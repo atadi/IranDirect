@@ -3,23 +3,25 @@ using System.Text;
 using System.Text.Json;
 using IranDirect.Core;
 using IranDirect.Core.Ipc;
+using IranDirect.Core.Routing;
+using IranDirect.Service.Operations;
 using Microsoft.Extensions.Logging;
 
 namespace IranDirect.Service.Ipc;
 
 public sealed class NamedPipeCommandServer
 {
-    public const string PipeName =
-        "IranDirect.Control.v1";
-
     private readonly IranDirectController _controller;
+    private readonly OperationCoordinator _operations;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
         IranDirectController controller,
+        OperationCoordinator operations,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
+        _operations = operations;
         _logger = logger;
     }
 
@@ -93,127 +95,194 @@ public sealed class NamedPipeCommandServer
         {
             ServiceRequest? request =
                 JsonSerializer.Deserialize<ServiceRequest>(
-                    requestJson ?? "");
+                    requestJson ?? "",
+                    IranDirectJson.Options);
 
             if (request is null)
             {
-                throw new InvalidOperationException(
-                    "Invalid request.");
+                response = Failure(
+                    "INVALID_REQUEST",
+                    "The request was invalid.");
             }
+            else if (request.ProtocolVersion !=
+                     IpcProtocol.CurrentVersion)
+            {
+                response = Failure(
+                    "UNSUPPORTED_PROTOCOL",
+                    $"Protocol version " +
+                    $"{request.ProtocolVersion} is not supported.");
+            }
+            else
+            {
+                response = await ExecuteAsync(
+                    request,
+                    cancellationToken);
+            }
+        }
+        catch (JsonException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Invalid named-pipe JSON request.");
 
-            response = await ExecuteAsync(
-                request,
-                cancellationToken);
+            response = Failure(
+                "INVALID_JSON",
+                "The request could not be parsed.");
         }
         catch (Exception exception)
         {
-            response = new ServiceResponse
-            {
-                Success = false,
-                Message = exception.Message
-            };
+            _logger.LogError(
+                exception,
+                "IranDirect command failed.");
+
+            response = Failure(
+                "COMMAND_FAILED",
+                exception.Message);
         }
 
         string responseJson =
-            JsonSerializer.Serialize(response);
+            JsonSerializer.Serialize(
+                response,
+                IranDirectJson.Options);
 
         await writer.WriteLineAsync(
             responseJson.AsMemory(),
             cancellationToken);
     }
 
-    private async Task<ServiceResponse> ExecuteAsync(
+    private Task<ServiceResponse> ExecuteAsync(
         ServiceRequest request,
         CancellationToken cancellationToken)
     {
-        switch (request.Command.Trim().ToLowerInvariant())
+        return request.Command switch
         {
-            case "status":
-            {
-                IranDirectStatus status =
-                    await _controller.GetStatusAsync(
-                        cancellationToken);
+            IranDirectCommand.Status =>
+                GetStatusAsync(cancellationToken),
 
-                return new ServiceResponse
-                {
-                    Success = true,
-                    Message = "Status retrieved.",
-                    Status = status
-                };
-            }
+            IranDirectCommand.UpdatePrefixes =>
+                _operations.ExecuteAsync(
+                    UpdatePrefixesAsync,
+                    cancellationToken),
 
-            case "update":
-            {
-                int count =
-                    await _controller.UpdatePrefixesAsync(
-                        cancellationToken);
+            IranDirectCommand.Enable =>
+                _operations.ExecuteAsync(
+                    EnableAsync,
+                    cancellationToken),
 
-                return new ServiceResponse
-                {
-                    Success = true,
-                    Message =
-                        $"Updated {count} prefixes."
-                };
-            }
+            IranDirectCommand.Disable =>
+                _operations.ExecuteAsync(
+                    DisableAsync,
+                    cancellationToken),
 
-            case "enable":
-            {
-                await _controller.EnableAsync(
-                    cancellationToken);
+            IranDirectCommand.Repair =>
+                _operations.ExecuteAsync(
+                    RepairAsync,
+                    cancellationToken),
 
-                IranDirectStatus status =
-                    await _controller.GetStatusAsync(
-                        cancellationToken);
+            _ => Task.FromResult(
+                Failure(
+                    "UNSUPPORTED_COMMAND",
+                    $"Unsupported command: {request.Command}"))
+        };
+    }
 
-                return new ServiceResponse
-                {
-                    Success = true,
-                    Message = "Iran Direct enabled.",
-                    Status = status
-                };
-            }
+    private async Task<ServiceResponse> GetStatusAsync(
+        CancellationToken cancellationToken)
+    {
+        IranDirectStatus status =
+            await _controller.GetStatusAsync(
+                cancellationToken);
 
-            case "disable":
-            {
-                await _controller.DisableAsync(
-                    cancellationToken);
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = "Status retrieved.",
+            Status = status
+        };
+    }
 
-                IranDirectStatus status =
-                    await _controller.GetStatusAsync(
-                        cancellationToken);
+    private async Task<ServiceResponse> UpdatePrefixesAsync(
+        CancellationToken cancellationToken)
+    {
+        int count =
+            await _controller.UpdatePrefixesAsync(
+                cancellationToken);
 
-                return new ServiceResponse
-                {
-                    Success = true,
-                    Message = "Iran Direct disabled.",
-                    Status = status
-                };
-            }
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = $"Updated {count} prefixes.",
+            PrefixCount = count
+        };
+    }
 
-            case "repair":
-            {
-                await _controller.RepairAsync(
-                    cancellationToken);
+    private async Task<ServiceResponse> EnableAsync(
+        CancellationToken cancellationToken)
+    {
+        ReconciliationResult result =
+            await _controller.EnableAsync(
+                cancellationToken);
 
-                IranDirectStatus status =
-                    await _controller.GetStatusAsync(
-                        cancellationToken);
+        IranDirectStatus status =
+            await _controller.GetStatusAsync(
+                cancellationToken);
 
-                return new ServiceResponse
-                {
-                    Success = true,
-                    Message = "Repair completed.",
-                    Status = status
-                };
-            }
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = "Iran Direct enabled.",
+            Status = status,
+            Reconciliation = result
+        };
+    }
 
-            default:
-                return new ServiceResponse
-                {
-                    Success = false,
-                    Message =
-                        $"Unsupported command: {request.Command}"
-                };
-        }
+    private async Task<ServiceResponse> DisableAsync(
+        CancellationToken cancellationToken)
+    {
+        ReconciliationResult result =
+            await _controller.DisableAsync(
+                cancellationToken);
+
+        IranDirectStatus status =
+            await _controller.GetStatusAsync(
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = "Iran Direct disabled.",
+            Status = status,
+            Reconciliation = result
+        };
+    }
+
+    private async Task<ServiceResponse> RepairAsync(
+        CancellationToken cancellationToken)
+    {
+        await _controller.RepairAsync(
+            cancellationToken);
+
+        IranDirectStatus status =
+            await _controller.GetStatusAsync(
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = "Repair completed.",
+            Status = status
+        };
+    }
+
+    private static ServiceResponse Failure(
+        string errorCode,
+        string message)
+    {
+        return new ServiceResponse
+        {
+            Success = false,
+            ErrorCode = errorCode,
+            Message = message
+        };
     }
 }

@@ -39,19 +39,19 @@ public sealed class TrayApplicationContext :
 
         _enableItem.Click +=
             async (_, _) =>
-                await ExecuteCommandAsync("enable");
+                await ExecuteCommandAsync(IranDirectCommand.Enable);
 
         _disableItem.Click +=
             async (_, _) =>
-                await ExecuteCommandAsync("disable");
+                await ExecuteCommandAsync(IranDirectCommand.Disable);
 
         _updateItem.Click +=
             async (_, _) =>
-                await ExecuteCommandAsync("update");
+                await ExecuteCommandAsync(IranDirectCommand.UpdatePrefixes);
 
         _repairItem.Click +=
             async (_, _) =>
-                await ExecuteCommandAsync("repair");
+                await ExecuteCommandAsync(IranDirectCommand.Repair);
 
         exitItem.Click +=
             (_, _) => ExitApplication();
@@ -97,7 +97,7 @@ public sealed class TrayApplicationContext :
     }
 
     private async Task ExecuteCommandAsync(
-        string command)
+        IranDirectCommand command)
     {
         if (_busy)
         {
@@ -156,7 +156,7 @@ public sealed class TrayApplicationContext :
         try
         {
             ServiceResponse response =
-                await _client.SendAsync("status");
+                await _client.SendAsync(IranDirectCommand.Status);
 
             if (!response.Success ||
                 response.Status is null)

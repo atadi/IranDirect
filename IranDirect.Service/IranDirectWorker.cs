@@ -1,5 +1,6 @@
 using IranDirect.Core;
 using IranDirect.Service.Ipc;
+using IranDirect.Service.Operations;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -9,15 +10,18 @@ public sealed class IranDirectWorker : BackgroundService
 {
     private readonly IranDirectController _controller;
     private readonly NamedPipeCommandServer _pipeServer;
+    private readonly OperationCoordinator _operations;
     private readonly ILogger<IranDirectWorker> _logger;
 
     public IranDirectWorker(
         IranDirectController controller,
         NamedPipeCommandServer pipeServer,
+        OperationCoordinator operations,
         ILogger<IranDirectWorker> logger)
     {
         _controller = controller;
         _pipeServer = pipeServer;
+        _operations = operations;
         _logger = logger;
     }
 
@@ -34,8 +38,14 @@ public sealed class IranDirectWorker : BackgroundService
         {
             try
             {
-                await _controller.RepairAsync(
+                await _operations.ExecuteAsync(
+                    token => _controller.RepairAsync(token),
                     stoppingToken);
+            }
+            catch (OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception exception)
             {

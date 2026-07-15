@@ -6,6 +6,7 @@ using IranDirect.Core.State;
 using IranDirect.Core.SystemTools;
 using IranDirect.Service;
 using IranDirect.Service.Ipc;
+using IranDirect.Service.Operations;
 
 string dataDirectory = Path.Combine(
     Environment.GetFolderPath(
@@ -51,6 +52,7 @@ builder.Services.AddSingleton<
 builder.Services.AddSingleton<RouteReconciler>();
 builder.Services.AddSingleton<IranDirectController>();
 
+builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
 

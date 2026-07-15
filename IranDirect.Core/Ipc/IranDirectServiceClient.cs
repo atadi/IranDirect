@@ -10,12 +10,10 @@ public sealed class IranDirectServiceClient
         TimeSpan.FromSeconds(5);
 
     public async Task<ServiceResponse> SendAsync(
-        string command,
+        IranDirectCommand command,
         string? value = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(command);
-
         await using NamedPipeClientStream pipe =
             new(
                 ".",
@@ -66,7 +64,9 @@ public sealed class IranDirectServiceClient
         };
 
         string requestJson =
-            JsonSerializer.Serialize(request);
+            JsonSerializer.Serialize(
+                request,
+                IranDirectJson.Options);
 
         await writer.WriteLineAsync(
             requestJson.AsMemory(),
@@ -78,12 +78,14 @@ public sealed class IranDirectServiceClient
 
         ServiceResponse? response =
             JsonSerializer.Deserialize<ServiceResponse>(
-                responseJson ?? "");
+                responseJson ?? "",
+                IranDirectJson.Options);
 
         return response
             ?? new ServiceResponse
             {
                 Success = false,
+                ErrorCode = "INVALID_RESPONSE",
                 Message =
                     "The service returned an invalid response."
             };

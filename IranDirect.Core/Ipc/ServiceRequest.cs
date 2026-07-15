@@ -1,8 +1,11 @@
-﻿namespace IranDirect.Core.Ipc;
+namespace IranDirect.Core.Ipc;
 
 public sealed record ServiceRequest
 {
-    public required string Command { get; init; }
+    public int ProtocolVersion { get; init; } =
+        IpcProtocol.CurrentVersion;
+
+    public required IranDirectCommand Command { get; init; }
 
     public string? Value { get; init; }
 }

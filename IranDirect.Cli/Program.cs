@@ -1,11 +1,13 @@
 using IranDirect.Core;
 using IranDirect.Core.Ipc;
 
-string command = args.Length == 0
+string commandText = args.Length == 0
     ? "status"
     : args[0].ToLowerInvariant();
 
-if (!IsSupportedCommand(command))
+if (!TryParseCommand(
+        commandText,
+        out IranDirectCommand command))
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
@@ -23,11 +25,18 @@ try
 
     if (!response.Success)
     {
-        Console.Error.WriteLine(response.Message);
+        string prefix =
+            string.IsNullOrWhiteSpace(response.ErrorCode)
+                ? ""
+                : $"[{response.ErrorCode}] ";
+
+        Console.Error.WriteLine(
+            prefix + response.Message);
+
         return 1;
     }
 
-    if (command == "status" &&
+    if (command == IranDirectCommand.Status &&
         response.Status is not null)
     {
         WriteStatus(response.Status);
@@ -59,15 +68,26 @@ catch (Exception exception)
     return 1;
 }
 
-static bool IsSupportedCommand(
-    string command)
+static bool TryParseCommand(
+    string value,
+    out IranDirectCommand command)
 {
-    return command is
+    command = value switch
+    {
+        "status" => IranDirectCommand.Status,
+        "update" => IranDirectCommand.UpdatePrefixes,
+        "enable" => IranDirectCommand.Enable,
+        "disable" => IranDirectCommand.Disable,
+        "repair" => IranDirectCommand.Repair,
+        _ => default
+    };
+
+    return value is
+        "status" or
         "update" or
         "enable" or
         "disable" or
-        "repair" or
-        "status";
+        "repair";
 }
 
 static void WriteStatus(
