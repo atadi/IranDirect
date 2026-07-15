@@ -56,7 +56,7 @@ public sealed class NamedPipeCommandServer
     {
         await using NamedPipeServerStream pipe =
             new(
-                PipeName,
+                IranDirectPipeNames.Control,
                 PipeDirection.InOut,
                 maxNumberOfServerInstances: 1,
                 PipeTransmissionMode.Byte,

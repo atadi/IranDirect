@@ -1,6 +1,5 @@
 using IranDirect.Core;
 using IranDirect.Core.Ipc;
-using IranDirect.Tray.Ipc;
 
 namespace IranDirect.Tray;
 

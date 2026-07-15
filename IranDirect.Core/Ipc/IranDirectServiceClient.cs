@@ -1,30 +1,45 @@
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
-using IranDirect.Core.Ipc;
 
-namespace IranDirect.Tray.Ipc;
+namespace IranDirect.Core.Ipc;
 
 public sealed class IranDirectServiceClient
 {
-    private const string PipeName =
-        "IranDirect.Control.v1";
+    private static readonly TimeSpan DefaultConnectTimeout =
+        TimeSpan.FromSeconds(5);
 
     public async Task<ServiceResponse> SendAsync(
         string command,
         string? value = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command);
+
         await using NamedPipeClientStream pipe =
             new(
                 ".",
-                PipeName,
+                IranDirectPipeNames.Control,
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous);
 
-        await pipe.ConnectAsync(
-            timeout: 5000,
-            cancellationToken);
+        using CancellationTokenSource timeoutSource =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+
+        timeoutSource.CancelAfter(DefaultConnectTimeout);
+
+        try
+        {
+            await pipe.ConnectAsync(timeoutSource.Token);
+        }
+        catch (OperationCanceledException)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                "IranDirect Service is unavailable or did not " +
+                "accept the connection within 5 seconds.");
+        }
 
         using StreamReader reader =
             new(
