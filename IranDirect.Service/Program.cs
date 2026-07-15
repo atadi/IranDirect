@@ -42,6 +42,11 @@ builder.Services.AddSingleton(
             dataDirectory,
             "state.json")));
 
+builder.Services.AddSingleton(
+    new RouteInventoryStore(
+        Path.Combine(
+            dataDirectory,
+            "route-inventory.json")));
 builder.Services.AddSingleton<GatewayDetector>();
 builder.Services.AddSingleton<CommandRunner>();
 

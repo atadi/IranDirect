@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 
 namespace IranDirect.Core.Routing;
 
@@ -49,41 +49,28 @@ public sealed class RouteReconciler
         {
             DesiredCount = desired.Length,
             ExistingCount = desired.Length - missing.Length,
-            AddedCount = missing.Length
+            AddedCount = missing.Length,
+            AddedRouteIdentities = missing
+                .Select(route => route.Identity)
+                .ToArray()
         };
     }
 
     public async Task<ReconciliationResult> DisableAsync(
-        IReadOnlyCollection<string> prefixes,
-        IPAddress gateway,
-        uint interfaceIndex,
+        IReadOnlyCollection<ManagedRoute> managedRoutes,
         CancellationToken cancellationToken = default)
     {
-        HashSet<string> managedPrefixes =
-            prefixes.ToHashSet(
-                StringComparer.OrdinalIgnoreCase);
-
         IReadOnlyList<SystemRoute> actual =
             await _routeManager.GetIpv4RoutesAsync(
                 cancellationToken);
 
-        ManagedRoute[] matching = actual
+        HashSet<string> actualIdentities = actual
+            .Select(ToIdentity)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        ManagedRoute[] matching = managedRoutes
             .Where(route =>
-                managedPrefixes.Contains(
-                    route.DestinationPrefix))
-            .Where(route =>
-                route.InterfaceIndex == interfaceIndex)
-            .Where(route =>
-                route.NextHop.Equals(gateway))
-            .Select(route => new ManagedRoute
-            {
-                DestinationPrefix =
-                    route.DestinationPrefix,
-                Gateway = route.NextHop,
-                InterfaceIndex =
-                    route.InterfaceIndex,
-                Metric = route.RouteMetric
-            })
+                actualIdentities.Contains(route.Identity))
             .ToArray();
 
         await _routeManager.DeleteRoutesAsync(
@@ -92,10 +79,26 @@ public sealed class RouteReconciler
 
         return new ReconciliationResult
         {
-            DesiredCount = prefixes.Count,
+            DesiredCount = managedRoutes.Count,
             ExistingCount = matching.Length,
             RemovedCount = matching.Length
         };
+    }
+
+    public async Task<int> CountMatchingRoutesAsync(
+        IReadOnlyCollection<ManagedRoute> managedRoutes,
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<SystemRoute> actual =
+            await _routeManager.GetIpv4RoutesAsync(
+                cancellationToken);
+
+        HashSet<string> actualIdentities = actual
+            .Select(ToIdentity)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return managedRoutes.Count(route =>
+            actualIdentities.Contains(route.Identity));
     }
 
     public async Task<int> CountMatchingRoutesAsync(
@@ -104,18 +107,18 @@ public sealed class RouteReconciler
         uint interfaceIndex,
         CancellationToken cancellationToken = default)
     {
-        HashSet<string> managedPrefixes =
-            prefixes.ToHashSet(
-                StringComparer.OrdinalIgnoreCase);
+        ManagedRoute[] routes = prefixes
+            .Select(prefix => new ManagedRoute
+            {
+                DestinationPrefix = prefix,
+                Gateway = gateway,
+                InterfaceIndex = interfaceIndex
+            })
+            .ToArray();
 
-        IReadOnlyList<SystemRoute> actual =
-            await _routeManager.GetIpv4RoutesAsync(
-                cancellationToken);
-
-        return actual.Count(route =>
-            managedPrefixes.Contains(route.DestinationPrefix)
-            && route.InterfaceIndex == interfaceIndex
-            && route.NextHop.Equals(gateway));
+        return await CountMatchingRoutesAsync(
+            routes,
+            cancellationToken);
     }
 
     private static string ToIdentity(

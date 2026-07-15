@@ -1,4 +1,4 @@
-﻿namespace IranDirect.Core.Routing;
+namespace IranDirect.Core.Routing;
 
 public sealed record ReconciliationResult
 {
@@ -9,4 +9,7 @@ public sealed record ReconciliationResult
     public int AddedCount { get; init; }
 
     public int RemovedCount { get; init; }
+
+    public IReadOnlyList<string> AddedRouteIdentities
+        { get; init; } = [];
 }

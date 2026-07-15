@@ -1,4 +1,4 @@
-﻿using IranDirect.Core.Models;
+using IranDirect.Core.Models;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
@@ -9,24 +9,29 @@ namespace IranDirect.Core;
 
 public sealed class IranDirectController
 {
+    private const int RouteMetric = 5;
+
     private readonly IranPrefixProvider _prefixProvider;
     private readonly PrefixFileRepository _prefixRepository;
     private readonly GatewayDetector _gatewayDetector;
     private readonly RouteReconciler _routeReconciler;
     private readonly StateRepository _stateRepository;
+    private readonly RouteInventoryStore _routeInventoryStore;
 
     public IranDirectController(
         IranPrefixProvider prefixProvider,
         PrefixFileRepository prefixRepository,
         GatewayDetector gatewayDetector,
         RouteReconciler routeReconciler,
-        StateRepository stateRepository)
+        StateRepository stateRepository,
+        RouteInventoryStore routeInventoryStore)
     {
         _prefixProvider = prefixProvider;
         _prefixRepository = prefixRepository;
         _gatewayDetector = gatewayDetector;
         _routeReconciler = routeReconciler;
         _stateRepository = stateRepository;
+        _routeInventoryStore = routeInventoryStore;
     }
 
     public async Task<int> UpdatePrefixesAsync(
@@ -72,11 +77,54 @@ public sealed class IranDirectController
                 prefixes,
                 gateway.Address,
                 gateway.InterfaceIndex,
-                metric: 5,
+                RouteMetric,
+                cancellationToken);
+
+        HashSet<string> addedIdentities =
+            result.AddedRouteIdentities.ToHashSet(
+                StringComparer.OrdinalIgnoreCase);
+
+        ManagedRoute[] desiredRoutes = prefixes
+            .Select(prefix => new ManagedRoute
+            {
+                DestinationPrefix = prefix,
+                Gateway = gateway.Address,
+                InterfaceIndex = gateway.InterfaceIndex,
+                Metric = RouteMetric
+            })
+            .ToArray();
+
+        RouteInventory inventory =
+            await _routeInventoryStore.LoadAsync(
+                cancellationToken);
+
+        RouteInventoryItem[] ownedRoutes =
+            inventory.Routes
+                .Concat(
+                    desiredRoutes
+                        .Where(route =>
+                            addedIdentities.Contains(
+                                route.Identity))
+                        .Select(ToInventoryItem))
+                .GroupBy(
+                    route => route.Identity,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+
+        await _routeInventoryStore.SaveAsync(
+            inventory with
+            {
+                Routes = ownedRoutes
+            },
+            cancellationToken);
+
+        IranDirectState previousState =
+            await _stateRepository.LoadAsync(
                 cancellationToken);
 
         await _stateRepository.SaveAsync(
-            new IranDirectState
+            previousState with
             {
                 Enabled = true,
                 Gateway =
@@ -87,7 +135,8 @@ public sealed class IranDirectController
                     gateway.InterfaceName,
                 PrefixCount = prefixes.Count,
                 EnabledAt =
-                    DateTimeOffset.UtcNow,
+                    previousState.EnabledAt
+                    ?? DateTimeOffset.UtcNow,
                 PrefixesUpdatedAt =
                     _prefixRepository.GetLastModified(),
                 LastError = null
@@ -104,26 +153,31 @@ public sealed class IranDirectController
             await _stateRepository.LoadAsync(
                 cancellationToken);
 
-        IReadOnlyList<string> prefixes =
-            await _prefixRepository.LoadAsync(
+        RouteInventory inventory =
+            await _routeInventoryStore.LoadAsync(
                 cancellationToken);
 
-        if (!IPAddress.TryParse(
-                state.Gateway,
-                out IPAddress? gateway))
+        ManagedRoute[] ownedRoutes =
+            ParseInventory(inventory.Routes);
+
+        ReconciliationResult result;
+
+        if (ownedRoutes.Length > 0)
         {
-            return new ReconciliationResult
-            {
-                DesiredCount = prefixes.Count
-            };
-        }
+            result =
+                await _routeReconciler.DisableAsync(
+                    ownedRoutes,
+                    cancellationToken);
 
-        ReconciliationResult result =
-            await _routeReconciler.DisableAsync(
-                prefixes,
-                gateway,
-                state.InterfaceIndex,
+            await _routeInventoryStore.ClearAsync(
                 cancellationToken);
+        }
+        else
+        {
+            result = await DisableLegacyRoutesAsync(
+                state,
+                cancellationToken);
+        }
 
         await _stateRepository.SaveAsync(
             state with
@@ -147,20 +201,30 @@ public sealed class IranDirectController
             await _prefixRepository.LoadAsync(
                 cancellationToken);
 
-        int installed = 0;
+        RouteInventory inventory =
+            await _routeInventoryStore.LoadAsync(
+                cancellationToken);
 
-        if (IPAddress.TryParse(
-                state.Gateway,
-                out IPAddress? gateway)
-            && state.InterfaceIndex > 0)
+        ManagedRoute[] ownedRoutes =
+            ParseInventory(inventory.Routes);
+
+        int installed;
+
+        if (ownedRoutes.Length > 0)
         {
             installed =
                 await _routeReconciler
                     .CountMatchingRoutesAsync(
-                        prefixes,
-                        gateway,
-                        state.InterfaceIndex,
+                        ownedRoutes,
                         cancellationToken);
+        }
+        else
+        {
+            installed =
+                await CountLegacyRoutesAsync(
+                    state,
+                    prefixes,
+                    cancellationToken);
         }
 
         return new IranDirectStatus
@@ -195,6 +259,105 @@ public sealed class IranDirectController
         }
 
         await EnableAsync(cancellationToken);
+    }
+
+    private async Task<ReconciliationResult>
+        DisableLegacyRoutesAsync(
+            IranDirectState state,
+            CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> prefixes =
+            await _prefixRepository.LoadAsync(
+                cancellationToken);
+
+        if (!IPAddress.TryParse(
+                state.Gateway,
+                out IPAddress? gateway))
+        {
+            return new ReconciliationResult
+            {
+                DesiredCount = prefixes.Count
+            };
+        }
+
+        ManagedRoute[] routes = prefixes
+            .Select(prefix => new ManagedRoute
+            {
+                DestinationPrefix = prefix,
+                Gateway = gateway,
+                InterfaceIndex = state.InterfaceIndex,
+                Metric = RouteMetric
+            })
+            .ToArray();
+
+        return await _routeReconciler.DisableAsync(
+            routes,
+            cancellationToken);
+    }
+
+    private async Task<int> CountLegacyRoutesAsync(
+        IranDirectState state,
+        IReadOnlyCollection<string> prefixes,
+        CancellationToken cancellationToken)
+    {
+        if (!IPAddress.TryParse(
+                state.Gateway,
+                out IPAddress? gateway)
+            || state.InterfaceIndex == 0)
+        {
+            return 0;
+        }
+
+        return await _routeReconciler
+            .CountMatchingRoutesAsync(
+                prefixes,
+                gateway,
+                state.InterfaceIndex,
+                cancellationToken);
+    }
+
+    private static RouteInventoryItem ToInventoryItem(
+        ManagedRoute route)
+    {
+        return new RouteInventoryItem
+        {
+            DestinationPrefix =
+                route.DestinationPrefix,
+            Gateway =
+                route.Gateway.ToString(),
+            InterfaceIndex =
+                route.InterfaceIndex,
+            Metric = route.Metric
+        };
+    }
+
+    private static ManagedRoute[] ParseInventory(
+        IReadOnlyCollection<RouteInventoryItem> routes)
+    {
+        List<ManagedRoute> parsed = [];
+
+        foreach (RouteInventoryItem route in routes)
+        {
+            if (!IPAddress.TryParse(
+                    route.Gateway,
+                    out IPAddress? gateway))
+            {
+                continue;
+            }
+
+            parsed.Add(
+                new ManagedRoute
+                {
+                    DestinationPrefix =
+                        route.DestinationPrefix,
+                    Gateway = gateway,
+                    InterfaceIndex =
+                        route.InterfaceIndex,
+                    Metric = route.Metric
+                });
+        }
+
+        return parsed.ToArray();
     }
 
     private async Task<IReadOnlyList<string>>
