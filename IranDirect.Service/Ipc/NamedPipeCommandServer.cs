@@ -4,6 +4,7 @@ using System.Text.Json;
 using IranDirect.Core;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Routing;
+using IranDirect.Core.Vpn;
 using IranDirect.Service.Operations;
 using Microsoft.Extensions.Logging;
 
@@ -13,15 +14,18 @@ public sealed class NamedPipeCommandServer
 {
     private readonly IranDirectController _controller;
     private readonly OperationCoordinator _operations;
+    private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
         IranDirectController controller,
         OperationCoordinator operations,
+        OpenVpnEndpointProvider vpnEndpointProvider,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
         _operations = operations;
+        _vpnEndpointProvider = vpnEndpointProvider;
         _logger = logger;
     }
 
@@ -179,6 +183,9 @@ public sealed class NamedPipeCommandServer
                     RepairAsync,
                     cancellationToken),
 
+            IranDirectCommand.VpnEndpoints =>
+                GetVpnEndpointsAsync(cancellationToken),
+
             _ => Task.FromResult(
                 Failure(
                     "UNSUPPORTED_COMMAND",
@@ -271,6 +278,23 @@ public sealed class NamedPipeCommandServer
             Success = true,
             Message = "Repair completed.",
             Status = status
+        };
+    }
+
+    private async Task<ServiceResponse>
+        GetVpnEndpointsAsync(
+            CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ResolvedVpnEndpoint> endpoints =
+            await _vpnEndpointProvider.GetEndpointsAsync(
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message =
+                $"Resolved {endpoints.Count} VPN endpoint(s).",
+            VpnEndpoints = endpoints
         };
     }
 

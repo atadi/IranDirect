@@ -4,6 +4,7 @@ using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.State;
 using IranDirect.Core.SystemTools;
+using IranDirect.Core.Vpn;
 using IranDirect.Service;
 using IranDirect.Service.Ipc;
 using IranDirect.Service.Operations;
@@ -47,6 +48,18 @@ builder.Services.AddSingleton(
         Path.Combine(
             dataDirectory,
             "route-inventory.json")));
+builder.Services.AddSingleton<OpenVpnProfileParser>();
+builder.Services.AddSingleton<VpnEndpointResolver>();
+builder.Services.AddSingleton(
+    serviceProvider =>
+        new OpenVpnEndpointProvider(
+            Path.Combine(
+                dataDirectory,
+                "vpn-profile.ovpn"),
+            serviceProvider.GetRequiredService<
+                OpenVpnProfileParser>(),
+            serviceProvider.GetRequiredService<
+                VpnEndpointResolver>()));
 builder.Services.AddSingleton<GatewayDetector>();
 builder.Services.AddSingleton<CommandRunner>();
 

@@ -1,4 +1,5 @@
 using IranDirect.Core.Routing;
+using IranDirect.Core.Vpn;
 
 namespace IranDirect.Core.Ipc;
 
@@ -15,4 +16,7 @@ public sealed record ServiceResponse
     public ReconciliationResult? Reconciliation { get; init; }
 
     public int? PrefixCount { get; init; }
+
+    public IReadOnlyList<ResolvedVpnEndpoint> VpnEndpoints
+        { get; init; } = [];
 }

@@ -11,7 +11,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status]");
+        "[update|enable|disable|repair|status|vpn-endpoints]");
 
     return 6;
 }
@@ -40,6 +40,11 @@ try
         response.Status is not null)
     {
         WriteStatus(response.Status);
+    }
+    else if (
+        command == IranDirectCommand.VpnEndpoints)
+    {
+        WriteVpnEndpoints(response);
     }
     else
     {
@@ -79,6 +84,7 @@ static bool TryParseCommand(
         "enable" => IranDirectCommand.Enable,
         "disable" => IranDirectCommand.Disable,
         "repair" => IranDirectCommand.Repair,
+        "vpn-endpoints" => IranDirectCommand.VpnEndpoints,
         _ => default
     };
 
@@ -87,7 +93,8 @@ static bool TryParseCommand(
         "update" or
         "enable" or
         "disable" or
-        "repair";
+        "repair" or
+        "vpn-endpoints";
 }
 
 static void WriteStatus(
@@ -113,5 +120,19 @@ static void WriteStatus(
     {
         Console.WriteLine(
             $"Last error: {status.LastError}");
+    }
+}
+
+static void WriteVpnEndpoints(
+    ServiceResponse response)
+{
+    Console.WriteLine(response.Message);
+
+    foreach (var endpoint in response.VpnEndpoints)
+    {
+        Console.WriteLine(
+            $"{endpoint.Address}:{endpoint.Port} " +
+            $"({endpoint.Protocol}) " +
+            $"from {endpoint.Host}");
     }
 }
