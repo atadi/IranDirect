@@ -6,6 +6,7 @@ using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Routing;
+using IranDirect.Core.Runtime;
 using IranDirect.Core.Vpn;
 using IranDirect.Service.Operations;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ public sealed class NamedPipeCommandServer
     private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
     private readonly IranDirectDiagnosticsService _diagnosticsService;
     private readonly DesiredConfigurationService _configurationService;
+    private readonly RuntimeCoordinator _runtimeCoordinator;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -27,6 +29,7 @@ public sealed class NamedPipeCommandServer
         OpenVpnEndpointProvider vpnEndpointProvider,
         IranDirectDiagnosticsService diagnosticsService,
         DesiredConfigurationService configurationService,
+        RuntimeCoordinator runtimeCoordinator,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -34,6 +37,7 @@ public sealed class NamedPipeCommandServer
         _vpnEndpointProvider = vpnEndpointProvider;
         _diagnosticsService = diagnosticsService;
         _configurationService = configurationService;
+        _runtimeCoordinator = runtimeCoordinator;
         _logger = logger;
     }
 
@@ -209,6 +213,9 @@ public sealed class NamedPipeCommandServer
                 SetConfigurationProfilePathAsync(
                     request,
                     cancellationToken),
+
+            IranDirectCommand.RuntimePlan =>
+                GetRuntimePlanAsync(cancellationToken),
 
             _ => Task.FromResult(
                 Failure(
@@ -405,6 +412,23 @@ public sealed class NamedPipeCommandServer
             Message =
                 "Desired configuration profile path updated.",
             Configuration = configuration
+        };
+    }
+    private async Task<ServiceResponse> GetRuntimePlanAsync(
+        CancellationToken cancellationToken)
+    {
+        RuntimePlanSnapshot snapshot =
+            await _runtimeCoordinator.BuildPlanAsync(
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message =
+                snapshot.Desired.CanReconcile
+                    ? "Runtime plan is safe to reconcile."
+                    : "Runtime plan contains blockers.",
+            RuntimePlan = snapshot
         };
     }
     private static ServiceResponse Failure(

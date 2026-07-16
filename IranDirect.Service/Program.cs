@@ -4,6 +4,7 @@ using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
+using IranDirect.Core.Runtime;
 using IranDirect.Core.State;
 using IranDirect.Core.SystemTools;
 using IranDirect.Core.Vpn;
@@ -111,6 +112,24 @@ builder.Services.AddSingleton(
                 OpenVpnEndpointProvider>(),
             serviceProvider.GetRequiredService<
                 VpnEndpointRouteManager>()));
+builder.Services.AddSingleton<IRuntimeObservationSource>(
+    serviceProvider =>
+        new IranDirectRuntimeObservationSource(
+            Path.Combine(
+                dataDirectory,
+                "vpn-profile.ovpn"),
+            serviceProvider.GetRequiredService<
+                OpenVpnEndpointProvider>(),
+            serviceProvider.GetRequiredService<
+                GatewayDetector>(),
+            serviceProvider.GetRequiredService<
+                PrefixFileRepository>(),
+            serviceProvider.GetRequiredService<
+                IRouteManager>()));
+
+builder.Services.AddSingleton<RuntimeObserver>();
+builder.Services.AddSingleton<RuntimePlanner>();
+builder.Services.AddSingleton<RuntimeCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();

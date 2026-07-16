@@ -11,5 +11,6 @@ public enum IranDirectCommand
     Diagnostics,
     GetConfiguration,
     SetConfigurationEnabled,
-    SetConfigurationProfilePath
+    SetConfigurationProfilePath,
+    RuntimePlan
 }

@@ -11,7 +11,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan]");
 
     return 6;
 }
@@ -70,6 +70,12 @@ try
     {
         WriteConfiguration(response.Configuration);
     }
+    else if (
+        command == IranDirectCommand.RuntimePlan &&
+        response.RuntimePlan is not null)
+    {
+        WriteRuntimePlan(response.RuntimePlan);
+    }
     else
     {
         Console.WriteLine(response.Message);
@@ -114,6 +120,7 @@ static bool TryParseCommand(
         "get-config" => IranDirectCommand.GetConfiguration,
         "set-enabled" => IranDirectCommand.SetConfigurationEnabled,
         "set-profile" => IranDirectCommand.SetConfigurationProfilePath,
+        "runtime-plan" => IranDirectCommand.RuntimePlan,
         _ => default
     };
 
@@ -128,7 +135,8 @@ static bool TryParseCommand(
         "config" or
         "get-config" or
         "set-enabled" or
-        "set-profile";
+        "set-profile" or
+        "runtime-plan";
 }
 
 static void WriteStatus(
@@ -215,4 +223,40 @@ static void WriteConfiguration(
     Console.WriteLine(
         $"Prefix update interval: " +
         $"{configuration.PrefixUpdateInterval}");
+}
+static void WriteRuntimePlan(
+    IranDirect.Core.Runtime.RuntimePlanSnapshot snapshot)
+{
+    Console.WriteLine("=== Runtime Plan ===");
+    Console.WriteLine(
+        $"Desired enabled: {snapshot.Desired.Enabled}");
+    Console.WriteLine(
+        $"Can reconcile: {snapshot.Desired.CanReconcile}");
+    Console.WriteLine(
+        $"Endpoint routes: " +
+        $"{snapshot.Desired.EndpointRoutes.Count}");
+    Console.WriteLine(
+        $"Prefix routes: " +
+        $"{snapshot.Desired.PrefixRoutes.Count}");
+    Console.WriteLine(
+        $"Observed routes: " +
+        $"{snapshot.Observed.Routes.Count}");
+    Console.WriteLine(
+        $"Observed at: {snapshot.Observed.ObservedAt}");
+    Console.WriteLine(
+        $"Planned at: {snapshot.PlannedAt}");
+
+    if (snapshot.Desired.Blockers.Count == 0)
+    {
+        Console.WriteLine("Blockers: none");
+        return;
+    }
+
+    Console.WriteLine("Blockers:");
+
+    foreach (var blocker in snapshot.Desired.Blockers)
+    {
+        Console.WriteLine(
+            $"- [{blocker.Code}] {blocker.Message}");
+    }
 }
