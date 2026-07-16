@@ -2,18 +2,28 @@
 
 This directory contains durable collaboration and continuation documents.
 
-## Two Sources of Current Truth
+## Required Reading
 
-### Committed repository truth
+1. repository root `AI-START-HERE.md`
+2. [CURRENT.md](CURRENT.md)
+3. the remaining task-relevant files listed by `AI-START-HERE.md`
 
-Use committed source, tests, ADRs, and project-state documents to understand:
+## Durable Current State
 
-- what is implemented;
-- why the architecture was selected;
-- what milestone is committed;
-- what constraints must be preserved.
+`CURRENT.md` is the committed executive summary.
 
-### Local runtime truth
+It contains:
+
+- current mission;
+- current architecture;
+- implemented responsibilities;
+- architectural debt;
+- immediate next milestone;
+- non-negotiable invariants.
+
+Update it after architecturally significant milestones.
+
+## Local Runtime State
 
 Use the generated root file:
 
@@ -21,33 +31,30 @@ Use the generated root file:
 AI-LOCAL-STATE.md
 ```
 
-to understand:
-
-- the developer's checked-out branch and commit;
-- uncommitted changes;
-- build and test results;
-- service/process state;
-- ProgramData files;
-- selected route-table evidence.
-
-`AI-LOCAL-STATE.md` is not committed.
-
 Generate it with:
 
 ```powershell
 .\tools\update-ai-local-state.ps1
 ```
 
-## New-Session Access Levels
+Successful snapshots remain compact.
 
-A new AI session should identify its access level:
+Full evidence is written under:
 
-- **A — Direct checkout and terminal access**
-- **B — Repository access plus an uploaded AI-LOCAL-STATE.md**
-- **C — Public web access only**
+```text
+AI-EVIDENCE/
+```
 
-Only level A can independently verify the local machine.
+Both generated locations are ignored by Git.
 
-Level B should compare committed repository truth with the uploaded snapshot.
+## Access Levels
 
-Level C must request a fresh `AI-LOCAL-STATE.md` before implementation.
+- A — Direct checkout and terminal
+- B — Repository plus uploaded AI-LOCAL-STATE.md
+- C — Public repository only
+
+Only level A independently verifies the local machine.
+
+Level B compares committed repository truth with the uploaded snapshot.
+
+Level C requests a fresh snapshot before implementation.

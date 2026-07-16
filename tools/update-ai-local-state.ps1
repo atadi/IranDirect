@@ -1,8 +1,9 @@
 param(
-    [string]$CurrentMilestone = "Verify from project-state.md",
-    [string]$NextMilestone = "Verify from session-handoff.md",
+    [string]$CurrentMilestone = "Verify from AI/CURRENT.md",
+    [string]$NextMilestone = "Verify from AI/CURRENT.md",
     [switch]$SkipBuild,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$IncludeSuccessfulLogs
 )
 
 $ErrorActionPreference = "Continue"
@@ -11,9 +12,28 @@ $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
 $outputPath = Join-Path $root "AI-LOCAL-STATE.md"
-$generatedAt = Get-Date
-$hostname = $env:COMPUTERNAME
-$repositoryPath = $root
+$evidenceDirectory = Join-Path $root "AI-EVIDENCE"
+
+New-Item `
+    -ItemType Directory `
+    -Path $evidenceDirectory `
+    -Force |
+    Out-Null
+
+function Write-Utf8NoBom {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Content
+    )
+
+    [System.IO.File]::WriteAllText(
+        $Path,
+        $Content,
+        [System.Text.UTF8Encoding]::new($false))
+}
 
 function Invoke-Captured {
     param(
@@ -23,70 +43,129 @@ function Invoke-Captured {
 
     try {
         $text = & $Command 2>&1 | Out-String
-        return @{
+
+        return [pscustomobject]@{
             ExitCode = $LASTEXITCODE
             Text = $text.TrimEnd()
         }
     }
     catch {
-        return @{
+        return [pscustomobject]@{
             ExitCode = 1
             Text = $_.Exception.Message
         }
     }
 }
 
-function Markdown-CodeBlock {
-    param(
-        [string]$Text,
-        [string]$Language = "text"
-    )
+function Get-GitStatusSummary {
+    $lines = @(git status --porcelain=v1 2>$null)
 
-    if ([string]::IsNullOrWhiteSpace($Text)) {
-        $Text = "(none)"
+    $summary = [ordered]@{
+        Modified = 0
+        Added = 0
+        Deleted = 0
+        Renamed = 0
+        Untracked = 0
+        Other = 0
     }
 
-    return @"
-````$Language
-$Text
-````
-"@
+    foreach ($line in $lines) {
+        if ($line.StartsWith("??")) {
+            $summary.Untracked++
+            continue
+        }
+
+        $code = $line.Substring(0, 2)
+
+        if ($code -match "R") {
+            $summary.Renamed++
+        }
+        elseif ($code -match "D") {
+            $summary.Deleted++
+        }
+        elseif ($code -match "A") {
+            $summary.Added++
+        }
+        elseif ($code -match "M") {
+            $summary.Modified++
+        }
+        else {
+            $summary.Other++
+        }
+    }
+
+    return [pscustomobject]@{
+        Lines = $lines
+        Summary = $summary
+        IsClean = $lines.Count -eq 0
+    }
 }
 
+function Get-TestCount {
+    param([string]$Output)
+
+    if ($Output -match
+        'Passed:\s*(\d+).*Skipped:\s*(\d+).*Total:\s*(\d+)') {
+        return [pscustomobject]@{
+            Passed = [int]$matches[1]
+            Skipped = [int]$matches[2]
+            Total = [int]$matches[3]
+        }
+    }
+
+    if ($Output -match
+        'total:\s*(\d+),\s*failed:\s*(\d+),\s*succeeded:\s*(\d+),\s*skipped:\s*(\d+)') {
+        return [pscustomobject]@{
+            Passed = [int]$matches[3]
+            Skipped = [int]$matches[4]
+            Total = [int]$matches[1]
+        }
+    }
+
+    return $null
+}
+
+$generatedAt = Get-Date
 $branch = (git branch --show-current 2>$null).Trim()
 $commit = (git rev-parse HEAD 2>$null).Trim()
-$shortCommit = (git rev-parse --short HEAD 2>$null).Trim()
 $latestCommit = (git log -1 --oneline 2>$null).Trim()
-$workingTree = (git status --short 2>$null | Out-String).TrimEnd()
 $branchDetails = (git branch -vv 2>$null | Out-String).TrimEnd()
+$gitState = Get-GitStatusSummary
 
-$upstream = ""
-$aheadBehind = ""
+$upstream = "(none)"
+$ahead = 0
+$behind = 0
 
 try {
-    $upstream =
-        (git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>$null).
-            Trim()
+    $resolvedUpstream =
+        (git rev-parse `
+            --abbrev-ref `
+            --symbolic-full-name `
+            "@{u}" `
+            2>$null).Trim()
 
-    if ($upstream) {
+    if ($resolvedUpstream) {
+        $upstream = $resolvedUpstream
+
         $counts =
-            (git rev-list --left-right --count "$upstream...HEAD" 2>$null).
-                Trim() -split "\s+"
+            (git rev-list `
+                --left-right `
+                --count `
+                "$upstream...HEAD" `
+                2>$null).Trim() -split "\s+"
 
         if ($counts.Count -ge 2) {
-            $aheadBehind =
-                "Ahead: $($counts[1]); Behind: $($counts[0])"
+            $behind = [int]$counts[0]
+            $ahead = [int]$counts[1]
         }
     }
 }
 catch {
-    $upstream = "(none)"
 }
 
-$dotnetInfo =
-    Invoke-Captured { dotnet --info }
+$dotnetInfo = Invoke-Captured { dotnet --info }
 
-$buildResult = @{
+$buildResult = [pscustomobject]@{
     ExitCode = 0
     Text = "Skipped by request."
 }
@@ -96,7 +175,7 @@ if (-not $SkipBuild) {
         Invoke-Captured { dotnet build --nologo }
 }
 
-$testResult = @{
+$testResult = [pscustomobject]@{
     ExitCode = 0
     Text = "Skipped by request."
 }
@@ -106,82 +185,101 @@ if (-not $SkipTests) {
         Invoke-Captured { dotnet test --nologo }
 }
 
-$serviceProcesses =
-    Get-Process IranDirect.Service -ErrorAction SilentlyContinue |
-    Select-Object Id, ProcessName, StartTime, Path |
-    Format-Table -AutoSize |
-    Out-String
+$testCount = Get-TestCount $testResult.Text
 
-$serviceRegistration =
-    Get-Service -Name IranDirect -ErrorAction SilentlyContinue |
-    Select-Object Name, DisplayName, Status, StartType |
-    Format-Table -AutoSize |
-    Out-String
+Write-Utf8NoBom `
+    -Path (Join-Path $evidenceDirectory "build.log") `
+    -Content $buildResult.Text
+
+Write-Utf8NoBom `
+    -Path (Join-Path $evidenceDirectory "tests.log") `
+    -Content $testResult.Text
+
+Write-Utf8NoBom `
+    -Path (Join-Path $evidenceDirectory "dotnet-info.txt") `
+    -Content $dotnetInfo.Text
+
+Write-Utf8NoBom `
+    -Path (Join-Path $evidenceDirectory "git-status.txt") `
+    -Content (
+        $branchDetails +
+        [Environment]::NewLine +
+        [Environment]::NewLine +
+        ($gitState.Lines -join [Environment]::NewLine))
+
+$serviceProcesses =
+    @(Get-Process IranDirect.Service -ErrorAction SilentlyContinue)
+
+$registeredService =
+    Get-Service -Name IranDirect -ErrorAction SilentlyContinue
 
 $dataDirectory = "C:\ProgramData\IranDirect"
+$dataDirectoryExists = Test-Path $dataDirectory
 
-$dataFiles =
-    if (Test-Path $dataDirectory) {
-        Get-ChildItem $dataDirectory -Force |
-        Select-Object Name, Length, LastWriteTime |
-        Format-Table -AutoSize |
-        Out-String
-    }
-    else {
-        "Directory not found."
-    }
-
-$stateJson =
-    if (Test-Path (Join-Path $dataDirectory "state.json")) {
-        Get-Content (Join-Path $dataDirectory "state.json") -Raw
-    }
-    else {
-        "(not found)"
-    }
-
-$routeInventorySummary = "(not found)"
+$stateSummary = "Not found"
+$statePath = Join-Path $dataDirectory "state.json"
 
 try {
-    $routeInventoryPath =
-        Join-Path $dataDirectory "route-inventory.json"
+    if (Test-Path $statePath) {
+        $state = Get-Content $statePath -Raw | ConvertFrom-Json
 
+        $stateSummary =
+            "Enabled=$($state.Enabled); " +
+            "Gateway=$($state.Gateway); " +
+            "Interface=$($state.InterfaceName) " +
+            "($($state.InterfaceIndex)); " +
+            "Prefixes=$($state.PrefixCount); " +
+            "LastError=$($state.LastError)"
+    }
+}
+catch {
+    $stateSummary =
+        "Unreadable: $($_.Exception.Message)"
+}
+
+$routeInventoryCount = "Not found"
+$routeInventoryPath =
+    Join-Path $dataDirectory "route-inventory.json"
+
+try {
     if (Test-Path $routeInventoryPath) {
-        $inventory =
+        $routeInventory =
             Get-Content $routeInventoryPath -Raw |
             ConvertFrom-Json
 
-        $routeInventorySummary =
-            "Owned routes: $($inventory.Routes.Count)"
+        $routeInventoryCount =
+            [string]$routeInventory.Routes.Count
     }
 }
 catch {
-    $routeInventorySummary =
-        "Unreadable: $($_.Exception.Message)"
+    $routeInventoryCount = "Unreadable"
 }
 
-$endpointInventorySummary = "(not found)"
+$endpointInventoryCount = "Not found"
+$endpointInventoryPath =
+    Join-Path $dataDirectory "endpoint-inventory.json"
 
 try {
-    $endpointInventoryPath =
-        Join-Path $dataDirectory "endpoint-inventory.json"
-
     if (Test-Path $endpointInventoryPath) {
-        $inventory =
+        $endpointInventory =
             Get-Content $endpointInventoryPath -Raw |
             ConvertFrom-Json
 
-        $endpointInventorySummary =
-            "Protected endpoints: $($inventory.Endpoints.Count)"
+        $endpointInventoryCount =
+            [string]$endpointInventory.Endpoints.Count
     }
 }
 catch {
-    $endpointInventorySummary =
-        "Unreadable: $($_.Exception.Message)"
+    $endpointInventoryCount = "Unreadable"
 }
 
-$endpointRoutes =
-    try {
-        Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop |
+$candidateRoutes = @()
+
+try {
+    $candidateRoutes =
+        @(Get-NetRoute `
+            -AddressFamily IPv4 `
+            -ErrorAction Stop |
         Where-Object {
             $_.DestinationPrefix -like "*/32" -and
             $_.RouteMetric -le 5
@@ -192,13 +290,30 @@ $endpointRoutes =
             InterfaceIndex,
             RouteMetric,
             PolicyStore |
-        Sort-Object DestinationPrefix |
+        Sort-Object DestinationPrefix)
+
+    $routeEvidence =
+        $candidateRoutes |
         Format-Table -AutoSize |
         Out-String
-    }
-    catch {
-        "Unavailable: $($_.Exception.Message)"
-    }
+
+    Write-Utf8NoBom `
+        -Path (
+            Join-Path `
+                $evidenceDirectory `
+                "candidate-routes.txt") `
+        -Content $routeEvidence
+}
+catch {
+    Write-Utf8NoBom `
+        -Path (
+            Join-Path `
+                $evidenceDirectory `
+                "candidate-routes.txt") `
+        -Content (
+            "Unavailable: " +
+            $_.Exception.Message)
+}
 
 $buildStatus =
     if ($buildResult.ExitCode -eq 0) {
@@ -216,127 +331,175 @@ $testStatus =
         "FAIL"
     }
 
-$workingTreeStatus =
-    if ([string]::IsNullOrWhiteSpace($workingTree)) {
+$testSummary =
+    if ($testCount) {
+        "$testStatus " +
+        "(passed=$($testCount.Passed), " +
+        "skipped=$($testCount.Skipped), " +
+        "total=$($testCount.Total))"
+    }
+    else {
+        $testStatus
+    }
+
+$processSummary =
+    if ($serviceProcesses.Count -eq 0) {
+        "Stopped"
+    }
+    else {
+        "Running (PID: " +
+        (($serviceProcesses.Id |
+            ForEach-Object { [string]$_ }) -join ", ") +
+        ")"
+    }
+
+$serviceSummary =
+    if ($null -eq $registeredService) {
+        "Not registered"
+    }
+    else {
+        "$($registeredService.Status); " +
+        "StartType=$($registeredService.StartType)"
+    }
+
+$workingTreeSummary =
+    if ($gitState.IsClean) {
         "Clean"
     }
     else {
         "Dirty"
     }
 
+$successLogs = ""
+
+if ($IncludeSuccessfulLogs) {
+    $successLogs = @"
+
+## Successful Verification Output
+
+### Build
+
+````text
+$($buildResult.Text)
+````
+
+### Tests
+
+````text
+$($testResult.Text)
+````
+"@
+}
+
+$failureDetails = ""
+
+if ($buildResult.ExitCode -ne 0) {
+    $failureDetails += @"
+
+## Build Failure Details
+
+Evidence: `AI-EVIDENCE/build.log`
+
+````text
+$($buildResult.Text)
+````
+"@
+}
+
+if ($testResult.ExitCode -ne 0) {
+    $failureDetails += @"
+
+## Test Failure Details
+
+Evidence: `AI-EVIDENCE/tests.log`
+
+````text
+$($testResult.Text)
+````
+"@
+}
+
 $content = @"
 # IranDirect Local State Snapshot
 
-> Generated locally. Do not commit this file.
+> Generated locally at $($generatedAt.ToString("o")).
 >
-> This document describes the developer's current checkout and Windows runtime.
-> It does not replace committed source code, tests, ADRs, or project-state documentation.
+> Do not commit this file. It contains machine-specific and time-sensitive evidence.
 
-## Snapshot Metadata
+## Handoff Summary
 
-- Generated: $($generatedAt.ToString("o"))
-- Machine: $hostname
-- Repository path: ``$repositoryPath``
+- Machine: ``$env:COMPUTERNAME``
+- Repository: ``$root``
 - Current milestone: $CurrentMilestone
 - Next milestone: $NextMilestone
-
-## Access Boundary
-
-A remote AI session may inspect the committed repository but cannot infer this
-machine's checkout, uncommitted files, build result, Windows services, route
-table, or ProgramData contents.
-
-Use this snapshot only when its timestamp is recent enough for the current task.
-
-## Git State
-
 - Branch: ``$branch``
 - Commit: ``$commit``
-- Short commit: ``$shortCommit``
 - Upstream: ``$upstream``
-- Ahead/behind: $aheadBehind
-- Working tree: **$workingTreeStatus**
-- Latest commit: ``$latestCommit``
-
-### Branch Details
-
-$(Markdown-CodeBlock $branchDetails)
-
-### Working Tree
-
-$(Markdown-CodeBlock $workingTree)
-
-## Verification
-
+- Ahead: $ahead
+- Behind: $behind
+- Working tree: **$workingTreeSummary**
 - Build: **$buildStatus**
-- Tests: **$testStatus**
+- Tests: **$testSummary**
+- IranDirect process: $processSummary
+- Windows service: $serviceSummary
+- ProgramData present: $dataDirectoryExists
+- Owned routes: $routeInventoryCount
+- Protected endpoints: $endpointInventoryCount
+- Candidate protected /32 routes: $($candidateRoutes.Count)
 
-### Build Output
+## Working Tree Classification
 
-$(Markdown-CodeBlock $buildResult.Text)
+- Modified: $($gitState.Summary.Modified)
+- Added: $($gitState.Summary.Added)
+- Deleted: $($gitState.Summary.Deleted)
+- Renamed: $($gitState.Summary.Renamed)
+- Untracked: $($gitState.Summary.Untracked)
+- Other: $($gitState.Summary.Other)
 
-### Test Output
+Evidence: `AI-EVIDENCE/git-status.txt`
 
-$(Markdown-CodeBlock $testResult.Text)
+## Runtime Summary
 
-## .NET Environment
+- `state.json`: $stateSummary
+- ProgramData path: ``$dataDirectory``
 
-$(Markdown-CodeBlock $dotnetInfo.Text)
+Candidate `/32` routes are diagnostic evidence only and do not establish ownership.
 
-## IranDirect Process and Service
+Evidence: `AI-EVIDENCE/candidate-routes.txt`
 
-### Running Process
+## Evidence Files
 
-$(Markdown-CodeBlock $serviceProcesses)
-
-### Registered Windows Service
-
-$(Markdown-CodeBlock $serviceRegistration)
-
-## ProgramData
-
-Path: ``$dataDirectory``
-
-### Files
-
-$(Markdown-CodeBlock $dataFiles)
-
-### state.json
-
-$(Markdown-CodeBlock $stateJson "json")
-
-### Inventories
-
-- $routeInventorySummary
-- $endpointInventorySummary
-
-## Candidate Protected /32 Routes
-
-This is diagnostic evidence only. It is not an ownership list.
-
-$(Markdown-CodeBlock $endpointRoutes)
+- `AI-EVIDENCE/build.log`
+- `AI-EVIDENCE/tests.log`
+- `AI-EVIDENCE/dotnet-info.txt`
+- `AI-EVIDENCE/git-status.txt`
+- `AI-EVIDENCE/candidate-routes.txt`
 
 ## Required AI Interpretation
 
-1. Treat committed source and tests as authoritative for implementation facts.
-2. Treat accepted ADRs as authoritative for architectural intent.
-3. Treat this file as evidence of the local checkout and runtime only.
-4. Report differences between this snapshot and the committed repository.
-5. Do not assume this snapshot remains current after any command or code change.
-6. Do not mutate routes merely because a route appears in this diagnostic list.
+1. Committed source and tests define current implementation facts.
+2. Accepted ADRs define architectural intent.
+3. This snapshot defines local checkout and runtime evidence only.
+4. Compare this snapshot with the committed repository.
+5. Treat the snapshot as stale after code, Git, build, test, service, or route changes.
+6. Do not mutate infrastructure from diagnostic evidence alone.
+$successLogs
+$failureDetails
 "@
 
-[System.IO.File]::WriteAllText(
-    $outputPath,
-    $content,
-    [System.Text.UTF8Encoding]::new($false))
+Write-Utf8NoBom `
+    -Path $outputPath `
+    -Content $content
 
 Write-Host "AI local state written to:"
 Write-Host $outputPath
 Write-Host ""
+Write-Host "Evidence written to:"
+Write-Host $evidenceDirectory
+Write-Host ""
 Write-Host "Build: $buildStatus"
-Write-Host "Tests: $testStatus"
-Write-Host "Working tree: $workingTreeStatus"
+Write-Host "Tests: $testSummary"
+Write-Host "Working tree: $workingTreeSummary"
 
 if ($buildResult.ExitCode -ne 0 -or
     $testResult.ExitCode -ne 0) {

@@ -43,3 +43,6 @@ Desktop.ini
 
 # Generated local AI handoff; contains machine-specific runtime evidence.
 AI-LOCAL-STATE.md
+
+# Generated deep evidence for AI handoff.
+AI-EVIDENCE/

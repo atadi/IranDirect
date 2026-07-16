@@ -80,6 +80,12 @@ Never switch branches, reset changes, delete files, or rewrite history without e
 Read the following documents in order.
 
 ### Required for Every New Session
+Read the committed executive summary immediately after this file:
+
+1. `AI-START-HERE.md`
+2. `docs/architecture-knowledge-base/AI/CURRENT.md`
+
+Then continue with the remaining task-relevant documents below.
 
 1. `AI-START-HERE.md`
 2. `docs/architecture-knowledge-base/README.md`
