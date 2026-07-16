@@ -11,7 +11,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile]");
 
     return 6;
 }
@@ -20,8 +20,17 @@ IranDirectServiceClient client = new();
 
 try
 {
+    string? value =
+        command is
+            IranDirectCommand.SetConfigurationEnabled or
+            IranDirectCommand.SetConfigurationProfilePath
+            ? args.ElementAtOrDefault(1)
+            : null;
+
     ServiceResponse response =
-        await client.SendAsync(command);
+        await client.SendAsync(
+            command,
+            value);
 
     if (!response.Success)
     {
@@ -51,6 +60,15 @@ try
         response.Diagnostics is not null)
     {
         WriteDiagnostics(response.Diagnostics);
+    }
+    else if (
+        command is
+            IranDirectCommand.GetConfiguration or
+            IranDirectCommand.SetConfigurationEnabled or
+            IranDirectCommand.SetConfigurationProfilePath &&
+        response.Configuration is not null)
+    {
+        WriteConfiguration(response.Configuration);
     }
     else
     {
@@ -92,6 +110,10 @@ static bool TryParseCommand(
         "repair" => IranDirectCommand.Repair,
         "vpn-endpoints" => IranDirectCommand.VpnEndpoints,
         "diagnostics" => IranDirectCommand.Diagnostics,
+        "config" => IranDirectCommand.GetConfiguration,
+        "get-config" => IranDirectCommand.GetConfiguration,
+        "set-enabled" => IranDirectCommand.SetConfigurationEnabled,
+        "set-profile" => IranDirectCommand.SetConfigurationProfilePath,
         _ => default
     };
 
@@ -102,7 +124,11 @@ static bool TryParseCommand(
         "disable" or
         "repair" or
         "vpn-endpoints" or
-        "diagnostics";
+        "diagnostics" or
+        "config" or
+        "get-config" or
+        "set-enabled" or
+        "set-profile";
 }
 
 static void WriteStatus(
@@ -167,4 +193,26 @@ static void WriteDiagnostics(
             $"[{check.Severity}] {check.Name}: " +
             $"{check.Message}");
     }
+}
+static void WriteConfiguration(
+    IranDirect.Core.Configuration.DesiredConfiguration configuration)
+{
+    Console.WriteLine("=== Desired Configuration ===");
+    Console.WriteLine(
+        $"Schema version: {configuration.SchemaVersion}");
+    Console.WriteLine($"Enabled: {configuration.Enabled}");
+    Console.WriteLine(
+        $"VPN provider: {configuration.VpnProvider}");
+    Console.WriteLine(
+        $"VPN profile path: {configuration.VpnProfilePath}");
+    Console.WriteLine(
+        $"Auto repair: {configuration.AutoRepair}");
+    Console.WriteLine(
+        $"Repair interval: {configuration.RepairInterval}");
+    Console.WriteLine(
+        $"Auto update prefixes: " +
+        $"{configuration.AutoUpdatePrefixes}");
+    Console.WriteLine(
+        $"Prefix update interval: " +
+        $"{configuration.PrefixUpdateInterval}");
 }

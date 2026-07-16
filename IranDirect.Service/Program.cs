@@ -1,4 +1,5 @@
 using IranDirect.Core;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
@@ -56,6 +57,16 @@ builder.Services.AddSingleton(
             dataDirectory,
             "endpoint-inventory.json")));
 
+builder.Services.AddSingleton<DesiredConfigurationValidator>();
+builder.Services.AddSingleton(
+    serviceProvider =>
+        new DesiredConfigurationStore(
+            Path.Combine(
+                dataDirectory,
+                "desired-configuration.json"),
+            serviceProvider.GetRequiredService<
+                DesiredConfigurationValidator>()));
+builder.Services.AddSingleton<DesiredConfigurationService>();
 builder.Services.AddSingleton<OpenVpnProfileParser>();
 builder.Services.AddSingleton<VpnEndpointResolver>();
 builder.Services.AddSingleton(

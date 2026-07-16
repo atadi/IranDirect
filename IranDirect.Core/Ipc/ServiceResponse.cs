@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Vpn;
@@ -22,4 +23,6 @@ public sealed record ServiceResponse
         { get; init; } = [];
 
     public IranDirectDiagnostics? Diagnostics { get; init; }
+
+    public DesiredConfiguration? Configuration { get; init; }
 }

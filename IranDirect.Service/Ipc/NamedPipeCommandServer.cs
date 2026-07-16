@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using IranDirect.Core;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Routing;
@@ -17,6 +18,7 @@ public sealed class NamedPipeCommandServer
     private readonly OperationCoordinator _operations;
     private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
     private readonly IranDirectDiagnosticsService _diagnosticsService;
+    private readonly DesiredConfigurationService _configurationService;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -24,12 +26,14 @@ public sealed class NamedPipeCommandServer
         OperationCoordinator operations,
         OpenVpnEndpointProvider vpnEndpointProvider,
         IranDirectDiagnosticsService diagnosticsService,
+        DesiredConfigurationService configurationService,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
         _operations = operations;
         _vpnEndpointProvider = vpnEndpointProvider;
         _diagnosticsService = diagnosticsService;
+        _configurationService = configurationService;
         _logger = logger;
     }
 
@@ -193,6 +197,19 @@ public sealed class NamedPipeCommandServer
             IranDirectCommand.Diagnostics =>
                 GetDiagnosticsAsync(cancellationToken),
 
+            IranDirectCommand.GetConfiguration =>
+                GetConfigurationAsync(cancellationToken),
+
+            IranDirectCommand.SetConfigurationEnabled =>
+                SetConfigurationEnabledAsync(
+                    request,
+                    cancellationToken),
+
+            IranDirectCommand.SetConfigurationProfilePath =>
+                SetConfigurationProfilePathAsync(
+                    request,
+                    cancellationToken),
+
             _ => Task.FromResult(
                 Failure(
                     "UNSUPPORTED_COMMAND",
@@ -319,6 +336,75 @@ public sealed class NamedPipeCommandServer
                 $"Diagnostics completed: " +
                 $"{diagnostics.OverallSeverity}.",
             Diagnostics = diagnostics
+        };
+    }
+    private async Task<ServiceResponse> GetConfigurationAsync(
+        CancellationToken cancellationToken)
+    {
+        DesiredConfiguration configuration =
+            await _configurationService.GetAsync(
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = "Desired configuration retrieved.",
+            Configuration = configuration
+        };
+    }
+
+    private async Task<ServiceResponse>
+        SetConfigurationEnabledAsync(
+            ServiceRequest request,
+            CancellationToken cancellationToken)
+    {
+        if (!bool.TryParse(
+                request.Value,
+                out bool enabled))
+        {
+            return Failure(
+                "INVALID_CONFIGURATION_VALUE",
+                "Enabled must be true or false.");
+        }
+
+        DesiredConfiguration configuration =
+            await _configurationService.SetEnabledAsync(
+                enabled,
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message =
+                $"Desired configuration enabled set to " +
+                $"{enabled}.",
+            Configuration = configuration
+        };
+    }
+
+    private async Task<ServiceResponse>
+        SetConfigurationProfilePathAsync(
+            ServiceRequest request,
+            CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Value))
+        {
+            return Failure(
+                "INVALID_CONFIGURATION_VALUE",
+                "VPN profile path is required.");
+        }
+
+        DesiredConfiguration configuration =
+            await _configurationService.SetProfilePathAsync(
+                request.Value,
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message =
+                "Desired configuration profile path updated.",
+            Configuration = configuration
         };
     }
     private static ServiceResponse Failure(

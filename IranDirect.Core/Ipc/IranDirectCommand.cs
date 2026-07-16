@@ -8,5 +8,8 @@ public enum IranDirectCommand
     Disable,
     Repair,
     VpnEndpoints,
-    Diagnostics
+    Diagnostics,
+    GetConfiguration,
+    SetConfigurationEnabled,
+    SetConfigurationProfilePath
 }

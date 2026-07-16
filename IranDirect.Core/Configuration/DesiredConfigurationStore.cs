@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using IranDirect.Core.Persistence;
 
 namespace IranDirect.Core.Configuration;
@@ -10,7 +12,9 @@ public sealed class DesiredConfigurationStore :
     public DesiredConfigurationStore(
         string configurationPath,
         DesiredConfigurationValidator validator)
-        : base(configurationPath)
+        : base(
+            configurationPath,
+            CreateJsonOptions())
     {
         _validator = validator;
     }
@@ -35,5 +39,18 @@ public sealed class DesiredConfigurationStore :
         return base.SaveAsync(
             value,
             cancellationToken);
+    }
+
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        JsonSerializerOptions options = new()
+        {
+            WriteIndented = true
+        };
+
+        options.Converters.Add(
+            new JsonStringEnumConverter());
+
+        return options;
     }
 }
