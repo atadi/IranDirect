@@ -7,5 +7,6 @@ public enum IranDirectCommand
     Enable,
     Disable,
     Repair,
-    VpnEndpoints
+    VpnEndpoints,
+    Diagnostics
 }

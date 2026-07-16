@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using IranDirect.Core;
+using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Vpn;
@@ -15,17 +16,20 @@ public sealed class NamedPipeCommandServer
     private readonly IranDirectController _controller;
     private readonly OperationCoordinator _operations;
     private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
+    private readonly IranDirectDiagnosticsService _diagnosticsService;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
         IranDirectController controller,
         OperationCoordinator operations,
         OpenVpnEndpointProvider vpnEndpointProvider,
+        IranDirectDiagnosticsService diagnosticsService,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
         _operations = operations;
         _vpnEndpointProvider = vpnEndpointProvider;
+        _diagnosticsService = diagnosticsService;
         _logger = logger;
     }
 
@@ -186,6 +190,9 @@ public sealed class NamedPipeCommandServer
             IranDirectCommand.VpnEndpoints =>
                 GetVpnEndpointsAsync(cancellationToken),
 
+            IranDirectCommand.Diagnostics =>
+                GetDiagnosticsAsync(cancellationToken),
+
             _ => Task.FromResult(
                 Failure(
                     "UNSUPPORTED_COMMAND",
@@ -298,6 +305,22 @@ public sealed class NamedPipeCommandServer
         };
     }
 
+    private async Task<ServiceResponse> GetDiagnosticsAsync(
+        CancellationToken cancellationToken)
+    {
+        IranDirectDiagnostics diagnostics =
+            await _diagnosticsService.RunAsync(
+                cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message =
+                $"Diagnostics completed: " +
+                $"{diagnostics.OverallSeverity}.",
+            Diagnostics = diagnostics
+        };
+    }
     private static ServiceResponse Failure(
         string errorCode,
         string message)

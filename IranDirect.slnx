@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="IranDirect.Cli/IranDirect.Cli.csproj" />
+  <Project Path="IranDirect.Core.Tests/IranDirect.Core.Tests.csproj" />
   <Project Path="IranDirect.Core/IranDirect.Core.csproj" />
   <Project Path="IranDirect.Service/IranDirect.Service.csproj" />
   <Project Path="IranDirect.Tray/IranDirect.Tray.csproj" />

@@ -11,7 +11,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics]");
 
     return 6;
 }
@@ -45,6 +45,12 @@ try
         command == IranDirectCommand.VpnEndpoints)
     {
         WriteVpnEndpoints(response);
+    }
+    else if (
+        command == IranDirectCommand.Diagnostics &&
+        response.Diagnostics is not null)
+    {
+        WriteDiagnostics(response.Diagnostics);
     }
     else
     {
@@ -85,6 +91,7 @@ static bool TryParseCommand(
         "disable" => IranDirectCommand.Disable,
         "repair" => IranDirectCommand.Repair,
         "vpn-endpoints" => IranDirectCommand.VpnEndpoints,
+        "diagnostics" => IranDirectCommand.Diagnostics,
         _ => default
     };
 
@@ -94,7 +101,8 @@ static bool TryParseCommand(
         "enable" or
         "disable" or
         "repair" or
-        "vpn-endpoints";
+        "vpn-endpoints" or
+        "diagnostics";
 }
 
 static void WriteStatus(
@@ -141,5 +149,22 @@ static void WriteVpnEndpoints(
             $"{endpoint.Address}:{endpoint.Port} " +
             $"({endpoint.Protocol}) " +
             $"from {endpoint.Host}");
+    }
+}
+static void WriteDiagnostics(
+    IranDirect.Core.Diagnostics.IranDirectDiagnostics diagnostics)
+{
+    Console.WriteLine("=== IranDirect Diagnostics ===");
+    Console.WriteLine($"Version: {diagnostics.Version}");
+    Console.WriteLine($"Generated: {diagnostics.GeneratedAt}");
+    Console.WriteLine(
+        $"Overall: {diagnostics.OverallSeverity}");
+    Console.WriteLine();
+
+    foreach (var check in diagnostics.Checks)
+    {
+        Console.WriteLine(
+            $"[{check.Severity}] {check.Name}: " +
+            $"{check.Message}");
     }
 }

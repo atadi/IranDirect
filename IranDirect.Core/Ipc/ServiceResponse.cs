@@ -1,3 +1,4 @@
+using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Vpn;
 
@@ -19,4 +20,6 @@ public sealed record ServiceResponse
 
     public IReadOnlyList<ResolvedVpnEndpoint> VpnEndpoints
         { get; init; } = [];
+
+    public IranDirectDiagnostics? Diagnostics { get; init; }
 }
