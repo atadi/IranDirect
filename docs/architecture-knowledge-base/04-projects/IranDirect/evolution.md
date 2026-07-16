@@ -1,0 +1,68 @@
+# IranDirect Architecture Evolution
+
+## Phase 1 — Command Utility
+
+```text
+CLI
+ |
+ v
+Controller
+ |
+ v
+Windows Routes
+```
+
+Problem: multiple processes could own state and route behavior.
+
+## Phase 2 — Service Authority
+
+```text
+CLI / Tray
+     |
+     v
+Named Pipe
+     |
+     v
+Windows Service
+```
+
+Result: one authority for all mutations.
+
+## Phase 3 — Ownership and Reconciliation
+
+```text
+Desired Prefixes
+      |
+      v
+Route Reconciler
+      |
+      v
+Route Inventory
+```
+
+Result: idempotent behavior and safe removal.
+
+## Phase 4 — VPN Safety and Diagnostics
+
+```text
+VPN Profile
+    |
+    v
+Endpoint Discovery
+    |
+    v
+Endpoint Protection
+```
+
+Result: prefix routing cannot override VPN endpoint reachability.
+
+## Phase 5 — Control Plane
+
+```text
+Configuration
+     |
+     v
+Observe -> Plan -> Reconcile
+```
+
+Result: commands become intent, and infrastructure is continuously reconciled.
