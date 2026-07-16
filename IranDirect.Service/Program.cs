@@ -48,6 +48,13 @@ builder.Services.AddSingleton(
         Path.Combine(
             dataDirectory,
             "route-inventory.json")));
+
+builder.Services.AddSingleton(
+    new VpnEndpointInventoryStore(
+        Path.Combine(
+            dataDirectory,
+            "endpoint-inventory.json")));
+
 builder.Services.AddSingleton<OpenVpnProfileParser>();
 builder.Services.AddSingleton<VpnEndpointResolver>();
 builder.Services.AddSingleton(
@@ -60,6 +67,7 @@ builder.Services.AddSingleton(
                 OpenVpnProfileParser>(),
             serviceProvider.GetRequiredService<
                 VpnEndpointResolver>()));
+
 builder.Services.AddSingleton<GatewayDetector>();
 builder.Services.AddSingleton<CommandRunner>();
 
@@ -68,6 +76,7 @@ builder.Services.AddSingleton<
     WindowsRouteManager>();
 
 builder.Services.AddSingleton<RouteReconciler>();
+builder.Services.AddSingleton<VpnEndpointRouteManager>();
 builder.Services.AddSingleton<IranDirectController>();
 
 builder.Services.AddSingleton<OperationCoordinator>();

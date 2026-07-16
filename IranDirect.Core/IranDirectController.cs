@@ -3,6 +3,7 @@ using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.State;
+using IranDirect.Core.Vpn;
 using System.Net;
 
 namespace IranDirect.Core;
@@ -17,6 +18,10 @@ public sealed class IranDirectController
     private readonly RouteReconciler _routeReconciler;
     private readonly StateRepository _stateRepository;
     private readonly RouteInventoryStore _routeInventoryStore;
+    private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
+    private readonly VpnEndpointRouteManager _vpnEndpointRouteManager;
+    private readonly VpnEndpointInventoryStore
+        _vpnEndpointInventoryStore;
 
     public IranDirectController(
         IranPrefixProvider prefixProvider,
@@ -24,7 +29,10 @@ public sealed class IranDirectController
         GatewayDetector gatewayDetector,
         RouteReconciler routeReconciler,
         StateRepository stateRepository,
-        RouteInventoryStore routeInventoryStore)
+        RouteInventoryStore routeInventoryStore,
+        OpenVpnEndpointProvider vpnEndpointProvider,
+        VpnEndpointRouteManager vpnEndpointRouteManager,
+        VpnEndpointInventoryStore vpnEndpointInventoryStore)
     {
         _prefixProvider = prefixProvider;
         _prefixRepository = prefixRepository;
@@ -32,6 +40,10 @@ public sealed class IranDirectController
         _routeReconciler = routeReconciler;
         _stateRepository = stateRepository;
         _routeInventoryStore = routeInventoryStore;
+        _vpnEndpointProvider = vpnEndpointProvider;
+        _vpnEndpointRouteManager = vpnEndpointRouteManager;
+        _vpnEndpointInventoryStore =
+            vpnEndpointInventoryStore;
     }
 
     public async Task<int> UpdatePrefixesAsync(
@@ -65,12 +77,29 @@ public sealed class IranDirectController
     public async Task<ReconciliationResult> EnableAsync(
         CancellationToken cancellationToken = default)
     {
+        DirectGateway gateway =
+            _gatewayDetector.Detect();
+
+        IReadOnlyList<ResolvedVpnEndpoint> endpoints =
+            await _vpnEndpointProvider.GetEndpointsAsync(
+                cancellationToken);
+
+        VpnEndpointProtectionResult endpointProtection =
+            await _vpnEndpointRouteManager
+                .EnsureProtectedAsync(
+                    endpoints,
+                    gateway,
+                    cancellationToken);
+
+        await SaveEndpointInventoryAsync(
+            endpoints,
+            endpointProtection,
+            gateway,
+            cancellationToken);
+
         IReadOnlyList<string> prefixes =
             await EnsurePrefixesAsync(
                 cancellationToken);
-
-        DirectGateway gateway =
-            _gatewayDetector.Detect();
 
         ReconciliationResult result =
             await _routeReconciler.EnableAsync(
@@ -259,6 +288,64 @@ public sealed class IranDirectController
         }
 
         await EnableAsync(cancellationToken);
+    }
+
+    private async Task SaveEndpointInventoryAsync(
+        IReadOnlyCollection<ResolvedVpnEndpoint> endpoints,
+        VpnEndpointProtectionResult protection,
+        DirectGateway gateway,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, ResolvedVpnEndpoint> endpointsByPrefix =
+            endpoints
+                .GroupBy(
+                    endpoint => $"{endpoint.Address}/32",
+                    StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+        VpnEndpointInventory inventory =
+            await _vpnEndpointInventoryStore.LoadAsync(
+                cancellationToken);
+
+        VpnEndpointInventoryItem[] protectedEndpoints =
+            protection.ProtectedRoutes
+                .Select(route =>
+                {
+                    ResolvedVpnEndpoint endpoint =
+                        endpointsByPrefix[
+                            route.DestinationPrefix];
+
+                    return new VpnEndpointInventoryItem
+                    {
+                        Host = endpoint.Host,
+                        Address = endpoint.Address,
+                        Port = endpoint.Port,
+                        Protocol = endpoint.Protocol,
+                        DestinationPrefix =
+                            route.DestinationPrefix,
+                        Gateway =
+                            gateway.Address.ToString(),
+                        InterfaceIndex =
+                            gateway.InterfaceIndex,
+                        Metric = route.Metric,
+                        AddedByIranDirect =
+                            protection.AddedRouteIdentities
+                                .Contains(route.Identity),
+                        ProtectedAt =
+                            DateTimeOffset.UtcNow
+                    };
+                })
+                .ToArray();
+
+        await _vpnEndpointInventoryStore.SaveAsync(
+            inventory with
+            {
+                Endpoints = protectedEndpoints
+            },
+            cancellationToken);
     }
 
     private async Task<ReconciliationResult>
