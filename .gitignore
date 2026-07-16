@@ -40,3 +40,6 @@ Desktop.ini
 
 # Archives
 *.zip
+
+# Generated local AI handoff; contains machine-specific runtime evidence.
+AI-LOCAL-STATE.md

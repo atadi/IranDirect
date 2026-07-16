@@ -478,3 +478,34 @@ When uncertain, return to this question:
 > What responsibility is entering the system, who should own it, and what invariant must never break?
 
 That question takes precedence over framework conventions and design-pattern labels.
+---
+
+## Local-State Snapshot
+
+A public or connected repository cannot prove the developer's current checkout
+or Windows runtime state.
+
+Before implementation, obtain one of:
+
+1. direct terminal access to the checked-out repository; or
+2. a freshly generated `AI-LOCAL-STATE.md`.
+
+Generate it from the repository root:
+
+```powershell
+.\tools\update-ai-local-state.ps1 `
+    -CurrentMilestone "M5.5 Runtime Reconciliation" `
+    -NextMilestone "Introduce RuntimeReconciler"
+```
+
+`AI-LOCAL-STATE.md` is intentionally ignored by Git because it contains
+machine-specific and time-sensitive evidence.
+
+Use separate authorities:
+
+- committed repository: implementation and architectural knowledge;
+- `AI-LOCAL-STATE.md`: current checkout, build, tests, services, and runtime;
+- accepted ADRs: architectural intent.
+
+Do not ask the user to paste many individual command outputs when a recent
+local-state snapshot is available.
