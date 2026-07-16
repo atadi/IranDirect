@@ -92,6 +92,39 @@ public sealed class VpnEndpointRouteManager
         };
     }
 
+    public async Task<VpnEndpointProtectionHealth>
+        GetHealthAsync(
+            IReadOnlyCollection<VpnEndpointInventoryItem> endpoints,
+            CancellationToken cancellationToken = default)
+    {
+        VpnEndpointInventoryItem[] current = endpoints
+            .Where(endpoint => endpoint.IsCurrent)
+            .ToArray();
+
+        if (current.Length == 0)
+        {
+            return new VpnEndpointProtectionHealth();
+        }
+
+        IReadOnlyList<SystemRoute> routes =
+            await _routeManager.GetIpv4RoutesAsync(
+                cancellationToken);
+
+        HashSet<string> identities = routes
+            .Select(ToIdentity)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        int protectedCount = current.Count(
+            endpoint =>
+                identities.Contains(endpoint.Identity));
+
+        return new VpnEndpointProtectionHealth
+        {
+            CurrentEndpointCount = current.Length,
+            ProtectedEndpointCount = protectedCount
+        };
+    }
+
     private static ManagedRoute CreateRoute(
         ResolvedVpnEndpoint endpoint,
         DirectGateway gateway)

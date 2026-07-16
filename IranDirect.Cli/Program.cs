@@ -114,6 +114,13 @@ static void WriteStatus(
         $"{status.PrefixCount}");
     Console.WriteLine(
         $"Prefixes updated: {status.PrefixesUpdatedAt}");
+    Console.WriteLine(
+        $"VPN endpoints: " +
+        $"{status.ProtectedVpnEndpointCount}/" +
+        $"{status.VpnEndpointCount} protected");
+    Console.WriteLine(
+        $"VPN protection healthy: " +
+        $"{status.VpnEndpointsProtected}");
 
     if (!string.IsNullOrWhiteSpace(
             status.LastError))

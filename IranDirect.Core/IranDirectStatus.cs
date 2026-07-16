@@ -1,4 +1,4 @@
-﻿namespace IranDirect.Core;
+namespace IranDirect.Core;
 
 public sealed record IranDirectStatus
 {
@@ -17,4 +17,10 @@ public sealed record IranDirectStatus
     public DateTimeOffset? PrefixesUpdatedAt { get; init; }
 
     public string? LastError { get; init; }
+
+    public int VpnEndpointCount { get; init; }
+
+    public int ProtectedVpnEndpointCount { get; init; }
+
+    public bool VpnEndpointsProtected { get; init; }
 }

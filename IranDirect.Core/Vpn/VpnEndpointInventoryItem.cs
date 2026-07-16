@@ -22,7 +22,11 @@ public sealed record VpnEndpointInventoryItem
 
     public bool AddedByIranDirect { get; init; }
 
+    public bool IsCurrent { get; init; } = true;
+
     public DateTimeOffset ProtectedAt { get; init; }
+
+    public DateTimeOffset LastSeenAt { get; init; }
 
     [JsonIgnore]
     public string Identity =>

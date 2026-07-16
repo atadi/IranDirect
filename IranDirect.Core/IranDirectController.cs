@@ -256,6 +256,15 @@ public sealed class IranDirectController
                     cancellationToken);
         }
 
+        VpnEndpointInventory endpointInventory =
+            await _vpnEndpointInventoryStore.LoadAsync(
+                cancellationToken);
+
+        VpnEndpointProtectionHealth endpointHealth =
+            await _vpnEndpointRouteManager.GetHealthAsync(
+                endpointInventory.Endpoints,
+                cancellationToken);
+
         return new IranDirectStatus
         {
             Enabled = state.Enabled,
@@ -271,7 +280,13 @@ public sealed class IranDirectController
             PrefixesUpdatedAt =
                 state.PrefixesUpdatedAt,
             LastError =
-                state.LastError
+                state.LastError,
+            VpnEndpointCount =
+                endpointHealth.CurrentEndpointCount,
+            ProtectedVpnEndpointCount =
+                endpointHealth.ProtectedEndpointCount,
+            VpnEndpointsProtected =
+                endpointHealth.IsProtected
         };
     }
 
@@ -296,6 +311,8 @@ public sealed class IranDirectController
         DirectGateway gateway,
         CancellationToken cancellationToken)
     {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
         Dictionary<string, ResolvedVpnEndpoint> endpointsByPrefix =
             endpoints
                 .GroupBy(
@@ -310,13 +327,28 @@ public sealed class IranDirectController
             await _vpnEndpointInventoryStore.LoadAsync(
                 cancellationToken);
 
-        VpnEndpointInventoryItem[] protectedEndpoints =
+        Dictionary<string, VpnEndpointInventoryItem> previousByIdentity =
+            inventory.Endpoints.ToDictionary(
+                endpoint => endpoint.Identity,
+                endpoint => endpoint,
+                StringComparer.OrdinalIgnoreCase);
+
+        VpnEndpointInventoryItem[] currentEndpoints =
             protection.ProtectedRoutes
                 .Select(route =>
                 {
                     ResolvedVpnEndpoint endpoint =
                         endpointsByPrefix[
                             route.DestinationPrefix];
+
+                    previousByIdentity.TryGetValue(
+                        route.Identity,
+                        out VpnEndpointInventoryItem? previous);
+
+                    bool addedByIranDirect =
+                        previous?.AddedByIranDirect == true ||
+                        protection.AddedRouteIdentities
+                            .Contains(route.Identity);
 
                     return new VpnEndpointInventoryItem
                     {
@@ -332,22 +364,42 @@ public sealed class IranDirectController
                             gateway.InterfaceIndex,
                         Metric = route.Metric,
                         AddedByIranDirect =
-                            protection.AddedRouteIdentities
-                                .Contains(route.Identity),
+                            addedByIranDirect,
+                        IsCurrent = true,
                         ProtectedAt =
-                            DateTimeOffset.UtcNow
+                            previous?.ProtectedAt ?? now,
+                        LastSeenAt = now
                     };
                 })
+                .ToArray();
+
+        HashSet<string> currentIdentities =
+            currentEndpoints
+                .Select(endpoint => endpoint.Identity)
+                .ToHashSet(
+                    StringComparer.OrdinalIgnoreCase);
+
+        VpnEndpointInventoryItem[] retainedPrevious =
+            inventory.Endpoints
+                .Where(endpoint =>
+                    !currentIdentities.Contains(
+                        endpoint.Identity))
+                .Select(endpoint =>
+                    endpoint with
+                    {
+                        IsCurrent = false
+                    })
                 .ToArray();
 
         await _vpnEndpointInventoryStore.SaveAsync(
             inventory with
             {
-                Endpoints = protectedEndpoints
+                Endpoints = currentEndpoints
+                    .Concat(retainedPrevious)
+                    .ToArray()
             },
             cancellationToken);
     }
-
     private async Task<ReconciliationResult>
         DisableLegacyRoutesAsync(
             IranDirectState state,
