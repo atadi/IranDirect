@@ -495,3 +495,31 @@ Neither side should optimize for speed at the expense of VPN safety or architect
 Before every significant change, ask:
 
 > What responsibility is entering the system, who owns it, and what invariant must never break?
+---
+
+## Remote Chat Without Repository Connector
+
+When a remote AI session cannot access GitHub or the local checkout, generate:
+
+```powershell
+.\tools\export-ai-context.ps1 `
+    -CurrentMilestone "<current milestone>" `
+    -NextMilestone "<next milestone>"
+```
+
+Upload:
+
+```text
+AI-CONTEXT-BUNDLE.zip
+```
+
+The bundle contains:
+
+- the committed repository at the current `HEAD`;
+- a fresh `AI-LOCAL-STATE.md`;
+- a manifest describing branch, commit, contents, and boot order.
+
+This establishes Level B access without relying on a GitHub connector.
+
+The AI may inspect and propose changes from the bundle, but the developer remains
+responsible for applying patches and executing local verification.

@@ -46,3 +46,6 @@ AI-LOCAL-STATE.md
 
 # Generated deep evidence for AI handoff.
 AI-EVIDENCE/
+
+# Generated repository and local-state bundle for remote AI sessions.
+AI-CONTEXT-BUNDLE.zip
