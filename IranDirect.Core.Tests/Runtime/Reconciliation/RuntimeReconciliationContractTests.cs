@@ -58,6 +58,12 @@ public sealed class RuntimeReconciliationContractTests
                         RuntimeChangeKind.AddEndpointRoute,
                     Identity =
                         "5.160.74.148/32|192.168.100.1|30",
+                    DestinationPrefix =
+                        "5.160.74.148/32",
+                    Gateway =
+                        "192.168.100.1",
+                    InterfaceIndex = 30,
+                    Metric = 1,
                     Description =
                         "Protect the VPN endpoint through " +
                         "the direct gateway."
