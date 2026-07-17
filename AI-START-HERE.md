@@ -515,3 +515,13 @@ Use separate authorities:
 
 Do not ask the user to paste many individual command outputs when a recent
 local-state snapshot is available.
+---
+
+## Session Protocol
+
+After reading `AI/CURRENT.md`, read:
+
+`docs/architecture-knowledge-base/AI/SESSION-PROTOCOL.md`
+
+This protocol defines access levels, human/AI responsibilities, architecture
+review gates, implementation steps, verification, and milestone completion.

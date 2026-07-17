@@ -58,3 +58,14 @@ Only level A independently verifies the local machine.
 Level B compares committed repository truth with the uploaded snapshot.
 
 Level C requests a fresh snapshot before implementation.
+## Session Protocol
+
+Read [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) for:
+
+- human and AI responsibilities;
+- access levels;
+- session boot sequence;
+- architecture review gate;
+- implementation workflow;
+- completion gate;
+- end-of-session handoff.
