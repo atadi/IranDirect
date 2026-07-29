@@ -257,7 +257,7 @@ public sealed class NamedPipeCommandServer
     private async Task<ServiceResponse> EnableAsync(
         CancellationToken cancellationToken)
     {
-        ReconciliationResult result =
+        RuntimeCycleExecutionResult cycleResult =
             await _controller.EnableAsync(
                 cancellationToken);
 
@@ -267,17 +267,21 @@ public sealed class NamedPipeCommandServer
 
         return new ServiceResponse
         {
-            Success = true,
-            Message = "Iran Direct enabled.",
+            Success = cycleResult.IsSuccess,
+            Message = cycleResult.IsSuccess
+                ? "Iran Direct enabled."
+                : "Enable failed: "
+                  + cycleResult.Execution.ErrorMessage,
             Status = status,
-            Reconciliation = result
+            Decision = cycleResult.Decision,
+            Execution = cycleResult.Execution
         };
     }
 
     private async Task<ServiceResponse> DisableAsync(
         CancellationToken cancellationToken)
     {
-        ReconciliationResult result =
+        RuntimeCycleExecutionResult cycleResult =
             await _controller.DisableAsync(
                 cancellationToken);
 
@@ -287,10 +291,14 @@ public sealed class NamedPipeCommandServer
 
         return new ServiceResponse
         {
-            Success = true,
-            Message = "Iran Direct disabled.",
+            Success = cycleResult.IsSuccess,
+            Message = cycleResult.IsSuccess
+                ? "Iran Direct disabled."
+                : "Disable failed: "
+                  + cycleResult.Execution.ErrorMessage,
             Status = status,
-            Reconciliation = result
+            Decision = cycleResult.Decision,
+            Execution = cycleResult.Execution
         };
     }
 
