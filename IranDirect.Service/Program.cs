@@ -5,6 +5,7 @@ using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
+using IranDirect.Core.Runtime.Reconciliation;
 using IranDirect.Core.State;
 using IranDirect.Core.SystemTools;
 using IranDirect.Core.Vpn;
@@ -130,6 +131,14 @@ builder.Services.AddSingleton<IRuntimeObservationSource>(
 builder.Services.AddSingleton<RuntimeObserver>();
 builder.Services.AddSingleton<RuntimePlanner>();
 builder.Services.AddSingleton<RuntimeCoordinator>();
+builder.Services.AddSingleton<
+    IRuntimeRouteOwnershipSource,
+    InventoryRouteOwnershipSource>();
+builder.Services.AddSingleton<RuntimeRouteOwnershipProvider>();
+builder.Services.AddSingleton<RuntimeChangeSetPlanner>();
+builder.Services.AddSingleton<
+    IRuntimeReconciler,
+    RuntimeReconciler>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
