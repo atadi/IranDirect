@@ -77,49 +77,48 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            VpnEndpointInventory inventory =
-                await _endpointInventory.LoadAsync(
-                    cancellationToken);
-
-            VpnEndpointInventoryItem? existing = inventory.Endpoints
-                .FirstOrDefault(e =>
-                    e.Identity.Equals(
-                        step.Identity,
-                        StringComparison.OrdinalIgnoreCase));
-
-            VpnEndpointInventoryItem item = existing is null
-                ? new VpnEndpointInventoryItem
+            await _endpointInventory.MutateAsync(
+                inventory =>
                 {
-                    Host = step.Description,
-                    Address = step.Gateway,
-                    Port = 0,
-                    Protocol = "udp",
-                    DestinationPrefix = step.DestinationPrefix,
-                    Gateway = step.Gateway,
-                    InterfaceIndex = step.InterfaceIndex,
-                    Metric = step.Metric,
-                    AddedByIranDirect = true,
-                    IsCurrent = true,
-                    ProtectedAt = DateTimeOffset.UtcNow,
-                    LastSeenAt = DateTimeOffset.UtcNow
-                }
-                : existing with
-                {
-                    AddedByIranDirect = true,
-                    IsCurrent = true,
-                    LastSeenAt = DateTimeOffset.UtcNow
-                };
+                    VpnEndpointInventoryItem? existing = inventory.Endpoints
+                        .FirstOrDefault(e =>
+                            e.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase));
 
-            VpnEndpointInventoryItem[] updated = existing is null
-                ? [.. inventory.Endpoints, item]
-                : inventory.Endpoints
-                    .Select(e => e.Identity.Equals(
-                        step.Identity,
-                        StringComparison.OrdinalIgnoreCase) ? item : e)
-                    .ToArray();
+                    VpnEndpointInventoryItem item = existing is null
+                        ? new VpnEndpointInventoryItem
+                        {
+                            Host = step.Description,
+                            Address = step.Gateway,
+                            Port = 0,
+                            Protocol = "udp",
+                            DestinationPrefix = step.DestinationPrefix,
+                            Gateway = step.Gateway,
+                            InterfaceIndex = step.InterfaceIndex,
+                            Metric = step.Metric,
+                            AddedByIranDirect = true,
+                            IsCurrent = true,
+                            ProtectedAt = DateTimeOffset.UtcNow,
+                            LastSeenAt = DateTimeOffset.UtcNow
+                        }
+                        : existing with
+                        {
+                            AddedByIranDirect = true,
+                            IsCurrent = true,
+                            LastSeenAt = DateTimeOffset.UtcNow
+                        };
 
-            await _endpointInventory.SaveAsync(
-                inventory with { Endpoints = updated },
+                    VpnEndpointInventoryItem[] updated = existing is null
+                        ? [.. inventory.Endpoints, item]
+                        : inventory.Endpoints
+                            .Select(e => e.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase) ? item : e)
+                            .ToArray();
+
+                    return inventory with { Endpoints = updated };
+                },
                 cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException
@@ -137,69 +136,118 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         RuntimeExecutionStep step,
         CancellationToken cancellationToken)
     {
-        VpnEndpointInventory inventory =
-            await _endpointInventory.LoadAsync(
-                cancellationToken);
+        bool routeOnPlatform = await RouteExistsAsync(step, cancellationToken);
 
-        VpnEndpointInventoryItem? item = inventory.Endpoints
-            .FirstOrDefault(e =>
-                e.Identity.Equals(
-                    step.Identity,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (item is null)
+        if (routeOnPlatform)
         {
-            return CreateFailedResult(step.Identity,
-                "Cannot remove endpoint route: route is not " +
-                "in the endpoint inventory.");
-        }
+            VpnEndpointInventoryItem? item;
+            try
+            {
+                VpnEndpointInventory snapshot = await _endpointInventory.LoadAsync(cancellationToken);
+                item = snapshot.Endpoints
+                    .FirstOrDefault(e =>
+                        e.Identity.Equals(
+                            step.Identity,
+                            StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       and not ArgumentNullException)
+            {
+                return CreateFailedResult(step.Identity,
+                    $"Failed to load endpoint inventory: {ex.Message}");
+            }
 
-        if (!item.AddedByIranDirect)
-        {
-            return CreateFailedResult(step.Identity,
-                "Cannot remove endpoint route: route was not " +
-                "created by IranDirect and may be a pre-existing " +
-                "VPN endpoint route.");
-        }
+            if (item is null)
+            {
+                return CreateFailedResult(step.Identity,
+                    "Cannot remove endpoint route: route is not " +
+                    "in the endpoint inventory.");
+            }
 
-        ManagedRoute managedRoute = ToManagedRoute(step);
+            if (!item.AddedByIranDirect)
+            {
+                return CreateFailedResult(step.Identity,
+                    "Cannot remove endpoint route: route was not " +
+                    "created by IranDirect and may be a pre-existing " +
+                    "VPN endpoint route.");
+            }
+
+            ManagedRoute managedRoute = ToManagedRoute(step);
+
+            try
+            {
+                await _routeManager.DeleteRoutesAsync(
+                    [managedRoute], cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       and not ArgumentNullException)
+            {
+                return CreateFailedResult(step.Identity,
+                    $"Failed to remove endpoint route: {ex.Message}");
+            }
+
+            if (await RouteExistsAsync(step, cancellationToken))
+            {
+                return CreateFailedResult(step.Identity,
+                    "Endpoint route still exists after removal.");
+            }
+
+            try
+            {
+                await _endpointInventory.MutateAsync(
+                    inv => inv with
+                    {
+                        Endpoints = inv.Endpoints
+                            .Where(e => !e.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase))
+                            .ToArray()
+                    },
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       and not ArgumentNullException)
+            {
+                return CreateFailedResult(step.Identity,
+                    $"Endpoint route was removed but inventory " +
+                    $"persistence failed: {ex.Message}");
+            }
+
+            return CreateSucceededResult(step.Identity);
+        }
 
         try
         {
-            await _routeManager.DeleteRoutesAsync(
-                [managedRoute], cancellationToken);
+            await _endpointInventory.MutateAsync(
+                inv =>
+                {
+                    VpnEndpointInventoryItem? stale = inv.Endpoints
+                        .FirstOrDefault(e =>
+                            e.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase) &&
+                            e.AddedByIranDirect);
+
+                    if (stale is null)
+                        return inv;
+
+                    return inv with
+                    {
+                        Endpoints = inv.Endpoints
+                            .Where(e => !e.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase))
+                            .ToArray()
+                    };
+                },
+                cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
         {
             return CreateFailedResult(step.Identity,
-                $"Failed to remove endpoint route: {ex.Message}");
-        }
-
-        if (await RouteExistsAsync(step, cancellationToken))
-        {
-            return CreateFailedResult(step.Identity,
-                "Endpoint route still exists after removal.");
-        }
-
-        try
-        {
-            VpnEndpointInventoryItem[] updated = inventory.Endpoints
-                .Where(e => !e.Identity.Equals(
-                    step.Identity,
-                    StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            await _endpointInventory.SaveAsync(
-                inventory with { Endpoints = updated },
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException
-                                   and not ArgumentNullException)
-        {
-            return CreateFailedResult(step.Identity,
-                $"Endpoint route was removed but inventory " +
-                $"persistence failed: {ex.Message}");
+                $"Endpoint route was already absent but inventory " +
+                $"cleanup failed: {ex.Message}");
         }
 
         return CreateSucceededResult(step.Identity);
@@ -231,25 +279,23 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            RouteInventory inventory =
-                await _routeInventory.LoadAsync(
-                    cancellationToken);
+            await _routeInventory.MutateAsync(
+                inventory =>
+                {
+                    bool exists = inventory.Routes.Any(r =>
+                        r.Identity.Equals(
+                            step.Identity,
+                            StringComparison.OrdinalIgnoreCase));
 
-            bool exists = inventory.Routes.Any(r =>
-                r.Identity.Equals(
-                    step.Identity,
-                    StringComparison.OrdinalIgnoreCase));
+                    if (exists)
+                        return inventory;
 
-            RouteInventoryItem[] updated = exists
-                ? inventory.Routes.ToArray()
-                : [.. inventory.Routes, ToInventoryItem(step)];
+                    RouteInventoryItem[] updated =
+                        [.. inventory.Routes, ToInventoryItem(step)];
 
-            if (!exists)
-            {
-                await _routeInventory.SaveAsync(
-                    inventory with { Routes = updated },
-                    cancellationToken);
-            }
+                    return inventory with { Routes = updated };
+                },
+                cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
@@ -266,60 +312,107 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         RuntimeExecutionStep step,
         CancellationToken cancellationToken)
     {
-        RouteInventory inventory =
-            await _routeInventory.LoadAsync(
-                cancellationToken);
+        bool routeOnPlatform = await RouteExistsAsync(step, cancellationToken);
 
-        bool exists = inventory.Routes.Any(r =>
-            r.Identity.Equals(
-                step.Identity,
-                StringComparison.OrdinalIgnoreCase));
-
-        if (!exists)
+        if (routeOnPlatform)
         {
-            return CreateFailedResult(step.Identity,
-                "Cannot remove prefix route: route is not " +
-                "in the route inventory.");
-        }
+            bool owned;
+            try
+            {
+                RouteInventory snapshot = await _routeInventory.LoadAsync(cancellationToken);
+                owned = snapshot.Routes.Any(r =>
+                    r.Identity.Equals(
+                        step.Identity,
+                        StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       and not ArgumentNullException)
+            {
+                return CreateFailedResult(step.Identity,
+                    $"Failed to load route inventory: {ex.Message}");
+            }
 
-        ManagedRoute managedRoute = ToManagedRoute(step);
+            if (!owned)
+            {
+                return CreateFailedResult(step.Identity,
+                    "Cannot remove prefix route: route exists on the " +
+                    "platform but is not owned by IranDirect.");
+            }
+
+            ManagedRoute managedRoute = ToManagedRoute(step);
+
+            try
+            {
+                await _routeManager.DeleteRoutesAsync(
+                    [managedRoute], cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       and not ArgumentNullException)
+            {
+                return CreateFailedResult(step.Identity,
+                    $"Failed to remove prefix route: {ex.Message}");
+            }
+
+            if (await RouteExistsAsync(step, cancellationToken))
+            {
+                return CreateFailedResult(step.Identity,
+                    "Prefix route still exists after removal.");
+            }
+
+            try
+            {
+                await _routeInventory.MutateAsync(
+                    inv => inv with
+                    {
+                        Routes = inv.Routes
+                            .Where(r => !r.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase))
+                            .ToArray()
+                    },
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       and not ArgumentNullException)
+            {
+                return CreateFailedResult(step.Identity,
+                    $"Prefix route was removed but inventory " +
+                    $"persistence failed: {ex.Message}");
+            }
+
+            return CreateSucceededResult(step.Identity);
+        }
 
         try
         {
-            await _routeManager.DeleteRoutesAsync(
-                [managedRoute], cancellationToken);
+            await _routeInventory.MutateAsync(
+                inv =>
+                {
+                    bool hasStaleOwned = inv.Routes.Any(r =>
+                        r.Identity.Equals(
+                            step.Identity,
+                            StringComparison.OrdinalIgnoreCase));
+
+                    if (!hasStaleOwned)
+                        return inv;
+
+                    return inv with
+                    {
+                        Routes = inv.Routes
+                            .Where(r => !r.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase))
+                            .ToArray()
+                    };
+                },
+                cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
         {
             return CreateFailedResult(step.Identity,
-                $"Failed to remove prefix route: {ex.Message}");
-        }
-
-        if (await RouteExistsAsync(step, cancellationToken))
-        {
-            return CreateFailedResult(step.Identity,
-                "Prefix route still exists after removal.");
-        }
-
-        try
-        {
-            RouteInventoryItem[] updated = inventory.Routes
-                .Where(r => !r.Identity.Equals(
-                    step.Identity,
-                    StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            await _routeInventory.SaveAsync(
-                inventory with { Routes = updated },
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException
-                                   and not ArgumentNullException)
-        {
-            return CreateFailedResult(step.Identity,
-                $"Prefix route was removed but inventory " +
-                $"persistence failed: {ex.Message}");
+                $"Prefix route was already absent but inventory " +
+                $"cleanup failed: {ex.Message}");
         }
 
         return CreateSucceededResult(step.Identity);

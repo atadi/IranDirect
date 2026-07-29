@@ -87,9 +87,10 @@ ObservedRuntime  DesiredRuntime
 - pre-execution decision contract (RuntimeDecision with validated consistency)
 - pre-execution decision builder (RuntimeDecisionBuilder composing plan, reconciliation, execution plan into validated RuntimeDecision)
 - coordinator migration to RuntimeDecision (RuntimeCycleCoordinator delegates to IRuntimeDecisionBuilder, returns RuntimeDecision; RuntimeCycleResult removed)
-- execution pipeline (RuntimeExecutor with sequential stop-on-failure step processing)
-- Windows route execution handler (mutate → verify → persist for add/remove prefix and endpoint route steps)
-- inventory persistence interfaces (IRouteInventoryPersistence, IEndpointInventoryPersistence)
+- execution pipeline (RuntimeExecutor with grouped bounded-parallel execution: endpoint groups sequential, prefix groups concurrent up to 8)
+- Windows route execution handler (mutate → verify → persist for add/remove prefix and endpoint route steps; stale owned inventory converges during remove)
+- inventory persistence interfaces (IRouteInventoryPersistence, IEndpointInventoryPersistence with MutateAsync for atomic read-modify-write)
+- inventory thread safety (SemaphoreSlim per store serializing concurrent mutation)
 - production enable/disable via RuntimeDecision + RuntimeExecutor pipeline
 - controller-orchestrated execution cycle (IranDirectController delegates to coordinator and executor)
 - service startup cycle (enabled desired → run one cycle on boot)
@@ -116,6 +117,7 @@ Complete one-prefix manual verification on real Windows to confirm:
 - stale InterfaceIndex is corrected
 - restart recovery is idempotent
 - disable removes owned routes
+- bounded parallel prefix execution converges correctly with 1,944 prefixes
 Then tag the release candidate.
 
 ## Non-Negotiable Invariants

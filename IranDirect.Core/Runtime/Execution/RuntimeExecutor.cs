@@ -2,6 +2,7 @@ namespace IranDirect.Core.Runtime.Execution;
 
 public sealed class RuntimeExecutor : IRuntimeExecutor
 {
+    private const int DefaultMaxDegreeOfParallelism = 8;
     private readonly IRuntimeExecutionStepHandler _handler;
 
     public RuntimeExecutor(
@@ -21,12 +22,55 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
         if (plan.IsEmpty)
             return RuntimeExecutionResult.NoExecutionRequired();
 
-        List<RuntimeExecutionStepResult> results = [];
+        RuntimeExecutionStepResult[] results = new RuntimeExecutionStepResult[plan.Steps.Count];
         bool hasSuccess = false;
 
-        for (int i = 0; i < plan.Steps.Count; i++)
+        (bool stopped, hasSuccess) = await ExecuteSequentialGroupAsync(
+            plan.Steps, RuntimeExecutionStepKind.AddEndpointRoute, results, hasSuccess, cancellationToken);
+        if (stopped)
         {
-            RuntimeExecutionStep step = plan.Steps[i];
+            FillNullResults(plan.Steps, results);
+            return BuildFinalResult(results, hasSuccess);
+        }
+
+        (stopped, hasSuccess) = await ExecuteBoundedGroupAsync(
+            plan.Steps, RuntimeExecutionStepKind.RemovePrefixRoute, results, hasSuccess, DefaultMaxDegreeOfParallelism, cancellationToken);
+        if (stopped)
+        {
+            FillNullResults(plan.Steps, results);
+            return BuildFinalResult(results, hasSuccess);
+        }
+
+        (stopped, hasSuccess) = await ExecuteBoundedGroupAsync(
+            plan.Steps, RuntimeExecutionStepKind.AddPrefixRoute, results, hasSuccess, DefaultMaxDegreeOfParallelism, cancellationToken);
+        if (stopped)
+        {
+            FillNullResults(plan.Steps, results);
+            return BuildFinalResult(results, hasSuccess);
+        }
+
+        (stopped, hasSuccess) = await ExecuteSequentialGroupAsync(
+            plan.Steps, RuntimeExecutionStepKind.RemoveEndpointRoute, results, hasSuccess, cancellationToken);
+        if (stopped)
+        {
+            FillNullResults(plan.Steps, results);
+            return BuildFinalResult(results, hasSuccess);
+        }
+
+        return BuildFinalResult(results, hasSuccess);
+    }
+
+    private async Task<(bool Stopped, bool HasSuccess)> ExecuteSequentialGroupAsync(
+        IReadOnlyList<RuntimeExecutionStep> allSteps,
+        RuntimeExecutionStepKind kind,
+        RuntimeExecutionStepResult[] results,
+        bool hasSuccess,
+        CancellationToken cancellationToken)
+    {
+        for (int i = 0; i < allSteps.Count; i++)
+        {
+            if (allSteps[i].Kind != kind)
+                continue;
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -34,26 +78,18 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
             try
             {
                 stepResult = await _handler.ExecuteAndVerifyAsync(
-                    step, cancellationToken);
+                    allSteps[i], cancellationToken);
             }
             catch (OperationCanceledException)
             {
+                results[i] = CreateStepResult(allSteps[i].Identity, RuntimeExecutionStepStatus.Cancelled);
                 if (hasSuccess)
-                {
-                    results.Add(new RuntimeExecutionStepResult
-                    {
-                        StepIdentity = step.Identity,
-                        Status = RuntimeExecutionStepStatus.Cancelled
-                    });
-                    AppendSkipped(i, plan.Steps, results);
-                    return RuntimeExecutionResult.PartiallyCompleted(
-                        results, "Execution cancelled after one or more steps completed.");
-                }
+                    return (true, hasSuccess);
 
                 throw;
             }
 
-            results.Add(stepResult);
+            results[i] = stepResult;
 
             if (stepResult.Status == RuntimeExecutionStepStatus.Succeeded)
             {
@@ -62,47 +98,161 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
             else if (stepResult.Status is RuntimeExecutionStepStatus.Failed
                      or RuntimeExecutionStepStatus.Cancelled)
             {
-                AppendSkipped(i, plan.Steps, results);
-                return ClassifyTerminalResult(results, hasSuccess, stepResult);
+                return (true, hasSuccess);
             }
         }
 
-        return RuntimeExecutionResult.Completed(results);
+        return (false, hasSuccess);
     }
 
-    private static void AppendSkipped(
-        int currentIndex,
+    private async Task<(bool Stopped, bool HasSuccess)> ExecuteBoundedGroupAsync(
         IReadOnlyList<RuntimeExecutionStep> allSteps,
-        List<RuntimeExecutionStepResult> results)
-    {
-        for (int i = currentIndex + 1; i < allSteps.Count; i++)
-        {
-            results.Add(new RuntimeExecutionStepResult
-            {
-                StepIdentity = allSteps[i].Identity,
-                Status = RuntimeExecutionStepStatus.Skipped
-            });
-        }
-    }
-
-    private static RuntimeExecutionResult ClassifyTerminalResult(
-        List<RuntimeExecutionStepResult> results,
+        RuntimeExecutionStepKind kind,
+        RuntimeExecutionStepResult[] results,
         bool hasSuccess,
-        RuntimeExecutionStepResult stepResult)
+        int maxDop,
+        CancellationToken cancellationToken)
     {
-        if (hasSuccess)
+        int[] indices = Enumerable.Range(0, allSteps.Count)
+            .Where(i => allSteps[i].Kind == kind)
+            .ToArray();
+
+        if (indices.Length == 0)
+            return (false, hasSuccess);
+
+        using SemaphoreSlim throttle = new(maxDop, maxDop);
+        List<Task> running = new(indices.Length);
+        bool groupFailed = false;
+        bool anyStarted = false;
+
+        for (int t = 0; t < indices.Length; t++)
         {
-            return RuntimeExecutionResult.PartiallyCompleted(
-                results, stepResult.ErrorMessage);
+            int idx = indices[t];
+
+            if (Volatile.Read(ref groupFailed))
+            {
+                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                continue;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                if (!anyStarted)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                continue;
+            }
+
+            try
+            {
+                await throttle.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                if (!anyStarted)
+                    throw;
+
+                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Cancelled);
+                for (int r = t + 1; r < indices.Length; r++)
+                    results[indices[r]] = CreateStepResult(allSteps[indices[r]].Identity, RuntimeExecutionStepStatus.Skipped);
+                Volatile.Write(ref groupFailed, true);
+                break;
+            }
+
+            if (Volatile.Read(ref groupFailed))
+            {
+                throttle.Release();
+                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                continue;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throttle.Release();
+                if (!anyStarted)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                continue;
+            }
+
+            anyStarted = true;
+            int captured = idx;
+            running.Add(Task.Run(async () =>
+            {
+                RuntimeExecutionStepResult r;
+                try
+                {
+                    r = await _handler.ExecuteAndVerifyAsync(allSteps[captured], cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    r = CreateStepResult(allSteps[captured].Identity, RuntimeExecutionStepStatus.Cancelled);
+                }
+
+                if (r.Status is RuntimeExecutionStepStatus.Failed or RuntimeExecutionStepStatus.Cancelled)
+                    Volatile.Write(ref groupFailed, true);
+
+                results[captured] = r;
+                throttle.Release();
+            }, CancellationToken.None));
         }
 
-        if (stepResult.Status == RuntimeExecutionStepStatus.Cancelled)
+        try
         {
-            return RuntimeExecutionResult.Cancelled(
-                results, stepResult.ErrorMessage);
+            await Task.WhenAll(running);
+        }
+        catch (OperationCanceledException)
+        {
         }
 
-        return RuntimeExecutionResult.Failed(
-            results, stepResult.ErrorMessage);
+        bool groupHasSuccess = false;
+        foreach (RuntimeExecutionStepResult? r in results)
+        {
+            if (r?.Status == RuntimeExecutionStepStatus.Succeeded)
+                groupHasSuccess = true;
+        }
+
+        return (Volatile.Read(ref groupFailed), hasSuccess || groupHasSuccess);
     }
+
+    private static void FillNullResults(
+        IReadOnlyList<RuntimeExecutionStep> allSteps,
+        RuntimeExecutionStepResult[] results)
+    {
+        for (int i = 0; i < results.Length; i++)
+        {
+            if (results[i] is null)
+                results[i] = CreateStepResult(allSteps[i].Identity, RuntimeExecutionStepStatus.Skipped);
+        }
+    }
+
+    private static RuntimeExecutionResult BuildFinalResult(
+        RuntimeExecutionStepResult[] results,
+        bool hasSuccess)
+    {
+        IReadOnlyList<RuntimeExecutionStepResult> finalResults = results.ToArray();
+        bool hasFailure = results.Any(r => r.Status == RuntimeExecutionStepStatus.Failed);
+        bool hasCancelled = results.Any(r => r.Status == RuntimeExecutionStepStatus.Cancelled);
+
+        if (hasFailure && !hasSuccess)
+            return RuntimeExecutionResult.Failed(finalResults);
+
+        if (hasCancelled && !hasSuccess)
+            return RuntimeExecutionResult.Cancelled(finalResults);
+
+        if (hasSuccess && (hasFailure || hasCancelled))
+            return RuntimeExecutionResult.PartiallyCompleted(finalResults);
+
+        return RuntimeExecutionResult.Completed(finalResults);
+    }
+
+    private static RuntimeExecutionStepResult CreateStepResult(
+        string identity, RuntimeExecutionStepStatus status) =>
+        new()
+        {
+            StepIdentity = identity,
+            Status = status
+        };
 }

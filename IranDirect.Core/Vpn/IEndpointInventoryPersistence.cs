@@ -8,4 +8,8 @@ public interface IEndpointInventoryPersistence
     Task SaveAsync(
         VpnEndpointInventory inventory,
         CancellationToken cancellationToken = default);
+
+    Task MutateAsync(
+        Func<VpnEndpointInventory, VpnEndpointInventory> transform,
+        CancellationToken cancellationToken = default);
 }

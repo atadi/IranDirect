@@ -208,3 +208,32 @@ UpdateStateAsync
 ```
 
 Result: two execution paths (IPC commands and service loop) converge on the single `RunCycleAsync` method. The service loop runs one cycle at startup if desired is enabled, then enters a periodic repair loop when `AutoRepair=true`. The `OperationCoordinator` SemaphoreSlim prevents concurrent execution between worker cycles, enable, and disable commands. The `GatewayDetector` runs fresh each cycle (via observation), so stale `InterfaceIndex` or `Gateway` values are corrected automatically. 8 additional controller tests verify `RunCycleAsync` state transitions, LastError management, and gateway refresh. The `RouteReconciler` DI registration is removed (zero production consumers). `tools/Install-IranDirectService.ps1` provides install/uninstall.
+
+## Phase 11 — Bounded Parallel Execution
+
+```text
+RuntimeExecutionPlan
+        |
+        v
+  +-- AddEndpointRoute  (sequential)
+  |
+  +-- RemovePrefixRoute (bounded parallel, max 8)
+  |
+  +-- AddPrefixRoute    (bounded parallel, max 8)
+  |
+  +-- RemoveEndpointRoute (sequential)
+        |
+        v
+RuntimeExecutionStepResult[]
+        |
+        v
+RuntimeExecutionResult (Completed / Failed / PartiallyCompleted / Cancelled)
+```
+
+Result: `RuntimeExecutor` processes execution plan steps in four strict groups while preserving plan order. Endpoint-route groups execute sequentially to avoid interleaving VPN-safety mutations; prefix-route groups execute with bounded concurrency (max 8) to improve throughput for large prefix sets (e.g., 1,944 routes). After a failure or cancellation within a group, no further groups start; never-started steps become Skipped; already-running steps may complete. Results are collected in plan order via indexed array slots, not completion order.
+
+`IRouteInventoryPersistence` and `IEndpointInventoryPersistence` gain `MutateAsync` for atomic read-modify-write. `RouteInventoryStore` and `VpnEndpointInventoryStore` use an internal `SemaphoreSlim(1,1)` per store to serialize concurrent mutations during bounded prefix execution.
+
+`WindowsRuntimeExecutionStepHandler` removes prefix routes with stale-ownership convergence: if a route is already absent from the platform but a stale owned entry remains in inventory, the entry is removed and the step succeeds. If the route is absent with no inventory entry, the step succeeds as a no-op. Non-owned routes are never removed. The same stale-owned convergence applies to endpoint route removal, preserving `AddedByIranDirect == false` entries.
+
+19 new tests cover: bounded prefix concurrency, sequential endpoint ordering, group ordering, plan-order result preservation, failure/cancellation scheduling, stale inventory convergence for both prefix and endpoint routes, duplicate identity deduplication, unrelated entry preservation, and a performance measurement test. 242 total, 0 failing.
