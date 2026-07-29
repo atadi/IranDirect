@@ -56,9 +56,19 @@
 - 24 tests verify all invariants, null safety, default rejection, reference preservation, identity/kind mismatch detection, duplicate handling, and non-recalculation of ordering.
 - Domain Decision concept distinguished from DTO: lifecycle boundaries need validated domain decisions, not transport-shaped data.
 
+## Decision Builder
+
+- RuntimeDecisionBuilder introduced: stateless, read-only orchestrator that composes the existing lifecycle into a validated RuntimeDecision.
+- Orchestration flow: IRuntimePlanCoordinator.BuildPlanAsync → IRuntimeReconciler.ReconcileAsync → RuntimeExecutionPlanner.Plan → TimeProvider.GetUtcNow → RuntimeDecision.Create.
+- No status-specific branching — RuntimeDecision.Create owns all consistency validation.
+- Injected TimeProvider for deterministic, testable timestamps; no DateTimeOffset.UtcNow in the builder.
+- Interface IRuntimeDecisionBuilder introduced as the authoritative pre-execution boundary, justified by future RuntimeCycleCoordinator migration and potential IPC/worker exposure.
+- 24 tests verify exact reference preservation, token forwarding, cancellation propagation, planner exception propagation, all status consistency paths, time source injection, and constructor validation.
+- DI registrations: RuntimeExecutionPlanner singleton, TimeProvider.System singleton, IRuntimeDecisionBuilder→RuntimeDecisionBuilder singleton.
+
 ## Next
 
-- Introduce RuntimeDecisionBuilder and wire into RuntimeCycleCoordinator, replacing RuntimeCycleResult with RuntimeDecision as the authoritative pre-execution artifact.
+- Migrate RuntimeCycleCoordinator to use RuntimeDecisionBuilder and return RuntimeDecision, replacing RuntimeCycleResult as the authoritative pre-execution artifact.
 - Implement RuntimeExecutor for platform operations.
 - Reduce the controller to orchestration.
 - Move route and inventory execution into focused executors.

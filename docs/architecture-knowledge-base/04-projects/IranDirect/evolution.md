@@ -93,3 +93,23 @@ Observation → Planning → Reconciliation → Execution Planning
 ```
 
 Result: the complete pre-execution decision becomes an immutable, validated domain artifact. Consumers no longer reconstruct the decision from intermediate fragments. The contract enforces consistency between reconciliation intent and execution steps.
+
+## Phase 8 — Decision Builder
+
+```text
+RuntimePlanSnapshot
+       |
+       v
+RuntimeReconciliationResult
+       |
+       v
+RuntimeExecutionPlan
+       |
+       v
+TimeProvider.GetUtcNow()
+       |
+       v
+RuntimeDecision.Create()
+```
+
+Result: a dedicated read-only orchestrator composes the lifecycle into a validated pre-execution decision. The builder owns ordering and reference preservation; the domain contract owns validation. The builder is clock-aware (injected `TimeProvider`) but the domain contract remains clock-independent.

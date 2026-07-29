@@ -204,3 +204,50 @@ Any system with a detect-decide-act pipeline should consider a validated decisio
 
 - Phase 7 in project evolution
 - Execution Plan pattern
+
+---
+
+## Lesson 018 — Orchestrators Compose Immutable Artifacts
+
+An orchestrator's primary responsibility is to sequence collaborators and combine their results into a coherent output. It should not validate, transform, or re-derive the outputs of the components it orchestrates.
+
+### Context
+
+IranDirect needed a component that produces a complete pre-execution `RuntimeDecision` from three upstream artifacts: `RuntimePlanSnapshot`, `RuntimeReconciliationResult`, and `RuntimeExecutionPlan`. Each was already validated and self-consistent. The initial temptation was to add status-specific branching and re-validate the relationship inside the orchestrator.
+
+### Insight
+
+When each upstream artifact is independently valid and the composition contract is owned by the final domain type (`RuntimeDecision.Create`), the orchestrator becomes a pure sequential pipeline:
+
+1. Call each collaborator in lifecycle order.
+2. Pass the exact result of each step to the next.
+3. Obtain the timestamp after all phases complete.
+4. Return the composed domain artifact.
+
+No status-specific branching, no duplicate validation, no re-derivation of invariants already enforced by the domain.
+
+### IranDirect Example
+
+- `RuntimeDecisionBuilder` calls `IRuntimePlanCoordinator`, `IRuntimeReconciler`, `RuntimeExecutionPlanner`, and `TimeProvider` in sequence.
+- RuntimeDecision.Create validates the composed result — the builder neither duplicates this check nor branches on status.
+- ChangesApplied is rejected by RuntimeDecision.Create, not by the builder.
+- The builder has no knowledge of route identities, execution ordering, or status semantics.
+
+### Broader Application
+
+Any orchestration that composes already-validated domain artifacts should:
+- Delegate validation to the domain contract (which knows the rules).
+- Delegate transformation to the owning component (which knows the shape).
+- Keep the orchestrator focused on ordering, reference preservation, and side-effect boundaries.
+
+### Tradeoffs
+
+- Requires discipline not to add "one more check" inside the orchestrator.
+- If the domain contract's validation becomes expensive, the orchestrator may need a fast-path guard — but that guard should be a separate concern, not status-specific branching.
+- Orchestrators without validation logic are trivial to test (only call-count, reference, token, and ordering tests needed).
+
+### Related ADRs and Patterns
+
+- Phase 7, Phase 8 in project evolution
+- Thin Orchestrator pattern
+- Stable Contract pattern

@@ -5,6 +5,7 @@ using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
+using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Reconciliation;
 using IranDirect.Core.State;
 using IranDirect.Core.SystemTools;
@@ -141,6 +142,10 @@ builder.Services.AddSingleton<RuntimeChangeSetPlanner>();
 builder.Services.AddSingleton<
     IRuntimeReconciler,
     RuntimeReconciler>();
+builder.Services.AddSingleton<RuntimeExecutionPlanner>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<
+    IRuntimeDecisionBuilder, RuntimeDecisionBuilder>();
 builder.Services.AddSingleton<RuntimeCycleCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();

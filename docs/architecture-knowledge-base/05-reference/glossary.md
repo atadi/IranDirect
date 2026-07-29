@@ -55,3 +55,7 @@ A component that confirms platform state matches expected post-execution state (
 ## Runtime Decision
 
 The complete validated pre-execution contract containing the plan snapshot, reconciliation result, and ordered execution plan. Guarantees internal consistency between reconciliation intent and execution steps.
+
+## Runtime Decision Builder
+
+A read-only orchestrator that composes the existing lifecycle into a validated RuntimeDecision. Sequences plan building, reconciliation, execution planning, and timestamp assignment. Delegates all domain validation to RuntimeDecision.Create. Uses injected TimeProvider for deterministic timestamps.

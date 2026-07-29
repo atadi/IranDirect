@@ -79,6 +79,7 @@ ObservedRuntime  DesiredRuntime
 - execution domain model (step, plan, result)
 - execution planner (pure RuntimeChangeSet → RuntimeExecutionPlan translation)
 - pre-execution decision contract (RuntimeDecision with validated consistency)
+- pre-execution decision builder (RuntimeDecisionBuilder composing plan, reconciliation, execution plan into validated RuntimeDecision)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -86,11 +87,11 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The controller still owns execution decisions that should move into dedicated runtime components. `RuntimeCycleResult` and `RuntimeDecision` coexist — the latter should supersede the former once `RuntimeDecisionBuilder` is introduced.
+The controller still owns execution decisions that should move into dedicated runtime components. `RuntimeCycleResult` and `RuntimeDecision` coexist — `RuntimeDecisionBuilder` is the authoritative pre-execution orchestrator but `RuntimeCycleCoordinator` still returns `RuntimeCycleResult` directly. A dedicated migration slice should replace `RuntimeCycleCoordinator`'s internal flow with `RuntimeDecisionBuilder` and change the return type to `RuntimeDecision`.
 
 ## Immediate Next Milestone
 
-Introduce `RuntimeDecisionBuilder` that composes `RuntimePlanSnapshot`, `RuntimeReconciliationResult`, and `RuntimeExecutionPlan` into a validated `RuntimeDecision`, then wire it into `RuntimeCycleCoordinator` so the cycle result includes an execution plan. This replaces `RuntimeCycleResult` with `RuntimeDecision` as the authoritative pre-execution artifact.
+Migrate `RuntimeCycleCoordinator` to use `RuntimeDecisionBuilder` internally and return `RuntimeDecision` instead of `RuntimeCycleResult`, then remove `RuntimeCycleResult`.
 
 ## Non-Negotiable Invariants
 
