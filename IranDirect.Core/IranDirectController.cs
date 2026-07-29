@@ -96,67 +96,7 @@ public sealed class IranDirectController
         await _configurationService.SetEnabledAsync(
             true, cancellationToken);
 
-        RuntimeDecision decision =
-            await _runtimeCycleCoordinator.RunCycleAsync(
-                cancellationToken);
-
-        RuntimeExecutionResult execution =
-            await _runtimeExecutor.ExecuteAsync(
-                decision.ExecutionPlan,
-                cancellationToken);
-
-        IranDirectState state =
-            await _stateRepository.LoadAsync(
-                cancellationToken);
-
-        if (execution.Status is
-                RuntimeExecutionResultStatus.Completed
-                or RuntimeExecutionResultStatus
-                    .NoExecutionRequired
-            && decision.Plan.Desired.Enabled)
-        {
-            ObservedDirectGateway? gateway =
-                decision.Plan.Observed.DirectGateway;
-
-            IReadOnlyList<string> prefixes =
-                await _prefixRepository.LoadAsync(
-                    cancellationToken);
-
-            await _stateRepository.SaveAsync(
-                state with
-                {
-                    Enabled = true,
-                    Gateway = gateway?.Address
-                        ?? state.Gateway,
-                    InterfaceIndex = gateway?.InterfaceIndex
-                        ?? state.InterfaceIndex,
-                    InterfaceName = gateway?.InterfaceName
-                        ?? state.InterfaceName,
-                    PrefixCount = prefixes.Count,
-                    EnabledAt = state.EnabledAt
-                        ?? DateTimeOffset.UtcNow,
-                    PrefixesUpdatedAt =
-                        _prefixRepository.GetLastModified(),
-                    LastError = null
-                },
-                cancellationToken);
-        }
-        else
-        {
-            await _stateRepository.SaveAsync(
-                state with
-                {
-                    LastError = execution.ErrorMessage
-                        ?? "Enable failed."
-                },
-                cancellationToken);
-        }
-
-        return new RuntimeCycleExecutionResult
-        {
-            Decision = decision,
-            Execution = execution
-        };
+        return await RunCycleAsync(cancellationToken);
     }
 
     public async Task<RuntimeCycleExecutionResult> DisableAsync(
@@ -165,6 +105,12 @@ public sealed class IranDirectController
         await _configurationService.SetEnabledAsync(
             false, cancellationToken);
 
+        return await RunCycleAsync(cancellationToken);
+    }
+
+    public async Task<RuntimeCycleExecutionResult> RunCycleAsync(
+        CancellationToken cancellationToken = default)
+    {
         RuntimeDecision decision =
             await _runtimeCycleCoordinator.RunCycleAsync(
                 cancellationToken);
@@ -174,39 +120,8 @@ public sealed class IranDirectController
                 decision.ExecutionPlan,
                 cancellationToken);
 
-        IranDirectState state =
-            await _stateRepository.LoadAsync(
-                cancellationToken);
-
-        if (execution.Status is
-            RuntimeExecutionResultStatus.Completed
-            or RuntimeExecutionResultStatus
-                .NoExecutionRequired)
-        {
-            await _stateRepository.SaveAsync(
-                state with
-                {
-                    Enabled = false,
-                    LastError = null
-                },
-                cancellationToken);
-
-            if (execution.MutatedInfrastructure)
-            {
-                await _routeInventoryStore.ClearAsync(
-                    cancellationToken);
-            }
-        }
-        else
-        {
-            await _stateRepository.SaveAsync(
-                state with
-                {
-                    LastError = execution.ErrorMessage
-                        ?? "Disable failed."
-                },
-                cancellationToken);
-        }
+        await UpdateStateAsync(
+            decision, execution, cancellationToken);
 
         return new RuntimeCycleExecutionResult
         {
@@ -284,7 +199,78 @@ public sealed class IranDirectController
             return;
         }
 
-        await EnableAsync(cancellationToken);
+        await RunCycleAsync(cancellationToken);
+    }
+
+    private async Task UpdateStateAsync(
+        RuntimeDecision decision,
+        RuntimeExecutionResult execution,
+        CancellationToken cancellationToken)
+    {
+        IranDirectState state =
+            await _stateRepository.LoadAsync(
+                cancellationToken);
+
+        if (execution.Status is
+                RuntimeExecutionResultStatus.Completed
+                or RuntimeExecutionResultStatus
+                    .NoExecutionRequired)
+        {
+            if (decision.Plan.Desired.Enabled)
+            {
+                ObservedDirectGateway? gateway =
+                    decision.Plan.Observed.DirectGateway;
+
+                IReadOnlyList<string> prefixes =
+                    await _prefixRepository.LoadAsync(
+                        cancellationToken);
+
+                await _stateRepository.SaveAsync(
+                    state with
+                    {
+                        Enabled = true,
+                        Gateway = gateway?.Address
+                            ?? state.Gateway,
+                        InterfaceIndex = gateway?.InterfaceIndex
+                            ?? state.InterfaceIndex,
+                        InterfaceName = gateway?.InterfaceName
+                            ?? state.InterfaceName,
+                        PrefixCount = prefixes.Count,
+                        EnabledAt = state.EnabledAt
+                            ?? DateTimeOffset.UtcNow,
+                        PrefixesUpdatedAt =
+                            _prefixRepository.GetLastModified(),
+                        LastError = null
+                    },
+                    cancellationToken);
+            }
+            else
+            {
+                await _stateRepository.SaveAsync(
+                    state with
+                    {
+                        Enabled = false,
+                        LastError = null
+                    },
+                    cancellationToken);
+
+                if (execution.MutatedInfrastructure)
+                {
+                    await _routeInventoryStore.ClearAsync(
+                        cancellationToken);
+                }
+            }
+        }
+        else
+        {
+            await _stateRepository.SaveAsync(
+                state with
+                {
+                    LastError = execution.ErrorMessage
+                        ?? "Cycle failed."
+                },
+                cancellationToken);
+        }
     }
 
     private static string ToIdentity(SystemRoute route) =>

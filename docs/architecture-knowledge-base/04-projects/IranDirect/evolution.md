@@ -170,3 +170,41 @@ State update on Completed/NoExecutionRequired
 ```
 
 Result: `IranDirectController.EnableAsync` and `DisableAsync` are replaced with a single consistent pipeline: set desired enabled state → run full observation→plan→reconcile→decision cycle → execute plan → update service state on success. `ServiceResponse` carries the `RuntimeDecision` and `RuntimeExecutionResult` for IPC transparency. The legacy `RouteReconciler` path is no longer called. `RuntimeCycleExecutionResult` bundles the decision and execution result for controller-orchestration use. 15 integration tests cover all execution result statuses, state update policy, the desired-enabled guard, plan dispatch, inventory clearing, and cancellation propagation.
+
+## Phase 10.2 — Service Cycle + Periodic Repair
+
+```text
+IranDirectWorker.ExecuteAsync
+        |
+        +-- startup: load desired config
+        |       |
+        |       +-- enabled=true  → RunServiceCycleAsync("startup")
+        |       +-- enabled=false → skip
+        |
+        +-- loop (while AutoRepair)
+                |
+                +-- wait RepairInterval
+                +-- RunServiceCycleAsync("periodic")
+
+RunServiceCycleAsync(trigger)
+        |
+        v
+OperationCoordinator.ExecuteAsync  (overlap guard)
+        |
+        v
+IranDirectController.RunCycleAsync  (no desire toggle)
+        |
+        v
+RuntimeCycleCoordinator.RunCycleAsync
+        |
+        v
+IRuntimeExecutor.ExecuteAsync
+        |
+        v
+UpdateStateAsync
+    |-- success + desired enabled  → state.Enabled=true, LastError=null
+    |-- success + desired disabled → state.Enabled=false, LastError=null
+    +-- failure                   → LastError=error, Enabled unchanged
+```
+
+Result: two execution paths (IPC commands and service loop) converge on the single `RunCycleAsync` method. The service loop runs one cycle at startup if desired is enabled, then enters a periodic repair loop when `AutoRepair=true`. The `OperationCoordinator` SemaphoreSlim prevents concurrent execution between worker cycles, enable, and disable commands. The `GatewayDetector` runs fresh each cycle (via observation), so stale `InterfaceIndex` or `Gateway` values are corrected automatically. 8 additional controller tests verify `RunCycleAsync` state transitions, LastError management, and gateway refresh. The `RouteReconciler` DI registration is removed (zero production consumers). `tools/Install-IranDirectService.ps1` provides install/uninstall.

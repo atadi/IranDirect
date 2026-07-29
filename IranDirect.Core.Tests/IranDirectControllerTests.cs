@@ -307,6 +307,221 @@ public sealed class IranDirectControllerTests
             () => ctx.Controller.EnableAsync(token));
     }
 
+    [Fact]
+    public async Task RunCycle_EnabledDesired_UpdatesStateEnabled()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+        ctx.DesiredEnabled = true;
+
+        RuntimeCycleExecutionResult result =
+            await ctx.Controller.RunCycleAsync();
+
+        Assert.True(result.IsSuccess);
+        IranDirectState state =
+            await ctx.StateRepository.LoadAsync();
+        Assert.True(state.Enabled);
+        Assert.Null(state.LastError);
+    }
+
+    [Fact]
+    public async Task RunCycle_DisabledDesired_UpdatesStateDisabled()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult =
+            RuntimeExecutionResult.NoExecutionRequired();
+        ctx.DesiredEnabled = false;
+
+        RuntimeCycleExecutionResult result =
+            await ctx.Controller.RunCycleAsync();
+
+        Assert.True(result.IsSuccess);
+        IranDirectState state =
+            await ctx.StateRepository.LoadAsync();
+        Assert.False(state.Enabled);
+    }
+
+    [Fact]
+    public async Task RunCycle_FailedExecution_SetsLastError()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult = RuntimeExecutionResult.Failed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Failed,
+                ErrorMessage = "test failure"
+            }
+        ], "test failure");
+
+        RuntimeCycleExecutionResult result =
+            await ctx.Controller.RunCycleAsync();
+
+        Assert.False(result.IsSuccess);
+        IranDirectState state =
+            await ctx.StateRepository.LoadAsync();
+        Assert.False(state.Enabled);
+        Assert.Equal("test failure", state.LastError);
+    }
+
+    [Fact]
+    public async Task RunCycle_SuccessfulCycle_ClearsLastError()
+    {
+        await using TestContext ctx = new();
+        ctx.DesiredEnabled = true;
+        await ctx.StateRepository.SaveAsync(
+            new IranDirectState
+            {
+                Enabled = true,
+                LastError = "previous error"
+            });
+
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+
+        await ctx.Controller.RunCycleAsync();
+
+        IranDirectState state =
+            await ctx.StateRepository.LoadAsync();
+        Assert.True(state.Enabled);
+        Assert.Null(state.LastError);
+    }
+
+    [Fact]
+    public async Task RunCycle_FailedCycle_PreservesLastError()
+    {
+        await using TestContext ctx = new();
+        ctx.DesiredEnabled = true;
+        await ctx.StateRepository.SaveAsync(
+            new IranDirectState
+            {
+                Enabled = true,
+                LastError = "previous error"
+            });
+
+        ctx.ExecutorResult = RuntimeExecutionResult.Failed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Failed,
+                ErrorMessage = "new error"
+            }
+        ], "new error");
+
+        await ctx.Controller.RunCycleAsync();
+
+        IranDirectState state =
+            await ctx.StateRepository.LoadAsync();
+        Assert.True(state.Enabled);
+        Assert.Equal("new error", state.LastError);
+    }
+
+    [Fact]
+    public async Task RunCycle_StaleGatewayReplaced()
+    {
+        await using TestContext ctx = new();
+        ctx.DesiredEnabled = true;
+
+        uint staleIndex = 5;
+        await ctx.StateRepository.SaveAsync(
+            new IranDirectState
+            {
+                Enabled = false,
+                Gateway = "192.168.1.1",
+                InterfaceIndex = staleIndex,
+                InterfaceName = "OldInterface"
+            });
+
+        RuntimePlanSnapshot plan = new()
+        {
+            Configuration = new DesiredConfiguration
+                { Enabled = true },
+            Observed = new ObservedRuntime
+            {
+                VpnProfileExists = true,
+                VpnProfileValid = true,
+                DirectGateway = new ObservedDirectGateway
+                {
+                    Address = "10.0.0.1",
+                    InterfaceIndex = 20,
+                    InterfaceName = "Ethernet"
+                },
+                VpnEndpoints = [],
+                Prefixes = ["203.0.113.0/24"],
+                Routes = [],
+                ObservedAt = DateTimeOffset.UtcNow
+            },
+            Desired = new DesiredRuntime
+            {
+                Enabled = true,
+                Blockers = [],
+                EndpointRoutes = [],
+                PrefixRoutes = []
+            },
+            PlannedAt = DateTimeOffset.UtcNow
+        };
+
+        ctx.FakeDecisionBuilder.Decision =
+            RuntimeDecision.Create(
+                plan,
+                RuntimeReconciliationResult.NoChanges(),
+                new RuntimeExecutionPlan { Steps = [] },
+                DateTimeOffset.UtcNow);
+
+        ctx.ExecutorResult =
+            RuntimeExecutionResult.NoExecutionRequired();
+
+        await ctx.Controller.RunCycleAsync();
+
+        IranDirectState state =
+            await ctx.StateRepository.LoadAsync();
+        Assert.True(state.Enabled);
+        Assert.Equal(20u, state.InterfaceIndex);
+        Assert.Equal("Ethernet", state.InterfaceName);
+        Assert.Equal("10.0.0.1", state.Gateway);
+    }
+
+    [Fact]
+    public async Task RunCycle_CancellationTokenPropagates()
+    {
+        await using TestContext ctx = new();
+        using CancellationTokenSource cts = new();
+        CancellationToken token = cts.Token;
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ctx.Controller.RunCycleAsync(token));
+    }
+
+    [Fact]
+    public async Task
+        RunCycle_EnabledDesired_NoExecutionRequired_UpdatesStateEnabled()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult =
+            RuntimeExecutionResult.NoExecutionRequired();
+        ctx.DesiredEnabled = true;
+
+        RuntimeCycleExecutionResult result =
+            await ctx.Controller.RunCycleAsync();
+
+        Assert.True(result.IsSuccess);
+        IranDirectState state =
+            await ctx.StateRepository.LoadAsync();
+        Assert.True(state.Enabled);
+    }
+
     internal sealed class FakeDecisionBuilder : IRuntimeDecisionBuilder
     {
         public RuntimeDecision? Decision { get; set; }

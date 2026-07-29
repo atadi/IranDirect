@@ -88,7 +88,6 @@ builder.Services.AddSingleton<
     IRouteManager,
     WindowsRouteManager>();
 
-builder.Services.AddSingleton<RouteReconciler>();
 builder.Services.AddSingleton<VpnEndpointRouteManager>();
 builder.Services.AddSingleton<IranDirectController>();
 

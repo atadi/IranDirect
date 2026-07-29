@@ -92,6 +92,13 @@ ObservedRuntime  DesiredRuntime
 - inventory persistence interfaces (IRouteInventoryPersistence, IEndpointInventoryPersistence)
 - production enable/disable via RuntimeDecision + RuntimeExecutor pipeline
 - controller-orchestrated execution cycle (IranDirectController delegates to coordinator and executor)
+- service startup cycle (enabled desired → run one cycle on boot)
+- periodic repair loop (AutoRepair + RepairInterval)
+- single-flight overlap guard (OperationCoordinator shared across worker + IPC)
+- physical gateway refresh every cycle (GatewayDetector runs per observation)
+- structured per-cycle logging (trigger, status, steps, duration)
+- failure isolation (failed cycles don't terminate the service)
+- LastError management (cleared on success, preserved on failure)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -99,11 +106,17 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The legacy `RouteReconciler` path is still registered and testable but no longer called in production. The `IranDirectWorker` repair loop still calls `EnableAsync` (now via the pipeline). Periodic execution (full cycle + execution on a timer) is not yet active — enable/disable is driven only by IPC commands. The `RouteInventoryStore.ClearAsync` call during disable duplicates pipeline inventory cleanup.
+The legacy `RouteReconciler` class and its DI registration are removed (zero production consumers). The `RouteInventoryStore.ClearAsync` call during disable duplicates pipeline inventory cleanup. The `OpenVPN` endpoint protection path has not been validated with ZoogVPN active.
 
 ## Immediate Next Milestone
 
-Controlled one-prefix manual verification on real Windows, then remove dead DI registrations (`RouteReconciler`) and unused private methods.
+Complete one-prefix manual verification on real Windows to confirm:
+- startup cycle when enabled
+- periodic repair restores deleted routes
+- stale InterfaceIndex is corrected
+- restart recovery is idempotent
+- disable removes owned routes
+Then tag the release candidate.
 
 ## Non-Negotiable Invariants
 
