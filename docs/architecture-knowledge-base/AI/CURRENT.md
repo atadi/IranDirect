@@ -46,16 +46,19 @@ ObservedRuntime  DesiredRuntime
    RuntimeChangeSet
               |
               v
- RuntimeExecutionPlanner   (model defined; planner deferred)
+  RuntimeExecutionPlanner   (pure, deterministic, safe ordering)
               |
               v
-   RuntimeExecutionPlan
-              |
-              v
-    RuntimeExecutor        (future)
-              |
-              v
- Windows Networking Platform
+    RuntimeExecutionPlan
+               |
+               v
+      RuntimeDecision        (domain contract)
+               |
+               v
+     RuntimeExecutor         (future)
+               |
+               v
+  Windows Networking Platform
 ```
 
 ## Implemented Responsibilities
@@ -74,6 +77,8 @@ ObservedRuntime  DesiredRuntime
 - read-only runtime plan exposure
 - read-only runtime cycle coordination
 - execution domain model (step, plan, result)
+- execution planner (pure RuntimeChangeSet → RuntimeExecutionPlan translation)
+- pre-execution decision contract (RuntimeDecision with validated consistency)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -81,11 +86,11 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The controller still owns reconciliation and execution decisions that should move into dedicated runtime components. Execution planning (converting `RuntimeChangeSet` to ordered `RuntimeExecutionPlan`) is defined as a domain model but not yet implemented.
+The controller still owns execution decisions that should move into dedicated runtime components. `RuntimeCycleResult` and `RuntimeDecision` coexist — the latter should supersede the former once `RuntimeDecisionBuilder` is introduced.
 
 ## Immediate Next Milestone
 
-Implement `RuntimeExecutionPlanner` to convert a `RuntimeChangeSet` into an ordered `RuntimeExecutionPlan` with deterministic step ordering, verification representation, and inventory-consequence metadata.
+Introduce `RuntimeDecisionBuilder` that composes `RuntimePlanSnapshot`, `RuntimeReconciliationResult`, and `RuntimeExecutionPlan` into a validated `RuntimeDecision`, then wire it into `RuntimeCycleCoordinator` so the cycle result includes an execution plan. This replaces `RuntimeCycleResult` with `RuntimeDecision` as the authoritative pre-execution artifact.
 
 ## Non-Negotiable Invariants
 

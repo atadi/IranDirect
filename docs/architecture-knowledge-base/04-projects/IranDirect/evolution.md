@@ -80,3 +80,16 @@ Executor -> Verifier -> Inventory
 ```
 
 Result: deciding what must change, deciding how to change it, performing the change, verifying it, and recording ownership become separate lifecycle stages.
+
+## Phase 7 — Decision Contract
+
+```text
+Observation → Planning → Reconciliation → Execution Planning
+                                              |
+                                              v
+                                       RuntimeDecision
+                                              |
+                              (execute / preview / audit / simulate)
+```
+
+Result: the complete pre-execution decision becomes an immutable, validated domain artifact. Consumers no longer reconstruct the decision from intermediate fragments. The contract enforces consistency between reconciliation intent and execution steps.

@@ -38,9 +38,27 @@
 - Execution ordering policy established: AddEndpointRoute → RemovePrefixRoute → AddPrefixRoute → RemoveEndpointRoute.
 - Safety invariant: establish new endpoint protection first; remove obsolete prefix routes before adding replacements; keep endpoint protection until all prefix work is complete; remove obsolete endpoint protection last.
 
+## Execution Planner
+
+- RuntimeExecutionPlanner implemented: pure, stateless, explicit ordering policy.
+- Planning uses AddEndpointRoute → RemovePrefixRoute → AddPrefixRoute → RemoveEndpointRoute priority.
+- Within-group sorting by identity with OrdinalIgnoreCase.
+- Enum ordinal values never define execution order.
+- Planning produces no side effects, no execution results, no status flags.
+- 18 tests verify ordering, mapping, field fidelity, duplicate preservation, null safety, and unsupported-kind rejection.
+
+## Decision Contract
+
+- RuntimeDecision introduced: immutable, validated domain contract for the complete pre-execution decision.
+- Enforces: plan non-null, reconciliation non-null, execution-plan non-null, non-default DecidedAt.
+- Consistency rules: NoChangesRequired → empty plan; ChangesPlanned → non-empty with traceability; Blocked/Failed → empty plan; ChangesApplied → rejected (pre-execution contract).
+- Traceability: change-to-step count equality + sorted (identity, kind) pair correspondence — validates without duplicating planner logic.
+- 24 tests verify all invariants, null safety, default rejection, reference preservation, identity/kind mismatch detection, duplicate handling, and non-recalculation of ordering.
+- Domain Decision concept distinguished from DTO: lifecycle boundaries need validated domain decisions, not transport-shaped data.
+
 ## Next
 
-- Implement RuntimeExecutionPlanner to convert RuntimeChangeSet to ordered RuntimeExecutionPlan.
+- Introduce RuntimeDecisionBuilder and wire into RuntimeCycleCoordinator, replacing RuntimeCycleResult with RuntimeDecision as the authoritative pre-execution artifact.
 - Implement RuntimeExecutor for platform operations.
 - Reduce the controller to orchestration.
 - Move route and inventory execution into focused executors.

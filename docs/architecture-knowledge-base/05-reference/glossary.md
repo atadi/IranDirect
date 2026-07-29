@@ -51,3 +51,7 @@ A component that performs platform operations defined by execution steps (future
 ## Verifier
 
 A component that confirms platform state matches expected post-execution state (future).
+
+## Runtime Decision
+
+The complete validated pre-execution contract containing the plan snapshot, reconciliation result, and ordered execution plan. Guarantees internal consistency between reconciliation intent and execution steps.

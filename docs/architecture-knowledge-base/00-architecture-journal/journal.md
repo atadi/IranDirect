@@ -173,3 +173,34 @@ More stages mean more vocabulary and more types. The benefit is the ability to p
 
 - Phase 6 in project evolution
 - Execution Plan pattern
+
+---
+
+## Lesson 017 — Domain Decisions Are Not DTOs
+
+A DTO exists because a transport boundary needs data in a particular shape.
+
+A Domain Decision exists because lifecycle stages need one authoritative, immutable, internally consistent decision contract.
+
+### Context
+
+IranDirect's pre-execution state was represented by three separate artifacts: `RuntimePlanSnapshot`, `RuntimeReconciliationResult`, and `RuntimeExecutionPlan`. Each was independently valid, but there was no contract-level guarantee that the execution plan actually corresponded to the reconciliation's change set. A consumer had to recompute that relationship or trust coincidence.
+
+### Insight
+
+When multiple upstream artifacts combine to form a single "what should happen next" answer, the architecture benefits from a validated domain contract that bundles them together. The validation is not transport shaping — it enforces domain invariants such as "a blocked reconciliation cannot have execution steps" and "every change must have a corresponding step."
+
+### Broader Application
+
+Any system with a detect-decide-act pipeline should consider a validated decision contract at the decide boundary. Without it, consumers must independently re-derive consistency constraints that the system already knows.
+
+### Tradeoffs
+
+- One more type in the domain.
+- Validation cost on construction (negligible for typical plan sizes).
+- Requires discipline to keep the contract transport-independent.
+
+### Related ADRs and Patterns
+
+- Phase 7 in project evolution
+- Execution Plan pattern
