@@ -57,6 +57,9 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
     {
         ManagedRoute managedRoute = ToManagedRoute(step);
 
+        if (await RouteExistsAsync(step, cancellationToken))
+            return await CheckExistingEndpointOwnershipAsync(step, cancellationToken);
+
         try
         {
             await _routeManager.AddRoutesAsync(
@@ -121,15 +124,51 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
                 },
                 cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException
-                                   and not ArgumentNullException)
+        catch (OperationCanceledException)
         {
-            return CreateFailedResult(step.Identity,
-                $"Endpoint route was added but inventory " +
-                $"persistence failed: {ex.Message}");
+            await CompensateEndpointRouteCreationAsync(managedRoute, step,
+                "Operation was cancelled during endpoint inventory persistence.");
+            throw;
+        }
+        catch (Exception ex) when (ex is not ArgumentNullException)
+        {
+            string msg = await CompensateEndpointRouteCreationAsync(managedRoute, step, ex.Message);
+            return CreateFailedResult(step.Identity, msg);
         }
 
         return CreateSucceededResult(step.Identity);
+    }
+
+    private async Task<RuntimeExecutionStepResult> CheckExistingEndpointOwnershipAsync(
+        RuntimeExecutionStep step,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            VpnEndpointInventory snapshot = await _endpointInventory.LoadAsync(cancellationToken);
+            VpnEndpointInventoryItem? item = snapshot.Endpoints
+                .FirstOrDefault(e =>
+                    e.Identity.Equals(step.Identity, StringComparison.OrdinalIgnoreCase));
+
+            if (item is not null)
+            {
+                if (item.AddedByIranDirect)
+                    return CreateSucceededResult(step.Identity);
+
+                return CreateFailedResult(step.Identity,
+                    "Cannot add endpoint route: an exact matching route already exists " +
+                    "on the platform but is not owned by IranDirect.");
+            }
+
+            return CreateFailedResult(step.Identity,
+                "Cannot add endpoint route: an exact matching route already exists " +
+                "on the platform but is not in the endpoint inventory.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return CreateFailedResult(step.Identity,
+                $"Failed to check endpoint inventory for existing route: {ex.Message}");
+        }
     }
 
     private async Task<RuntimeExecutionStepResult> ExecuteRemoveEndpointRouteAsync(
@@ -259,6 +298,9 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
     {
         ManagedRoute managedRoute = ToManagedRoute(step);
 
+        if (await RouteExistsAsync(step, cancellationToken))
+            return await CheckExistingPrefixOwnershipAsync(step, cancellationToken);
+
         try
         {
             await _routeManager.AddRoutesAsync(
@@ -282,30 +324,112 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             await _routeInventory.MutateAsync(
                 inventory =>
                 {
-                    bool exists = inventory.Routes.Any(r =>
-                        r.Identity.Equals(
-                            step.Identity,
-                            StringComparison.OrdinalIgnoreCase));
-
-                    if (exists)
+                    if (inventory.Routes.Any(r =>
+                            r.Identity.Equals(
+                                step.Identity,
+                                StringComparison.OrdinalIgnoreCase)))
                         return inventory;
 
-                    RouteInventoryItem[] updated =
-                        [.. inventory.Routes, ToInventoryItem(step)];
-
-                    return inventory with { Routes = updated };
+                    return inventory with
+                    {
+                        Routes = [.. inventory.Routes, ToInventoryItem(step)]
+                    };
                 },
                 cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException
-                                   and not ArgumentNullException)
+        catch (OperationCanceledException)
         {
-            return CreateFailedResult(step.Identity,
-                $"Prefix route was added but inventory " +
-                $"persistence failed: {ex.Message}");
+            await CompensatePrefixRouteCreationAsync(managedRoute, step,
+                "Operation was cancelled during route inventory persistence.");
+            throw;
+        }
+        catch (Exception ex) when (ex is not ArgumentNullException)
+        {
+            string msg = await CompensatePrefixRouteCreationAsync(managedRoute, step, ex.Message);
+            return CreateFailedResult(step.Identity, msg);
         }
 
         return CreateSucceededResult(step.Identity);
+    }
+
+    private async Task<RuntimeExecutionStepResult> CheckExistingPrefixOwnershipAsync(
+        RuntimeExecutionStep step,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            RouteInventory snapshot = await _routeInventory.LoadAsync(cancellationToken);
+            bool owned = snapshot.Routes.Any(r =>
+                r.Identity.Equals(step.Identity, StringComparison.OrdinalIgnoreCase));
+
+            if (owned)
+                return CreateSucceededResult(step.Identity);
+
+            return CreateFailedResult(step.Identity,
+                "Cannot add prefix route: an exact matching route already exists " +
+                "on the platform but is not owned by IranDirect.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return CreateFailedResult(step.Identity,
+                $"Failed to check route inventory for existing route: {ex.Message}");
+        }
+    }
+
+    private async Task<string> CompensatePrefixRouteCreationAsync(
+        ManagedRoute managedRoute,
+        RuntimeExecutionStep step,
+        string originalError)
+    {
+        try
+        {
+            await _routeManager.DeleteRoutesAsync(
+                [managedRoute], CancellationToken.None);
+        }
+        catch (Exception compEx)
+        {
+            return $"Prefix route was created but inventory persistence failed: " +
+                   $"{originalError}. Compensation removal also failed: " +
+                   $"{compEx.Message}. Orphaned route: {step.Identity}.";
+        }
+
+        if (await RouteExistsAsync(step, CancellationToken.None))
+        {
+            return $"Prefix route was created but inventory persistence failed: " +
+                   $"{originalError}. Compensation removal was attempted but the " +
+                   $"route still exists. Orphaned route: {step.Identity}.";
+        }
+
+        return $"Prefix route was created but inventory persistence failed: " +
+               $"{originalError}. Route was removed as compensation.";
+    }
+
+    private async Task<string> CompensateEndpointRouteCreationAsync(
+        ManagedRoute managedRoute,
+        RuntimeExecutionStep step,
+        string originalError)
+    {
+        try
+        {
+            await _routeManager.DeleteRoutesAsync(
+                [managedRoute], CancellationToken.None);
+        }
+        catch (Exception compEx)
+        {
+            return $"Endpoint route was created but inventory persistence failed: " +
+                   $"{originalError}. Compensation removal also failed: " +
+                   $"{compEx.Message}. Orphaned route: {step.Identity}.";
+        }
+
+        if (await RouteExistsAsync(step, CancellationToken.None))
+        {
+            return $"Endpoint route was created but inventory persistence failed: " +
+                   $"{originalError}. Compensation removal was attempted but the " +
+                   $"route still exists. Orphaned route: {step.Identity}.";
+        }
+
+        return $"Endpoint route was created but inventory persistence failed: " +
+               $"{originalError}. Route was removed as compensation.";
     }
 
     private async Task<RuntimeExecutionStepResult> ExecuteRemovePrefixRouteAsync(
