@@ -61,7 +61,7 @@ ObservedRuntime  DesiredRuntime
  RuntimeCycleCoordinator   (use-case entry point)
               |
               v
-     RuntimeExecutor       (future)
+      RuntimeExecutor
               |
               v
   Windows Networking Platform
@@ -87,6 +87,9 @@ ObservedRuntime  DesiredRuntime
 - pre-execution decision contract (RuntimeDecision with validated consistency)
 - pre-execution decision builder (RuntimeDecisionBuilder composing plan, reconciliation, execution plan into validated RuntimeDecision)
 - coordinator migration to RuntimeDecision (RuntimeCycleCoordinator delegates to IRuntimeDecisionBuilder, returns RuntimeDecision; RuntimeCycleResult removed)
+- execution pipeline (RuntimeExecutor with sequential stop-on-failure step processing)
+- Windows route execution handler (mutate → verify → persist for add/remove prefix and endpoint route steps)
+- inventory persistence interfaces (IRouteInventoryPersistence, IEndpointInventoryPersistence)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -94,11 +97,11 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The controller still owns execution decisions that should move into dedicated runtime components. `RuntimeExecutor` is not yet implemented. No competing cycle-output contracts remain — `RuntimeDecision` is the sole authoritative pre-execution artifact.
+The controller still owns execution decisions that should move into dedicated runtime components. The executor is not yet wired into `RuntimeCycleCoordinator`. No competing cycle-output contracts remain — `RuntimeDecision` is the sole authoritative pre-execution artifact.
 
 ## Immediate Next Milestone
 
-Implement `RuntimeExecutor` for platform operations.
+Wire `RuntimeExecutor` into `RuntimeCycleCoordinator` (M5.8.1).
 
 ## Non-Negotiable Invariants
 

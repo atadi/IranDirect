@@ -3,7 +3,8 @@ using IranDirect.Core.Persistence;
 namespace IranDirect.Core.Vpn;
 
 public sealed class VpnEndpointInventoryStore :
-    JsonStore<VpnEndpointInventory>
+    JsonStore<VpnEndpointInventory>,
+    IEndpointInventoryPersistence
 {
     public VpnEndpointInventoryStore(string inventoryPath)
         : base(inventoryPath)

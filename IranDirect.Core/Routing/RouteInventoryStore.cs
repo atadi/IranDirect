@@ -3,7 +3,8 @@ using IranDirect.Core.Persistence;
 namespace IranDirect.Core.Routing;
 
 public sealed class RouteInventoryStore :
-    JsonStore<RouteInventory>
+    JsonStore<RouteInventory>,
+    IRouteInventoryPersistence
 {
     public RouteInventoryStore(string inventoryPath)
         : base(inventoryPath)
