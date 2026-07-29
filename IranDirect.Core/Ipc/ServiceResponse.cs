@@ -1,4 +1,5 @@
 using IranDirect.Core.Runtime;
+using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Routing;
@@ -28,4 +29,8 @@ public sealed record ServiceResponse
     public DesiredConfiguration? Configuration { get; init; }
 
     public RuntimePlanSnapshot? RuntimePlan { get; init; }
+
+    public RuntimeDecision? Decision { get; init; }
+
+    public RuntimeExecutionResult? Execution { get; init; }
 }

@@ -48,17 +48,15 @@ builder.Services.AddSingleton(
             dataDirectory,
             "state.json")));
 
-builder.Services.AddSingleton(
-    new RouteInventoryStore(
-        Path.Combine(
-            dataDirectory,
-            "route-inventory.json")));
+RouteInventoryStore routeInventoryStore = new(
+    Path.Combine(dataDirectory, "route-inventory.json"));
+builder.Services.AddSingleton(routeInventoryStore);
+builder.Services.AddSingleton<IRouteInventoryPersistence>(routeInventoryStore);
 
-builder.Services.AddSingleton(
-    new VpnEndpointInventoryStore(
-        Path.Combine(
-            dataDirectory,
-            "endpoint-inventory.json")));
+VpnEndpointInventoryStore endpointInventoryStore = new(
+    Path.Combine(dataDirectory, "endpoint-inventory.json"));
+builder.Services.AddSingleton(endpointInventoryStore);
+builder.Services.AddSingleton<IEndpointInventoryPersistence>(endpointInventoryStore);
 
 builder.Services.AddSingleton<DesiredConfigurationValidator>();
 builder.Services.AddSingleton(

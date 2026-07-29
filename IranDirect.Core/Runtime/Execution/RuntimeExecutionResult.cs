@@ -1,7 +1,10 @@
+using System.Text.Json.Serialization;
+
 namespace IranDirect.Core.Runtime.Execution;
 
 public sealed record RuntimeExecutionResult
 {
+    [JsonConstructor]
     private RuntimeExecutionResult() { }
 
     public RuntimeExecutionResultStatus Status { get; init; }

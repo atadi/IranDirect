@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace IranDirect.Core.Runtime;
 
 using IranDirect.Core.Runtime.Execution;
@@ -5,6 +7,7 @@ using IranDirect.Core.Runtime.Reconciliation;
 
 public sealed record RuntimeDecision
 {
+    [JsonConstructor]
     private RuntimeDecision() { }
 
     public required RuntimePlanSnapshot Plan { get; init; }

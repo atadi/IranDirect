@@ -1,7 +1,10 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Models;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
+using IranDirect.Core.Runtime;
+using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.State;
 using IranDirect.Core.Vpn;
 using System.Net;
@@ -15,35 +18,46 @@ public sealed class IranDirectController
     private readonly IranPrefixProvider _prefixProvider;
     private readonly PrefixFileRepository _prefixRepository;
     private readonly GatewayDetector _gatewayDetector;
-    private readonly RouteReconciler _routeReconciler;
     private readonly StateRepository _stateRepository;
     private readonly RouteInventoryStore _routeInventoryStore;
     private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
     private readonly VpnEndpointRouteManager _vpnEndpointRouteManager;
     private readonly VpnEndpointInventoryStore
         _vpnEndpointInventoryStore;
+    private readonly IRouteManager _routeManager;
+    private readonly RuntimeCycleCoordinator
+        _runtimeCycleCoordinator;
+    private readonly IRuntimeExecutor _runtimeExecutor;
+    private readonly DesiredConfigurationService
+        _configurationService;
 
     public IranDirectController(
         IranPrefixProvider prefixProvider,
         PrefixFileRepository prefixRepository,
         GatewayDetector gatewayDetector,
-        RouteReconciler routeReconciler,
+        IRouteManager routeManager,
         StateRepository stateRepository,
         RouteInventoryStore routeInventoryStore,
         OpenVpnEndpointProvider vpnEndpointProvider,
         VpnEndpointRouteManager vpnEndpointRouteManager,
-        VpnEndpointInventoryStore vpnEndpointInventoryStore)
+        VpnEndpointInventoryStore vpnEndpointInventoryStore,
+        RuntimeCycleCoordinator runtimeCycleCoordinator,
+        IRuntimeExecutor runtimeExecutor,
+        DesiredConfigurationService configurationService)
     {
         _prefixProvider = prefixProvider;
         _prefixRepository = prefixRepository;
         _gatewayDetector = gatewayDetector;
-        _routeReconciler = routeReconciler;
         _stateRepository = stateRepository;
         _routeInventoryStore = routeInventoryStore;
         _vpnEndpointProvider = vpnEndpointProvider;
         _vpnEndpointRouteManager = vpnEndpointRouteManager;
         _vpnEndpointInventoryStore =
             vpnEndpointInventoryStore;
+        _routeManager = routeManager;
+        _runtimeCycleCoordinator = runtimeCycleCoordinator;
+        _runtimeExecutor = runtimeExecutor;
+        _configurationService = configurationService;
     }
 
     public async Task<int> UpdatePrefixesAsync(
@@ -74,149 +88,131 @@ public sealed class IranDirectController
         return prefixes.Count;
     }
 
-    public async Task<ReconciliationResult> EnableAsync(
+    public async Task<RuntimeCycleExecutionResult> EnableAsync(
         CancellationToken cancellationToken = default)
     {
-        DirectGateway gateway =
-            _gatewayDetector.Detect();
+        await EnsurePrefixesAsync(cancellationToken);
 
-        IReadOnlyList<ResolvedVpnEndpoint> endpoints =
-            await _vpnEndpointProvider.GetEndpointsAsync(
+        await _configurationService.SetEnabledAsync(
+            true, cancellationToken);
+
+        RuntimeDecision decision =
+            await _runtimeCycleCoordinator.RunCycleAsync(
                 cancellationToken);
 
-        VpnEndpointProtectionResult endpointProtection =
-            await _vpnEndpointRouteManager
-                .EnsureProtectedAsync(
-                    endpoints,
-                    gateway,
-                    cancellationToken);
-
-        await SaveEndpointInventoryAsync(
-            endpoints,
-            endpointProtection,
-            gateway,
-            cancellationToken);
-
-        IReadOnlyList<string> prefixes =
-            await EnsurePrefixesAsync(
+        RuntimeExecutionResult execution =
+            await _runtimeExecutor.ExecuteAsync(
+                decision.ExecutionPlan,
                 cancellationToken);
 
-        ReconciliationResult result =
-            await _routeReconciler.EnableAsync(
-                prefixes,
-                gateway.Address,
-                gateway.InterfaceIndex,
-                RouteMetric,
-                cancellationToken);
-
-        HashSet<string> addedIdentities =
-            result.AddedRouteIdentities.ToHashSet(
-                StringComparer.OrdinalIgnoreCase);
-
-        ManagedRoute[] desiredRoutes = prefixes
-            .Select(prefix => new ManagedRoute
-            {
-                DestinationPrefix = prefix,
-                Gateway = gateway.Address,
-                InterfaceIndex = gateway.InterfaceIndex,
-                Metric = RouteMetric
-            })
-            .ToArray();
-
-        RouteInventory inventory =
-            await _routeInventoryStore.LoadAsync(
-                cancellationToken);
-
-        RouteInventoryItem[] ownedRoutes =
-            inventory.Routes
-                .Concat(
-                    desiredRoutes
-                        .Where(route =>
-                            addedIdentities.Contains(
-                                route.Identity))
-                        .Select(ToInventoryItem))
-                .GroupBy(
-                    route => route.Identity,
-                    StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .ToArray();
-
-        await _routeInventoryStore.SaveAsync(
-            inventory with
-            {
-                Routes = ownedRoutes
-            },
-            cancellationToken);
-
-        IranDirectState previousState =
-            await _stateRepository.LoadAsync(
-                cancellationToken);
-
-        await _stateRepository.SaveAsync(
-            previousState with
-            {
-                Enabled = true,
-                Gateway =
-                    gateway.Address.ToString(),
-                InterfaceIndex =
-                    gateway.InterfaceIndex,
-                InterfaceName =
-                    gateway.InterfaceName,
-                PrefixCount = prefixes.Count,
-                EnabledAt =
-                    previousState.EnabledAt
-                    ?? DateTimeOffset.UtcNow,
-                PrefixesUpdatedAt =
-                    _prefixRepository.GetLastModified(),
-                LastError = null
-            },
-            cancellationToken);
-
-        return result;
-    }
-
-    public async Task<ReconciliationResult> DisableAsync(
-        CancellationToken cancellationToken = default)
-    {
         IranDirectState state =
             await _stateRepository.LoadAsync(
                 cancellationToken);
 
-        RouteInventory inventory =
-            await _routeInventoryStore.LoadAsync(
-                cancellationToken);
-
-        ManagedRoute[] ownedRoutes =
-            ParseInventory(inventory.Routes);
-
-        ReconciliationResult result;
-
-        if (ownedRoutes.Length > 0)
+        if (execution.Status is
+                RuntimeExecutionResultStatus.Completed
+                or RuntimeExecutionResultStatus
+                    .NoExecutionRequired
+            && decision.Plan.Desired.Enabled)
         {
-            result =
-                await _routeReconciler.DisableAsync(
-                    ownedRoutes,
+            ObservedDirectGateway? gateway =
+                decision.Plan.Observed.DirectGateway;
+
+            IReadOnlyList<string> prefixes =
+                await _prefixRepository.LoadAsync(
                     cancellationToken);
 
-            await _routeInventoryStore.ClearAsync(
+            await _stateRepository.SaveAsync(
+                state with
+                {
+                    Enabled = true,
+                    Gateway = gateway?.Address
+                        ?? state.Gateway,
+                    InterfaceIndex = gateway?.InterfaceIndex
+                        ?? state.InterfaceIndex,
+                    InterfaceName = gateway?.InterfaceName
+                        ?? state.InterfaceName,
+                    PrefixCount = prefixes.Count,
+                    EnabledAt = state.EnabledAt
+                        ?? DateTimeOffset.UtcNow,
+                    PrefixesUpdatedAt =
+                        _prefixRepository.GetLastModified(),
+                    LastError = null
+                },
                 cancellationToken);
         }
         else
         {
-            result = await DisableLegacyRoutesAsync(
-                state,
+            await _stateRepository.SaveAsync(
+                state with
+                {
+                    LastError = execution.ErrorMessage
+                        ?? "Enable failed."
+                },
                 cancellationToken);
         }
 
-        await _stateRepository.SaveAsync(
-            state with
-            {
-                Enabled = false,
-                LastError = null
-            },
-            cancellationToken);
+        return new RuntimeCycleExecutionResult
+        {
+            Decision = decision,
+            Execution = execution
+        };
+    }
 
-        return result;
+    public async Task<RuntimeCycleExecutionResult> DisableAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _configurationService.SetEnabledAsync(
+            false, cancellationToken);
+
+        RuntimeDecision decision =
+            await _runtimeCycleCoordinator.RunCycleAsync(
+                cancellationToken);
+
+        RuntimeExecutionResult execution =
+            await _runtimeExecutor.ExecuteAsync(
+                decision.ExecutionPlan,
+                cancellationToken);
+
+        IranDirectState state =
+            await _stateRepository.LoadAsync(
+                cancellationToken);
+
+        if (execution.Status is
+            RuntimeExecutionResultStatus.Completed
+            or RuntimeExecutionResultStatus
+                .NoExecutionRequired)
+        {
+            await _stateRepository.SaveAsync(
+                state with
+                {
+                    Enabled = false,
+                    LastError = null
+                },
+                cancellationToken);
+
+            if (execution.MutatedInfrastructure)
+            {
+                await _routeInventoryStore.ClearAsync(
+                    cancellationToken);
+            }
+        }
+        else
+        {
+            await _stateRepository.SaveAsync(
+                state with
+                {
+                    LastError = execution.ErrorMessage
+                        ?? "Disable failed."
+                },
+                cancellationToken);
+        }
+
+        return new RuntimeCycleExecutionResult
+        {
+            Decision = decision,
+            Execution = execution
+        };
     }
 
     public async Task<IranDirectStatus> GetStatusAsync(
@@ -239,22 +235,8 @@ public sealed class IranDirectController
 
         int installed;
 
-        if (ownedRoutes.Length > 0)
-        {
-            installed =
-                await _routeReconciler
-                    .CountMatchingRoutesAsync(
-                        ownedRoutes,
-                        cancellationToken);
-        }
-        else
-        {
-            installed =
-                await CountLegacyRoutesAsync(
-                    state,
-                    prefixes,
-                    cancellationToken);
-        }
+        installed = await CountOwnedRoutesAsync(
+            ownedRoutes, cancellationToken);
 
         VpnEndpointInventory endpointInventory =
             await _vpnEndpointInventoryStore.LoadAsync(
@@ -305,154 +287,28 @@ public sealed class IranDirectController
         await EnableAsync(cancellationToken);
     }
 
-    private async Task SaveEndpointInventoryAsync(
-        IReadOnlyCollection<ResolvedVpnEndpoint> endpoints,
-        VpnEndpointProtectionResult protection,
-        DirectGateway gateway,
+    private static string ToIdentity(SystemRoute route) =>
+        $"{route.DestinationPrefix}|" +
+        $"{route.NextHop}|" +
+        $"{route.InterfaceIndex}";
+
+    private async Task<int> CountOwnedRoutesAsync(
+        ManagedRoute[] ownedRoutes,
         CancellationToken cancellationToken)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        Dictionary<string, ResolvedVpnEndpoint> endpointsByPrefix =
-            endpoints
-                .GroupBy(
-                    endpoint => $"{endpoint.Address}/32",
-                    StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.First(),
-                    StringComparer.OrdinalIgnoreCase);
-
-        VpnEndpointInventory inventory =
-            await _vpnEndpointInventoryStore.LoadAsync(
-                cancellationToken);
-
-        Dictionary<string, VpnEndpointInventoryItem> previousByIdentity =
-            inventory.Endpoints.ToDictionary(
-                endpoint => endpoint.Identity,
-                endpoint => endpoint,
-                StringComparer.OrdinalIgnoreCase);
-
-        VpnEndpointInventoryItem[] currentEndpoints =
-            protection.ProtectedRoutes
-                .Select(route =>
-                {
-                    ResolvedVpnEndpoint endpoint =
-                        endpointsByPrefix[
-                            route.DestinationPrefix];
-
-                    previousByIdentity.TryGetValue(
-                        route.Identity,
-                        out VpnEndpointInventoryItem? previous);
-
-                    bool addedByIranDirect =
-                        previous?.AddedByIranDirect == true ||
-                        protection.AddedRouteIdentities
-                            .Contains(route.Identity);
-
-                    return new VpnEndpointInventoryItem
-                    {
-                        Host = endpoint.Host,
-                        Address = endpoint.Address,
-                        Port = endpoint.Port,
-                        Protocol = endpoint.Protocol,
-                        DestinationPrefix =
-                            route.DestinationPrefix,
-                        Gateway =
-                            gateway.Address.ToString(),
-                        InterfaceIndex =
-                            gateway.InterfaceIndex,
-                        Metric = route.Metric,
-                        AddedByIranDirect =
-                            addedByIranDirect,
-                        IsCurrent = true,
-                        ProtectedAt =
-                            previous?.ProtectedAt ?? now,
-                        LastSeenAt = now
-                    };
-                })
-                .ToArray();
-
-        HashSet<string> currentIdentities =
-            currentEndpoints
-                .Select(endpoint => endpoint.Identity)
-                .ToHashSet(
-                    StringComparer.OrdinalIgnoreCase);
-
-        VpnEndpointInventoryItem[] retainedPrevious =
-            inventory.Endpoints
-                .Where(endpoint =>
-                    !currentIdentities.Contains(
-                        endpoint.Identity))
-                .Select(endpoint =>
-                    endpoint with
-                    {
-                        IsCurrent = false
-                    })
-                .ToArray();
-
-        await _vpnEndpointInventoryStore.SaveAsync(
-            inventory with
-            {
-                Endpoints = currentEndpoints
-                    .Concat(retainedPrevious)
-                    .ToArray()
-            },
-            cancellationToken);
-    }
-    private async Task<ReconciliationResult>
-        DisableLegacyRoutesAsync(
-            IranDirectState state,
-            CancellationToken cancellationToken)
-    {
-        IReadOnlyList<string> prefixes =
-            await _prefixRepository.LoadAsync(
-                cancellationToken);
-
-        if (!IPAddress.TryParse(
-                state.Gateway,
-                out IPAddress? gateway))
-        {
-            return new ReconciliationResult
-            {
-                DesiredCount = prefixes.Count
-            };
-        }
-
-        ManagedRoute[] routes = prefixes
-            .Select(prefix => new ManagedRoute
-            {
-                DestinationPrefix = prefix,
-                Gateway = gateway,
-                InterfaceIndex = state.InterfaceIndex,
-                Metric = RouteMetric
-            })
-            .ToArray();
-
-        return await _routeReconciler.DisableAsync(
-            routes,
-            cancellationToken);
-    }
-
-    private async Task<int> CountLegacyRoutesAsync(
-        IranDirectState state,
-        IReadOnlyCollection<string> prefixes,
-        CancellationToken cancellationToken)
-    {
-        if (!IPAddress.TryParse(
-                state.Gateway,
-                out IPAddress? gateway)
-            || state.InterfaceIndex == 0)
-        {
+        if (ownedRoutes.Length == 0)
             return 0;
-        }
 
-        return await _routeReconciler
-            .CountMatchingRoutesAsync(
-                prefixes,
-                gateway,
-                state.InterfaceIndex,
+        IReadOnlyList<SystemRoute> actual =
+            await _routeManager.GetIpv4RoutesAsync(
                 cancellationToken);
+
+        HashSet<string> actualIdentities = actual
+            .Select(ToIdentity)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return ownedRoutes.Count(route =>
+            actualIdentities.Contains(route.Identity));
     }
 
     private static RouteInventoryItem ToInventoryItem(

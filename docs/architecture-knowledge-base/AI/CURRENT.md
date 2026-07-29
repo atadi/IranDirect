@@ -90,6 +90,8 @@ ObservedRuntime  DesiredRuntime
 - execution pipeline (RuntimeExecutor with sequential stop-on-failure step processing)
 - Windows route execution handler (mutate → verify → persist for add/remove prefix and endpoint route steps)
 - inventory persistence interfaces (IRouteInventoryPersistence, IEndpointInventoryPersistence)
+- production enable/disable via RuntimeDecision + RuntimeExecutor pipeline
+- controller-orchestrated execution cycle (IranDirectController delegates to coordinator and executor)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -97,11 +99,11 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The controller still owns execution decisions that should move into dedicated runtime components. The executor is not yet wired into `RuntimeCycleCoordinator`. No competing cycle-output contracts remain — `RuntimeDecision` is the sole authoritative pre-execution artifact.
+The legacy `RouteReconciler` path is still registered and testable but no longer called in production. The `IranDirectWorker` repair loop still calls `EnableAsync` (now via the pipeline). Periodic execution (full cycle + execution on a timer) is not yet active — enable/disable is driven only by IPC commands. The `RouteInventoryStore.ClearAsync` call during disable duplicates pipeline inventory cleanup.
 
 ## Immediate Next Milestone
 
-Wire `RuntimeExecutor` into `RuntimeCycleCoordinator` (M5.8.1).
+Controlled one-prefix manual verification on real Windows, then remove dead DI registrations (`RouteReconciler`) and unused private methods.
 
 ## Non-Negotiable Invariants
 

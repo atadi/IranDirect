@@ -144,3 +144,29 @@ Windows Networking / Inventory
 ```
 
 Result: the first concrete execution pipeline. `RuntimeExecutor` processes a `RuntimeExecutionPlan` one step at a time, stopping on the first failure. `WindowsRuntimeExecutionStepHandler` performs each platform operation (add/remove prefix routes, add/remove endpoint routes), verifies the result via `IRouteManager`, and persists/removes inventory only after successful verification. Non-owned routes are never removed. `OperationCanceledException` propagates before any success; partial completion is captured as `RuntimeExecutionStatus.PartiallyCompleted`. Inventory persistence follows the existing `RouteInventoryStore` / `VpnEndpointInventoryStore` conventions through minimal extracted interfaces.
+
+## Phase 10.1 — Controller Integration
+
+```text
+IPC Enable/Disable
+        |
+        v
+IranDirectController.EnableAsync / DisableAsync
+        |
+        v
+DesiredConfigurationService.SetDesiredEnabledAsync(enabled)
+        |
+        v
+RuntimeCycleCoordinator.RunCycleAsync()
+        |
+        v
+RuntimeDecision  ←  RuntimeDecisionBuilder produces
+        |
+        v
+RuntimeExecutor.ExecuteAsync(plan)
+        |
+        v
+State update on Completed/NoExecutionRequired
+```
+
+Result: `IranDirectController.EnableAsync` and `DisableAsync` are replaced with a single consistent pipeline: set desired enabled state → run full observation→plan→reconcile→decision cycle → execute plan → update service state on success. `ServiceResponse` carries the `RuntimeDecision` and `RuntimeExecutionResult` for IPC transparency. The legacy `RouteReconciler` path is no longer called. `RuntimeCycleExecutionResult` bundles the decision and execution result for controller-orchestration use. 15 integration tests cover all execution result statuses, state update policy, the desired-enabled guard, plan dispatch, inventory clearing, and cancellation propagation.
