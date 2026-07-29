@@ -251,3 +251,62 @@ Any orchestration that composes already-validated domain artifacts should:
 - Phase 7, Phase 8 in project evolution
 - Thin Orchestrator pattern
 - Stable Contract pattern
+
+---
+
+## Lesson 019 — Remove Competing Sources of Truth
+
+When a richer validated lifecycle artifact supersedes an earlier intermediate result, migrate the orchestration boundary to the new contract and remove the old contract rather than maintaining competing sources of truth.
+
+### Context
+
+IranDirect had two types representing the output of a read-only runtime cycle: `RuntimeCycleResult` (original) and `RuntimeDecision` (new, richer). Both existed in committed code. `RuntimeCycleCoordinator` returned `RuntimeCycleResult` while `RuntimeDecisionBuilder` produced `RuntimeDecision`.
+
+The coordinator's internal flow matched the builder's flow identically — it called the same plan coordinator and reconciler, but stopped at `RuntimeCycleResult` instead of continuing through execution planning and validation into `RuntimeDecision`. This meant:
+
+- Two types answering "what happened in the last cycle"
+- No validation of the pre-execution contract in the coordinator's output
+- No execution planning or traceability guarantee
+- Future coordinator consumers would need to reach into the builder directly or trust incomplete state
+
+### Insight
+
+A competing source of truth creates ambiguity about which contract consumers should depend on. The older contract loses value as the richer one proves stable. Migration is the simplifying direction — not coexistence or adapters.
+
+The migration itself is small when preceded by good boundaries:
+
+1. `RuntimeDecisionBuilder` existed as the authoritative lifecycle composition.
+2. `RuntimeCycleCoordinator` needed only to change its constructor dependency and return type.
+3. `RuntimeCycleResult` had zero production consumers beyond the coordinator.
+4. No adapter was needed — no external consumer depended on `RuntimeCycleResult`.
+
+### IranDirect Example
+
+- `RuntimeCycleResult` deleted (3 files changed: coordinator, tests, definition).
+- `RuntimeCycleCoordinator` now delegates entirely to `IRuntimeDecisionBuilder`.
+- No compatibility shim. No deprecation period. No dead code.
+- All tests pass (171).
+
+### Broader Application
+
+When a new contract fully covers the responsibilities of an older contract:
+
+1. Verify the old contract has no external consumers beyond the migration boundary.
+2. Migrate the boundary.
+3. Remove the old contract.
+4. Do not add adapters that convert old → new unless a real backward-compatibility contract exists (IPC wire format, public API, plugin contract).
+
+A deprecation period is valuable when the old type is widely consumed or serialized. When it is contained within a single component boundary, deletion is cleaner.
+
+### Tradeoffs
+
+- Requires confidence that no consumer depends on the old type.
+- If the old type is embedded in a serialization contract, removal requires version negotiation.
+- Deleting a type is psychologically harder than marking it obsolete — but dead code has a maintenance cost.
+- The migration window must be narrow; competing truths that persist across multiple milestones create drift.
+
+### Related ADRs and Patterns
+
+- Phase 9 in project evolution
+- Thin Orchestrator pattern
+- Stable Contract pattern

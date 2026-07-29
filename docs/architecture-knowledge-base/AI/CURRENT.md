@@ -50,14 +50,20 @@ ObservedRuntime  DesiredRuntime
               |
               v
     RuntimeExecutionPlan
-               |
-               v
-      RuntimeDecision        (domain contract)
-               |
-               v
-     RuntimeExecutor         (future)
-               |
-               v
+              |
+              v
+ RuntimeDecisionBuilder    (composes lifecycle artifacts)
+              |
+              v
+      RuntimeDecision       (domain contract)
+              |
+              v
+ RuntimeCycleCoordinator   (use-case entry point)
+              |
+              v
+     RuntimeExecutor       (future)
+              |
+              v
   Windows Networking Platform
 ```
 
@@ -80,6 +86,7 @@ ObservedRuntime  DesiredRuntime
 - execution planner (pure RuntimeChangeSet → RuntimeExecutionPlan translation)
 - pre-execution decision contract (RuntimeDecision with validated consistency)
 - pre-execution decision builder (RuntimeDecisionBuilder composing plan, reconciliation, execution plan into validated RuntimeDecision)
+- coordinator migration to RuntimeDecision (RuntimeCycleCoordinator delegates to IRuntimeDecisionBuilder, returns RuntimeDecision; RuntimeCycleResult removed)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -87,11 +94,11 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The controller still owns execution decisions that should move into dedicated runtime components. `RuntimeCycleResult` and `RuntimeDecision` coexist — `RuntimeDecisionBuilder` is the authoritative pre-execution orchestrator but `RuntimeCycleCoordinator` still returns `RuntimeCycleResult` directly. A dedicated migration slice should replace `RuntimeCycleCoordinator`'s internal flow with `RuntimeDecisionBuilder` and change the return type to `RuntimeDecision`.
+The controller still owns execution decisions that should move into dedicated runtime components. `RuntimeExecutor` is not yet implemented. No competing cycle-output contracts remain — `RuntimeDecision` is the sole authoritative pre-execution artifact.
 
 ## Immediate Next Milestone
 
-Migrate `RuntimeCycleCoordinator` to use `RuntimeDecisionBuilder` internally and return `RuntimeDecision` instead of `RuntimeCycleResult`, then remove `RuntimeCycleResult`.
+Implement `RuntimeExecutor` for platform operations.
 
 ## Non-Negotiable Invariants
 

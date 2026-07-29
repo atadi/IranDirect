@@ -1,37 +1,21 @@
-using IranDirect.Core.Runtime.Reconciliation;
-
 namespace IranDirect.Core.Runtime;
 
 public sealed class RuntimeCycleCoordinator
 {
-    private readonly IRuntimePlanCoordinator _planCoordinator;
-    private readonly IRuntimeReconciler _reconciler;
+    private readonly IRuntimeDecisionBuilder _decisionBuilder;
 
     public RuntimeCycleCoordinator(
-        IRuntimePlanCoordinator planCoordinator,
-        IRuntimeReconciler reconciler)
+        IRuntimeDecisionBuilder decisionBuilder)
     {
-        _planCoordinator = planCoordinator;
-        _reconciler = reconciler;
+        ArgumentNullException.ThrowIfNull(decisionBuilder);
+
+        _decisionBuilder = decisionBuilder;
     }
 
-    public async Task<RuntimeCycleResult> RunCycleAsync(
+    public Task<RuntimeDecision> RunCycleAsync(
         CancellationToken cancellationToken = default)
     {
-        RuntimePlanSnapshot plan =
-            await _planCoordinator.BuildPlanAsync(
-                cancellationToken);
-
-        RuntimeReconciliationResult reconciliation =
-            await _reconciler.ReconcileAsync(
-                plan,
-                cancellationToken);
-
-        return new RuntimeCycleResult
-        {
-            Plan = plan,
-            Reconciliation = reconciliation,
-            CompletedAt = DateTimeOffset.UtcNow
-        };
+        return _decisionBuilder.BuildAsync(
+            cancellationToken);
     }
 }

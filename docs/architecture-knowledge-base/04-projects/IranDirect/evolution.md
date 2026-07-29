@@ -113,3 +113,17 @@ RuntimeDecision.Create()
 ```
 
 Result: a dedicated read-only orchestrator composes the lifecycle into a validated pre-execution decision. The builder owns ordering and reference preservation; the domain contract owns validation. The builder is clock-aware (injected `TimeProvider`) but the domain contract remains clock-independent.
+
+## Phase 9 — Coordinator Migration
+
+```text
+RuntimeDecisionBuilder
+       |
+       v
+RuntimeDecision
+       |
+       v
+RuntimeCycleCoordinator   (thin use-case façade)
+```
+
+Result: `RuntimeCycleCoordinator` no longer calls `IRuntimePlanCoordinator` or `IRuntimeReconciler` directly. It delegates entirely to `IRuntimeDecisionBuilder`, returning `RuntimeDecision`. `RuntimeCycleResult` is removed — no production consumers remained, and `RuntimeDecision` is the single authoritative pre-execution artifact. The coordinator proves its value as stable use-case vocabulary for "run one runtime cycle" — not as lifecycle logic.

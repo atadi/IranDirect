@@ -59,3 +59,7 @@ The complete validated pre-execution contract containing the plan snapshot, reco
 ## Runtime Decision Builder
 
 A read-only orchestrator that composes the existing lifecycle into a validated RuntimeDecision. Sequences plan building, reconciliation, execution planning, and timestamp assignment. Delegates all domain validation to RuntimeDecision.Create. Uses injected TimeProvider for deterministic timestamps.
+
+## Runtime Cycle Result (removed)
+
+An earlier intermediate container for plan snapshot and reconciliation result. Superseded by RuntimeDecision, which additionally includes execution planning, validated consistency, and traceability. Removed after RuntimeCycleCoordinator migrated to IRuntimeDecisionBuilder. No adapter was needed — no external consumer depended on the type.

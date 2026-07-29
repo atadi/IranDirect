@@ -66,9 +66,16 @@
 - 24 tests verify exact reference preservation, token forwarding, cancellation propagation, planner exception propagation, all status consistency paths, time source injection, and constructor validation.
 - DI registrations: RuntimeExecutionPlanner singleton, TimeProvider.System singleton, IRuntimeDecisionBuilder→RuntimeDecisionBuilder singleton.
 
+## Coordinator Migration
+
+- RuntimeCycleCoordinator migrated to delegate to IRuntimeDecisionBuilder — no longer calls IRuntimePlanCoordinator, IRuntimeReconciler, or reads the clock directly.
+- RunCycleAsync now returns RuntimeDecision instead of RuntimeCycleResult.
+- RuntimeCycleResult deleted — zero production consumers beyond the coordinator itself.
+- Coordinator tests rewritten: 10 focused tests prove null rejection, delegation, token forwarding, reference preservation, cancellation/exception propagation, and absence of lifecycle logic.
+- No interface added to RuntimeCycleCoordinator — no consumer yet exists, and sealing the class allows future interface extraction if a use-case boundary proves valuable.
+
 ## Next
 
-- Migrate RuntimeCycleCoordinator to use RuntimeDecisionBuilder and return RuntimeDecision, replacing RuntimeCycleResult as the authoritative pre-execution artifact.
 - Implement RuntimeExecutor for platform operations.
 - Reduce the controller to orchestration.
 - Move route and inventory execution into focused executors.
