@@ -49,3 +49,5 @@ AI-EVIDENCE/
 
 # Generated repository and local-state bundle for remote AI sessions.
 AI-CONTEXT-BUNDLE.zip
+# Generated Graphify analysis output.
+graphify-out/
