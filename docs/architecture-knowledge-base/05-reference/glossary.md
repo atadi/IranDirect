@@ -31,3 +31,23 @@ A condition that prevents safe reconciliation.
 ## Orchestrator
 
 A component that sequences collaborators without owning their business decisions.
+
+## Execution Plan
+
+An ordered, immutable sequence of execution steps derived from a reconciled change set.
+
+## Execution Step
+
+A single unit of platform work with a defined kind (add/remove endpoint/prefix), route fields, and verification requirement.
+
+## Execution Result
+
+The outcome of executing an execution plan, including plan-level status and per-step results.
+
+## Executor
+
+A component that performs platform operations defined by execution steps (future).
+
+## Verifier
+
+A component that confirms platform state matches expected post-execution state (future).

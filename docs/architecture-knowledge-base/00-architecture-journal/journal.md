@@ -130,3 +130,46 @@ A controller should coordinate collaborators rather than contain business rules 
 ## Lesson 015 — Stable Contracts, Replaceable Implementations
 
 Contracts such as `ObservedRuntime`, `DesiredRuntime`, and `RuntimePlanSnapshot` should remain stable while platform-specific implementations evolve.
+
+---
+
+## Lesson 016 — Decide, Plan, Execute, Verify, Record
+
+Deciding what must change, deciding how to change it, performing the change, verifying it, and recording ownership are separate lifecycle stages.
+
+Each stage has its own vocabulary, invariants, and failure modes.
+
+### Context
+
+IranDirect's runtime reconciliation originally produced a `RuntimeChangeSet` that combined what should change and assumed execution would follow immediately. As the system grew, the need to preview changes, order them safely, verify postconditions, and record ownership became distinct concerns.
+
+### Insight
+
+A single "reconcile and execute" step conflates five lifecycle stages:
+
+1. **Decide** what infrastructure differs from desired state (reconciliation).
+2. **Plan** the order and grouping of platform operations (execution planning).
+3. **Execute** platform operations (route add/delete).
+4. **Verify** post-conditions (route exists or is absent).
+5. **Record** ownership in durable inventory.
+
+### IranDirect Example
+
+- `RuntimeChangeSetPlanner` decides what changes are needed.
+- `RuntimeExecutionPlan` (domain model) defines the ordered steps.
+- `RuntimeExecutor` (future) will execute them.
+- `RuntimeVerifier` (future) will confirm post-conditions.
+- `RouteInventoryStore` records ownership (existing).
+
+### Broader Application
+
+Any system that reconciles state toward a goal benefits from separating change detection, change ordering, change execution, and change verification. Conflating them makes previewing changes, safe partial execution, and rollback harder to implement.
+
+### Tradeoffs
+
+More stages mean more vocabulary and more types. The benefit is the ability to preview, order, verify, and partially recover without coupling stages that evolve at different speeds.
+
+### Related ADRs and Patterns
+
+- Phase 6 in project evolution
+- Execution Plan pattern

@@ -66,3 +66,17 @@ Observe -> Plan -> Reconcile
 ```
 
 Result: commands become intent, and infrastructure is continuously reconciled.
+
+## Phase 6 — Execution Domain
+
+```text
+Reconciliation
+     |
+     v
+Execution Plan (ordered steps)
+     |
+     v
+Executor -> Verifier -> Inventory
+```
+
+Result: deciding what must change, deciding how to change it, performing the change, verifying it, and recording ownership become separate lifecycle stages.

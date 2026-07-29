@@ -16,3 +16,7 @@ Patterns describe reusable solutions and tradeoffs.
 - Read-Only Diagnostics
 - Fail-Closed Safety
 - Idempotent Reconciliation
+- Execution Plan
+- Per-Step Outcome
+- Safety-First Ordering
+- Decouple Change from Execution

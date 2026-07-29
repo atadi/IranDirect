@@ -43,6 +43,18 @@ ObservedRuntime  DesiredRuntime
      RuntimeReconciler
               |
               v
+   RuntimeChangeSet
+              |
+              v
+ RuntimeExecutionPlanner   (model defined; planner deferred)
+              |
+              v
+   RuntimeExecutionPlan
+              |
+              v
+    RuntimeExecutor        (future)
+              |
+              v
  Windows Networking Platform
 ```
 
@@ -60,6 +72,8 @@ ObservedRuntime  DesiredRuntime
 - runtime planning
 - runtime coordination
 - read-only runtime plan exposure
+- read-only runtime cycle coordination
+- execution domain model (step, plan, result)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -67,20 +81,11 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The controller still owns reconciliation and execution decisions that should move into a dedicated runtime reconciler.
+The controller still owns reconciliation and execution decisions that should move into dedicated runtime components. Execution planning (converting `RuntimeChangeSet` to ordered `RuntimeExecutionPlan`) is defined as a domain model but not yet implemented.
 
 ## Immediate Next Milestone
 
-Introduce `RuntimeReconciler` as a stable execution contract.
-
-Initial goals:
-
-1. consume `RuntimePlanSnapshot`;
-2. reject blocked plans without mutation;
-3. compute minimal changes;
-4. delegate platform operations through existing route and inventory components;
-5. preserve all current behavior;
-6. keep the controller thin.
+Implement `RuntimeExecutionPlanner` to convert a `RuntimeChangeSet` into an ordered `RuntimeExecutionPlan` with deterministic step ordering, verification representation, and inventory-consequence metadata.
 
 ## Non-Negotiable Invariants
 

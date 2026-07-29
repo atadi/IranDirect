@@ -31,8 +31,16 @@
 - `RuntimeCoordinator` composes configuration, observation, and planning.
 - Runtime plans become visible through CLI before execution.
 
+## Execution Domain
+
+- Runtime execution domain model defined (step kinds, plan, result statuses).
+- RuntimeChangeSet becomes the input for execution planning rather than direct execution.
+- Execution ordering policy established: AddEndpointRoute → RemovePrefixRoute → AddPrefixRoute → RemoveEndpointRoute.
+- Safety invariant: establish new endpoint protection first; remove obsolete prefix routes before adding replacements; keep endpoint protection until all prefix work is complete; remove obsolete endpoint protection last.
+
 ## Next
 
-- Introduce runtime reconciliation.
+- Implement RuntimeExecutionPlanner to convert RuntimeChangeSet to ordered RuntimeExecutionPlan.
+- Implement RuntimeExecutor for platform operations.
 - Reduce the controller to orchestration.
-- Move route and inventory execution into focused reconcilers.
+- Move route and inventory execution into focused executors.
