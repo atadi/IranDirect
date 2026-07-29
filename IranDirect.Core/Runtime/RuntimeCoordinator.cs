@@ -2,7 +2,8 @@ using IranDirect.Core.Configuration;
 
 namespace IranDirect.Core.Runtime;
 
-public sealed class RuntimeCoordinator
+public sealed class RuntimeCoordinator :
+    IRuntimePlanCoordinator
 {
     private readonly DesiredConfigurationService
         _configurationService;

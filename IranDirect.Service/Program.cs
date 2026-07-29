@@ -131,6 +131,8 @@ builder.Services.AddSingleton<IRuntimeObservationSource>(
 builder.Services.AddSingleton<RuntimeObserver>();
 builder.Services.AddSingleton<RuntimePlanner>();
 builder.Services.AddSingleton<RuntimeCoordinator>();
+builder.Services.AddSingleton<IRuntimePlanCoordinator>(
+    sp => sp.GetRequiredService<RuntimeCoordinator>());
 builder.Services.AddSingleton<
     IRuntimeRouteOwnershipSource,
     InventoryRouteOwnershipSource>();
@@ -139,6 +141,7 @@ builder.Services.AddSingleton<RuntimeChangeSetPlanner>();
 builder.Services.AddSingleton<
     IRuntimeReconciler,
     RuntimeReconciler>();
+builder.Services.AddSingleton<RuntimeCycleCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
