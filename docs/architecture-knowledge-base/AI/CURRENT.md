@@ -100,6 +100,11 @@ ObservedRuntime  DesiredRuntime
 - structured per-cycle logging (trigger, status, steps, duration)
 - failure isolation (failed cycles don't terminate the service)
 - LastError management (cleared on success, preserved on failure)
+- orphan compensation (best-effort route removal when inventory persistence fails after successful route creation)
+- operation status (RuntimeOperationStatus: in-memory transient state tracking Enabling/Disabling/Repairing/Idle/Failed)
+- progress propagation (IProgress<RuntimeExecutionProgress> from RuntimeExecutor: per-step updates with total/processed/succeeded/failed/cancelled/skipped)
+- Desired/Applied distinction in CLI status output
+- performance instrumentation (Stopwatch-based aggregate metrics logged per execution)
 - automated tests
 - Architecture Knowledge Base
 - deterministic AI bootstrap
@@ -107,17 +112,19 @@ ObservedRuntime  DesiredRuntime
 
 ## Current Architectural Debt
 
-The legacy `RouteReconciler` class and its DI registration are removed (zero production consumers). The `RouteInventoryStore.ClearAsync` call during disable duplicates pipeline inventory cleanup. The `OpenVPN` endpoint protection path has not been validated with ZoogVPN active.
+The legacy `RouteReconciler` class and its DI registration are removed (zero production consumers). The `RouteInventoryStore.ClearAsync` call during disable duplicates pipeline inventory cleanup. The `OpenVPN` endpoint protection path has not been validated with ZoogVPN active. Inventory batching (loading once per group, persisting once per group) is a known optimization deferred from Phase 12 — profiling on the target machine is needed to confirm the dominant cost before applying.
 
 ## Immediate Next Milestone
 
-Complete one-prefix manual verification on real Windows to confirm:
+Complete full-prefix manual verification on real Windows to confirm:
 - startup cycle when enabled
 - periodic repair restores deleted routes
 - stale InterfaceIndex is corrected
 - restart recovery is idempotent
 - disable removes owned routes
-- bounded parallel prefix execution converges correctly with 1,944 prefixes
+- bounded parallel prefix execution converges correctly with 1,944 routes
+- operation status/progress visibility during long cycles
+- performance metrics identify dominant cost
 Then tag the release candidate.
 
 ## Non-Negotiable Invariants

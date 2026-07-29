@@ -1,8 +1,14 @@
 namespace IranDirect.Core;
 
+using IranDirect.Core.Runtime.Execution;
+
 public sealed record IranDirectStatus
 {
     public bool Enabled { get; init; }
+
+    public bool? DesiredEnabled { get; init; }
+
+    public RuntimeOperationStatus? Operation { get; init; }
 
     public string? Gateway { get; init; }
 

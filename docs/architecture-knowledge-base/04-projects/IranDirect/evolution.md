@@ -237,3 +237,42 @@ Result: `RuntimeExecutor` processes execution plan steps in four strict groups w
 `WindowsRuntimeExecutionStepHandler` removes prefix routes with stale-ownership convergence: if a route is already absent from the platform but a stale owned entry remains in inventory, the entry is removed and the step succeeds. If the route is absent with no inventory entry, the step succeeds as a no-op. Non-owned routes are never removed. The same stale-owned convergence applies to endpoint route removal, preserving `AddedByIranDirect == false` entries.
 
 19 new tests cover: bounded prefix concurrency, sequential endpoint ordering, group ordering, plan-order result preservation, failure/cancellation scheduling, stale inventory convergence for both prefix and endpoint routes, duplicate identity deduplication, unrelated entry preservation, and a performance measurement test. 242 total, 0 failing.
+
+## Phase 12 — Operation Status and Progress
+
+```text
+RuntimeCycleExecutionResult
+        |
+        v
+RuntimeOperationStatus  (in-memory singleton)
+        |
+   +----+----+
+   |         |
+   v         v
+State/CLI   IPC/Status
+```
+
+Result: long enable/disable/repair cycles now expose an explicit temporary operation state distinct from the persisted applied state. `RuntimeOperationStatus` (Idle/Enabling/Disabling/Repairing/Failed) is updated before execution begins (`Begin`), as steps complete (via `IProgress<RuntimeExecutionProgress>`), and after execution finishes (`Complete`/`Fail`). The status is in-memory only — never persisted.
+
+`RuntimeExecutor` now accepts an optional `IProgress<RuntimeExecutionProgress>` parameter and reports per-step updates including total, processed, succeeded, failed, cancelled, and skipped counts. Progress reporting is thread-safe under bounded parallel prefix execution via locks on the progress object.
+
+`IranDirectController` manages the operation lifecycle:
+- `EnableAsync` → `Begin(Enabling)` → `SetPlannedSteps` → execute → `Complete`
+- `DisableAsync` → `Begin(Disabling)` → execute → `Complete`
+- `RunCycleAsync` (service cycles) → `Begin(Repairing)` → execute → `Complete`
+- Cancellation or exception → `Fail(error)`
+
+`IranDirectStatus` carries `DesiredEnabled` (from `DesiredConfigurationService`) and `Operation` (the current `RuntimeOperationStatus` snapshot). The CLI `status` command displays:
+
+```
+Desired: Enabled
+Applied: Disabled
+Operation: Enabling
+Progress: 812 / 1944
+```
+
+State.Enabled is only updated to `true` after a successful `Completed` or `NoExecutionRequired` execution. Applied state remains unchanged during an incomplete cycle — the operation status is the only indicator of in-flight work.
+
+The existing `RuntimeCycleExecutionResult`, `RuntimeDecisionBuilder`, reconciliation, execution planning, route ownership, VPN safety, worker scheduling, and service lifecycle are unchanged.
+
+8 new unit tests cover operation status lifecycle (Begin, Reset, Report, Complete, Fail). 2 new executor tests verify progress reporting for success and failure scenarios. 7 new controller tests verify operation state transitions during enable/disable/repair and status exposure. 266 total, 0 failing.

@@ -522,6 +522,116 @@ public sealed class IranDirectControllerTests
         Assert.True(state.Enabled);
     }
 
+    [Fact]
+    public async Task Enable_BeginsWithOperationEnabling()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+        ctx.DesiredEnabled = true;
+
+        await ctx.Controller.EnableAsync();
+
+        RuntimeOperationStatus? op = ctx.OperationStatus;
+        Assert.Equal(OperationState.Idle, op.State);
+    }
+
+    [Fact]
+    public async Task Enable_OperationReportsProgress()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+        ctx.DesiredEnabled = true;
+
+        await ctx.Controller.EnableAsync();
+
+        Assert.Equal(1, ctx.OperationStatus.SucceededSteps);
+    }
+
+    [Fact]
+    public async Task Disable_BeginsWithOperationDisabling()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+
+        await ctx.Controller.DisableAsync();
+
+        Assert.Equal(OperationState.Idle, ctx.OperationStatus.State);
+        Assert.Equal(1, ctx.OperationStatus.SucceededSteps);
+    }
+
+    [Fact]
+    public async Task Enable_FailedExecution_SetsOperationFailed()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult = RuntimeExecutionResult.Failed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Status = RuntimeExecutionStepStatus.Failed,
+                ErrorMessage = "test failure"
+            }
+        ], "test failure");
+        ctx.DesiredEnabled = true;
+
+        await ctx.Controller.EnableAsync();
+
+        Assert.Equal(OperationState.Failed, ctx.OperationStatus.State);
+        Assert.NotNull(ctx.OperationStatus.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task RunCycle_SetsOperationRepairing()
+    {
+        await using TestContext ctx = new();
+        ctx.ExecutorResult = RuntimeExecutionResult.NoExecutionRequired();
+        ctx.DesiredEnabled = true;
+
+        await ctx.Controller.RunCycleAsync();
+
+        Assert.Equal(OperationState.Idle, ctx.OperationStatus.State);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_IncludesDesiredEnabled()
+    {
+        await using TestContext ctx = new();
+        ctx.DesiredEnabled = true;
+
+        IranDirectStatus status = await ctx.Controller.GetStatusAsync();
+
+        Assert.True(status.DesiredEnabled);
+        Assert.NotNull(status.Operation);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_IncludesOperationStatus()
+    {
+        await using TestContext ctx = new();
+
+        IranDirectStatus status = await ctx.Controller.GetStatusAsync();
+
+        Assert.NotNull(status.Operation);
+        Assert.Equal(OperationState.Idle, status.Operation.State);
+    }
+
     internal sealed class FakeDecisionBuilder : IRuntimeDecisionBuilder
     {
         public RuntimeDecision? Decision { get; set; }
@@ -543,6 +653,7 @@ public sealed class IranDirectControllerTests
 
         public Task<RuntimeExecutionResult> ExecuteAsync(
             RuntimeExecutionPlan plan,
+            IProgress<RuntimeExecutionProgress>? progress = null,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -595,12 +706,14 @@ public sealed class IranDirectControllerTests
     private sealed class TestContext : IAsyncDisposable
     {
         private readonly string _tempDir;
+        private readonly DesiredConfigurationService _configurationService;
 
         public StateRepository StateRepository { get; }
         public RouteInventoryStore RouteInventoryStore { get; }
         public IranDirectController Controller { get; }
         public FakeExecutor FakeExecutor { get; }
         public FakeDecisionBuilder FakeDecisionBuilder { get; }
+        public RuntimeOperationStatus OperationStatus { get; }
 
         public RuntimeExecutionResult ExecutorResult
         {
@@ -620,6 +733,8 @@ public sealed class IranDirectControllerTests
                 RuntimeDecision decision = RuntimeDecision.Create(
                     plan, reconciliation, executionPlan, DateTimeOffset.UtcNow);
                 FakeDecisionBuilder.Decision = decision;
+                _ = _configurationService.SetEnabledAsync(value, CancellationToken.None)
+                    .GetAwaiter().GetResult();
             }
         }
 
@@ -671,11 +786,12 @@ public sealed class IranDirectControllerTests
             DesiredConfigurationStore configStore = new(
                 Path.Combine(_tempDir, "config.json"),
                 new DesiredConfigurationValidator());
-            DesiredConfigurationService configService = new(configStore);
+            _configurationService = new DesiredConfigurationService(configStore);
 
             FakeExecutor = new FakeExecutor();
             FakeDecisionBuilder = new FakeDecisionBuilder();
             RuntimeCycleCoordinator coordinator = new(FakeDecisionBuilder);
+            OperationStatus = new RuntimeOperationStatus();
 
             FakeRouteManager routeManager = new();
             GatewayDetector gatewayDetector = new();
@@ -697,7 +813,8 @@ public sealed class IranDirectControllerTests
                 endpointInventory,
                 coordinator,
                 FakeExecutor,
-                configService);
+                _configurationService,
+                OperationStatus);
 
             // Set a default decision so first call doesn't NPE
             DesiredEnabled = false;

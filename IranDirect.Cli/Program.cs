@@ -1,5 +1,6 @@
 using IranDirect.Core;
 using IranDirect.Core.Ipc;
+using IranDirect.Core.Runtime.Execution;
 
 string commandText = args.Length == 0
     ? "status"
@@ -143,7 +144,35 @@ static void WriteStatus(
     IranDirectStatus status)
 {
     Console.WriteLine("=== Iran Direct status ===");
-    Console.WriteLine($"Enabled: {status.Enabled}");
+
+    string desired = status.DesiredEnabled.HasValue
+        ? (status.DesiredEnabled.Value ? "Enabled" : "Disabled")
+        : "Unknown";
+    string applied = status.Enabled ? "Enabled" : "Disabled";
+    Console.WriteLine($"Desired: {desired}");
+    Console.WriteLine($"Applied: {applied}");
+
+    if (status.Operation is not null && status.Operation.State != OperationState.Idle)
+    {
+        string opState = status.Operation.State switch
+        {
+            OperationState.Enabling => "Enabling",
+            OperationState.Disabling => "Disabling",
+            OperationState.Repairing => "Repairing",
+            OperationState.Failed => "Failed",
+            _ => "Idle"
+        };
+        Console.WriteLine($"Operation: {opState}");
+
+        int completed = status.Operation.CompletedSteps;
+        int planned = status.Operation.PlannedSteps;
+        if (planned > 0)
+            Console.WriteLine($"Progress: {completed} / {planned}");
+
+        if (!string.IsNullOrWhiteSpace(status.Operation.ErrorMessage))
+            Console.WriteLine($"Operation error: {status.Operation.ErrorMessage}");
+    }
+
     Console.WriteLine(
         $"Gateway: {status.Gateway ?? "Unknown"}");
     Console.WriteLine(

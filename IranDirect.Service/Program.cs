@@ -148,6 +148,7 @@ builder.Services.AddSingleton<
     WindowsRuntimeExecutionStepHandler>();
 builder.Services.AddSingleton<
     IRuntimeExecutor, RuntimeExecutor>();
+builder.Services.AddSingleton<RuntimeOperationStatus>();
 builder.Services.AddSingleton<RuntimeCycleCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();

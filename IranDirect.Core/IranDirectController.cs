@@ -30,6 +30,7 @@ public sealed class IranDirectController
     private readonly IRuntimeExecutor _runtimeExecutor;
     private readonly DesiredConfigurationService
         _configurationService;
+    private readonly RuntimeOperationStatus _operationStatus;
 
     public IranDirectController(
         IranPrefixProvider prefixProvider,
@@ -43,7 +44,8 @@ public sealed class IranDirectController
         VpnEndpointInventoryStore vpnEndpointInventoryStore,
         RuntimeCycleCoordinator runtimeCycleCoordinator,
         IRuntimeExecutor runtimeExecutor,
-        DesiredConfigurationService configurationService)
+        DesiredConfigurationService configurationService,
+        RuntimeOperationStatus operationStatus)
     {
         _prefixProvider = prefixProvider;
         _prefixRepository = prefixRepository;
@@ -58,6 +60,7 @@ public sealed class IranDirectController
         _runtimeCycleCoordinator = runtimeCycleCoordinator;
         _runtimeExecutor = runtimeExecutor;
         _configurationService = configurationService;
+        _operationStatus = operationStatus;
     }
 
     public async Task<int> UpdatePrefixesAsync(
@@ -91,43 +94,72 @@ public sealed class IranDirectController
     public async Task<RuntimeCycleExecutionResult> EnableAsync(
         CancellationToken cancellationToken = default)
     {
+        _operationStatus.Begin(OperationState.Enabling, "user");
+
         await EnsurePrefixesAsync(cancellationToken);
 
         await _configurationService.SetEnabledAsync(
             true, cancellationToken);
 
-        return await RunCycleAsync(cancellationToken);
+        return await RunCycleCoreAsync(cancellationToken);
     }
 
     public async Task<RuntimeCycleExecutionResult> DisableAsync(
         CancellationToken cancellationToken = default)
     {
+        _operationStatus.Begin(OperationState.Disabling, "user");
+
         await _configurationService.SetEnabledAsync(
             false, cancellationToken);
 
-        return await RunCycleAsync(cancellationToken);
+        return await RunCycleCoreAsync(cancellationToken);
     }
 
     public async Task<RuntimeCycleExecutionResult> RunCycleAsync(
         CancellationToken cancellationToken = default)
     {
-        RuntimeDecision decision =
-            await _runtimeCycleCoordinator.RunCycleAsync(
-                cancellationToken);
+        _operationStatus.Begin(OperationState.Repairing, "cycle");
+        return await RunCycleCoreAsync(cancellationToken);
+    }
 
-        RuntimeExecutionResult execution =
-            await _runtimeExecutor.ExecuteAsync(
-                decision.ExecutionPlan,
-                cancellationToken);
-
-        await UpdateStateAsync(
-            decision, execution, cancellationToken);
-
-        return new RuntimeCycleExecutionResult
+    private async Task<RuntimeCycleExecutionResult> RunCycleCoreAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
         {
-            Decision = decision,
-            Execution = execution
-        };
+            RuntimeDecision decision =
+                await _runtimeCycleCoordinator.RunCycleAsync(
+                    cancellationToken);
+
+            _operationStatus.SetPlannedSteps(decision.ExecutionPlan.Count);
+
+            RuntimeExecutionResult execution =
+                await _runtimeExecutor.ExecuteAsync(
+                    decision.ExecutionPlan,
+                    _operationStatus,
+                    cancellationToken);
+
+            _operationStatus.Complete(execution);
+
+            await UpdateStateAsync(
+                decision, execution, cancellationToken);
+
+            return new RuntimeCycleExecutionResult
+            {
+                Decision = decision,
+                Execution = execution
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _operationStatus.Fail("Operation was cancelled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _operationStatus.Fail(ex.Message);
+            throw;
+        }
     }
 
     public async Task<IranDirectStatus> GetStatusAsync(
@@ -162,9 +194,15 @@ public sealed class IranDirectController
                 endpointInventory.Endpoints,
                 cancellationToken);
 
+        DesiredConfiguration config =
+            await _configurationService.GetAsync(
+                cancellationToken);
+
         return new IranDirectStatus
         {
             Enabled = state.Enabled,
+            DesiredEnabled = config.Enabled,
+            Operation = _operationStatus,
             Gateway = state.Gateway,
             InterfaceIndex =
                 state.InterfaceIndex,

@@ -146,7 +146,7 @@ public sealed class RuntimeExecutorTests
 
         cts.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => executor.ExecuteAsync(plan, cts.Token));
+            () => executor.ExecuteAsync(plan, cancellationToken: cts.Token));
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public sealed class RuntimeExecutorTests
         RuntimeExecutionPlan plan = CreateEndpointPlan(3);
 
         RuntimeExecutionResult result = await executor.ExecuteAsync(
-            plan, cts.Token);
+            plan, cancellationToken: cts.Token);
 
         Assert.Equal(
             RuntimeExecutionResultStatus.PartiallyCompleted,
@@ -474,7 +474,7 @@ public sealed class RuntimeExecutorTests
         ];
 
         RuntimeExecutionPlan plan = new() { Steps = steps };
-        RuntimeExecutionResult result = await executor.ExecuteAsync(plan, cts.Token);
+        RuntimeExecutionResult result = await executor.ExecuteAsync(plan, cancellationToken: cts.Token);
 
         Assert.Equal(RuntimeExecutionResultStatus.PartiallyCompleted, result.Status);
     }
@@ -503,7 +503,7 @@ public sealed class RuntimeExecutorTests
         RuntimeExecutionPlan plan = new() { Steps = steps };
 
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => executor.ExecuteAsync(plan, cts.Token));
+            () => executor.ExecuteAsync(plan, cancellationToken: cts.Token));
     }
 
     [Fact]
@@ -613,6 +613,46 @@ public sealed class RuntimeExecutorTests
 
         Assert.True(observedMs < sequentialMs,
             $"Expected parallel execution ({observedMs}ms) to be faster than sequential ({sequentialMs}ms)");
+    }
+
+    [Fact]
+    public async Task Progress_ReportsIntermediateUpdates()
+    {
+        List<RuntimeExecutionProgress> updates = [];
+        FakeStepHandler handler = new(delayMs: 5);
+        RuntimeExecutor executor = new(handler);
+        RuntimeExecutionPlan plan = CreatePrefixPlan(4);
+
+        RuntimeExecutionResult result = await executor.ExecuteAsync(
+            plan,
+            new Progress<RuntimeExecutionProgress>(updates.Add));
+
+        Assert.Equal(RuntimeExecutionResultStatus.Completed, result.Status);
+        Assert.True(updates.Count > 0, "Expected at least one progress update");
+        RuntimeExecutionProgress last = updates[^1];
+        Assert.Equal(4, last.TotalSteps);
+        Assert.Equal(4, last.ProcessedSteps);
+        Assert.Equal(4, last.SucceededSteps);
+    }
+
+    [Fact]
+    public async Task Progress_Failure_ReportsCorrectCounts()
+    {
+        List<RuntimeExecutionProgress> updates = [];
+        FakeStepHandler handler = new(succeedAll: true, failOnStep: 1);
+        RuntimeExecutor executor = new(handler);
+        RuntimeExecutionPlan plan = CreateEndpointPlan(3);
+
+        RuntimeExecutionResult result = await executor.ExecuteAsync(
+            plan,
+            new Progress<RuntimeExecutionProgress>(updates.Add));
+
+        Assert.Equal(RuntimeExecutionResultStatus.PartiallyCompleted, result.Status);
+        RuntimeExecutionProgress last = updates[^1];
+        Assert.Equal(3, last.TotalSteps);
+        Assert.Equal(1, last.SucceededSteps);
+        Assert.Equal(1, last.FailedSteps);
+        Assert.Equal(1, last.SkippedSteps);
     }
 
     private static RuntimeExecutionPlan CreateEndpointPlan(int stepCount)
