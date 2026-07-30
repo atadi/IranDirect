@@ -523,7 +523,7 @@ public sealed class IranDirectControllerTests
     }
 
     [Fact]
-    public async Task Enable_BeginsWithOperationEnabling()
+    public async Task Enable_Completed_PreservesOperationState()
     {
         await using TestContext ctx = new();
         ctx.ExecutorResult = RuntimeExecutionResult.Completed([
@@ -537,8 +537,9 @@ public sealed class IranDirectControllerTests
 
         await ctx.Controller.EnableAsync();
 
-        RuntimeOperationStatus? op = ctx.OperationStatus;
-        Assert.Equal(OperationState.Idle, op.State);
+        RuntimeOperationStatus op = ctx.OperationStatus;
+        Assert.Equal(OperationState.Enabling, op.State);
+        Assert.NotNull(op.CompletedAt);
     }
 
     [Fact]
@@ -560,7 +561,7 @@ public sealed class IranDirectControllerTests
     }
 
     [Fact]
-    public async Task Disable_BeginsWithOperationDisabling()
+    public async Task Disable_Completed_PreservesOperationState()
     {
         await using TestContext ctx = new();
         ctx.ExecutorResult = RuntimeExecutionResult.Completed([
@@ -573,8 +574,9 @@ public sealed class IranDirectControllerTests
 
         await ctx.Controller.DisableAsync();
 
-        Assert.Equal(OperationState.Idle, ctx.OperationStatus.State);
+        Assert.Equal(OperationState.Disabling, ctx.OperationStatus.State);
         Assert.Equal(1, ctx.OperationStatus.SucceededSteps);
+        Assert.NotNull(ctx.OperationStatus.CompletedAt);
     }
 
     [Fact]
@@ -598,7 +600,7 @@ public sealed class IranDirectControllerTests
     }
 
     [Fact]
-    public async Task RunCycle_SetsOperationRepairing()
+    public async Task RunCycle_Completed_PreservesOperationState()
     {
         await using TestContext ctx = new();
         ctx.ExecutorResult = RuntimeExecutionResult.NoExecutionRequired();
@@ -606,7 +608,8 @@ public sealed class IranDirectControllerTests
 
         await ctx.Controller.RunCycleAsync();
 
-        Assert.Equal(OperationState.Idle, ctx.OperationStatus.State);
+        Assert.Equal(OperationState.Repairing, ctx.OperationStatus.State);
+        Assert.NotNull(ctx.OperationStatus.CompletedAt);
     }
 
     [Fact]
@@ -622,14 +625,16 @@ public sealed class IranDirectControllerTests
     }
 
     [Fact]
-    public async Task GetStatusAsync_IncludesOperationStatus()
+    public async Task GetStatusAsync_ReturnsOperationSnapshot()
     {
         await using TestContext ctx = new();
 
         IranDirectStatus status = await ctx.Controller.GetStatusAsync();
 
         Assert.NotNull(status.Operation);
+        Assert.IsType<RuntimeOperationSnapshot>(status.Operation);
         Assert.Equal(OperationState.Idle, status.Operation.State);
+        Assert.False(status.Operation.IsCompleted);
     }
 
     internal sealed class FakeDecisionBuilder : IRuntimeDecisionBuilder

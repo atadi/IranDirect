@@ -89,10 +89,27 @@ public sealed class RuntimeOperationStatus : IProgress<RuntimeExecutionProgress>
                 State = OperationState.Failed;
                 ErrorMessage = result.ErrorMessage ?? "Execution completed with errors.";
             }
-            else
+        }
+    }
+
+    public RuntimeOperationSnapshot CreateSnapshot()
+    {
+        lock (_lock)
+        {
+            return new RuntimeOperationSnapshot
             {
-                State = OperationState.Idle;
-            }
+                State = State,
+                Trigger = Trigger,
+                StartedAt = StartedAt,
+                CompletedAt = CompletedAt,
+                PlannedSteps = PlannedSteps,
+                CompletedSteps = CompletedSteps,
+                SucceededSteps = SucceededSteps,
+                FailedSteps = FailedSteps,
+                CancelledSteps = CancelledSteps,
+                SkippedSteps = SkippedSteps,
+                ErrorMessage = ErrorMessage
+            };
         }
     }
 

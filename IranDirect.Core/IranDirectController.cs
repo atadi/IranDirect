@@ -202,7 +202,7 @@ public sealed class IranDirectController
         {
             Enabled = state.Enabled,
             DesiredEnabled = config.Enabled,
-            Operation = _operationStatus,
+            Operation = _operationStatus.CreateSnapshot(),
             Gateway = state.Gateway,
             InterfaceIndex =
                 state.InterfaceIndex,

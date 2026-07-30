@@ -154,23 +154,41 @@ static void WriteStatus(
 
     if (status.Operation is not null && status.Operation.State != OperationState.Idle)
     {
-        string opState = status.Operation.State switch
+        if (status.Operation.State == OperationState.Failed)
         {
-            OperationState.Enabling => "Enabling",
-            OperationState.Disabling => "Disabling",
-            OperationState.Repairing => "Repairing",
-            OperationState.Failed => "Failed",
-            _ => "Idle"
-        };
-        Console.WriteLine($"Operation: {opState}");
+            Console.WriteLine("Operation: Failed");
 
-        int completed = status.Operation.CompletedSteps;
-        int planned = status.Operation.PlannedSteps;
-        if (planned > 0)
-            Console.WriteLine($"Progress: {completed} / {planned}");
+            int completed = status.Operation.CompletedSteps;
+            int planned = status.Operation.PlannedSteps;
+            if (planned > 0)
+                Console.WriteLine($"Progress: {completed} / {planned}");
 
-        if (!string.IsNullOrWhiteSpace(status.Operation.ErrorMessage))
-            Console.WriteLine($"Operation error: {status.Operation.ErrorMessage}");
+            if (!string.IsNullOrWhiteSpace(status.Operation.ErrorMessage))
+                Console.WriteLine($"Operation error: {status.Operation.ErrorMessage}");
+        }
+        else
+        {
+            string opState = status.Operation.State switch
+            {
+                OperationState.Enabling => "Enabling",
+                OperationState.Disabling => "Disabling",
+                OperationState.Repairing => "Repairing",
+                _ => status.Operation.State.ToString()
+            };
+            string suffix = status.Operation.IsCompleted ? " (Completed)" : "";
+            Console.WriteLine($"Operation: {opState}{suffix}");
+
+            int completed = status.Operation.CompletedSteps;
+            int planned = status.Operation.PlannedSteps;
+            if (planned > 0)
+                Console.WriteLine($"Progress: {completed} / {planned}");
+
+            if (status.Operation.CompletedAt is not null)
+                Console.WriteLine($"Completed: {status.Operation.CompletedAt:yyyy-MM-dd HH:mm:ss UTC}");
+
+            if (!string.IsNullOrWhiteSpace(status.Operation.ErrorMessage))
+                Console.WriteLine($"Operation error: {status.Operation.ErrorMessage}");
+        }
     }
 
     Console.WriteLine(

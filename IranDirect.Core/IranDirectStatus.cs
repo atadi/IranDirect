@@ -8,7 +8,7 @@ public sealed record IranDirectStatus
 
     public bool? DesiredEnabled { get; init; }
 
-    public RuntimeOperationStatus? Operation { get; init; }
+    public RuntimeOperationSnapshot? Operation { get; init; }
 
     public string? Gateway { get; init; }
 
