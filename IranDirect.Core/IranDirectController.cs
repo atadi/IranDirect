@@ -8,6 +8,7 @@ using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.State;
 using IranDirect.Core.Vpn;
 using System.Net;
+using System.Text;
 
 namespace IranDirect.Core;
 
@@ -249,10 +250,18 @@ public sealed class IranDirectController
             await _stateRepository.LoadAsync(
                 cancellationToken);
 
-        if (execution.Status is
-                RuntimeExecutionResultStatus.Completed
-                or RuntimeExecutionResultStatus
-                    .NoExecutionRequired)
+        bool isSuccess = execution.Status switch
+        {
+            RuntimeExecutionResultStatus.Completed => true,
+            RuntimeExecutionResultStatus.NoExecutionRequired => true,
+            RuntimeExecutionResultStatus.PartiallyCompleted => false,
+            RuntimeExecutionResultStatus.Failed => false,
+            RuntimeExecutionResultStatus.Cancelled => false,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(execution.Status), execution.Status, null)
+        };
+
+        if (isSuccess)
         {
             if (decision.Plan.Desired.Enabled)
             {
@@ -301,14 +310,39 @@ public sealed class IranDirectController
         }
         else
         {
+            string failureSummary = BuildFailureSummary(execution);
+
             await _stateRepository.SaveAsync(
-                state with
-                {
-                    LastError = execution.ErrorMessage
-                        ?? "Cycle failed."
-                },
+                state with { LastError = failureSummary },
                 cancellationToken);
         }
+    }
+
+    private static string BuildFailureSummary(
+        RuntimeExecutionResult execution)
+    {
+        RuntimeExecutionStepResult[] failedSteps = execution.StepResults
+            .Where(sr => sr.Status == RuntimeExecutionStepStatus.Failed)
+            .ToArray();
+
+        if (failedSteps.Length == 0)
+            return execution.ErrorMessage ?? "Cycle failed.";
+
+        RuntimeExecutionStepResult first = failedSteps[0];
+
+        string target = string.IsNullOrWhiteSpace(
+            first.DestinationPrefix)
+                ? first.StepIdentity
+                : first.DestinationPrefix;
+
+        StringBuilder sb = new();
+        sb.AppendLine($"{failedSteps.Length} step(s) failed.");
+        sb.AppendLine("First failure:");
+        sb.AppendLine($"Type: {first.Kind}");
+        sb.AppendLine($"Target: {target}");
+        sb.AppendLine($"Reason: {first.ErrorMessage ?? "Unknown error"}");
+
+        return sb.ToString().TrimEnd();
     }
 
     private static string ToIdentity(SystemRoute route) =>

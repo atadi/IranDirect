@@ -111,7 +111,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
             }
             catch (OperationCanceledException)
             {
-                results[i] = CreateStepResult(allSteps[i].Identity, RuntimeExecutionStepStatus.Cancelled);
+                results[i] = CreateStepResult(allSteps[i], RuntimeExecutionStepStatus.Cancelled);
                 updateProgress(RuntimeExecutionStepStatus.Cancelled);
                 if (hasSuccess)
                     return (true, hasSuccess);
@@ -166,7 +166,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
 
             if (Volatile.Read(ref groupFailed))
             {
-                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                results[idx] = CreateStepResult(allSteps[idx], RuntimeExecutionStepStatus.Skipped);
                 lock (progressLock) { processed++; skipped++; }
                 continue;
             }
@@ -176,7 +176,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
                 if (!anyStarted)
                     cancellationToken.ThrowIfCancellationRequested();
 
-                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                results[idx] = CreateStepResult(allSteps[idx], RuntimeExecutionStepStatus.Skipped);
                 lock (progressLock) { processed++; skipped++; }
                 continue;
             }
@@ -190,11 +190,11 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
                 if (!anyStarted)
                     throw;
 
-                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Cancelled);
+                results[idx] = CreateStepResult(allSteps[idx], RuntimeExecutionStepStatus.Cancelled);
                 lock (progressLock) { processed++; cancelled++; }
                 for (int r = t + 1; r < indices.Length; r++)
                 {
-                    results[indices[r]] = CreateStepResult(allSteps[indices[r]].Identity, RuntimeExecutionStepStatus.Skipped);
+                    results[indices[r]] = CreateStepResult(allSteps[indices[r]], RuntimeExecutionStepStatus.Skipped);
                     lock (progressLock) { processed++; skipped++; }
                 }
                 Volatile.Write(ref groupFailed, true);
@@ -204,7 +204,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
             if (Volatile.Read(ref groupFailed))
             {
                 throttle.Release();
-                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                results[idx] = CreateStepResult(allSteps[idx], RuntimeExecutionStepStatus.Skipped);
                 lock (progressLock) { processed++; skipped++; }
                 continue;
             }
@@ -215,7 +215,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
                 if (!anyStarted)
                     cancellationToken.ThrowIfCancellationRequested();
 
-                results[idx] = CreateStepResult(allSteps[idx].Identity, RuntimeExecutionStepStatus.Skipped);
+                results[idx] = CreateStepResult(allSteps[idx], RuntimeExecutionStepStatus.Skipped);
                 lock (progressLock) { processed++; skipped++; }
                 continue;
             }
@@ -231,7 +231,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
                 }
                 catch (OperationCanceledException)
                 {
-                    r = CreateStepResult(allSteps[captured].Identity, RuntimeExecutionStepStatus.Cancelled);
+                    r = CreateStepResult(allSteps[captured], RuntimeExecutionStepStatus.Cancelled);
                 }
 
                 bool wasFailure = r.Status is RuntimeExecutionStepStatus.Failed or RuntimeExecutionStepStatus.Cancelled;
@@ -283,7 +283,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
         {
             if (results[i] is null)
             {
-                results[i] = CreateStepResult(allSteps[i].Identity, RuntimeExecutionStepStatus.Skipped);
+                results[i] = CreateStepResult(allSteps[i], RuntimeExecutionStepStatus.Skipped);
                 updateProgress?.Invoke(RuntimeExecutionStepStatus.Skipped);
             }
         }
@@ -310,10 +310,12 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
     }
 
     private static RuntimeExecutionStepResult CreateStepResult(
-        string identity, RuntimeExecutionStepStatus status) =>
+        RuntimeExecutionStep step, RuntimeExecutionStepStatus status) =>
         new()
         {
-            StepIdentity = identity,
+            StepIdentity = step.Identity,
+            Kind = step.Kind,
+            DestinationPrefix = step.DestinationPrefix,
             Status = status
         };
 

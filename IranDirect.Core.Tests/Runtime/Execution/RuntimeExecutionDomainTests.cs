@@ -128,6 +128,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult stepResult = new()
         {
             StepIdentity = "test-identity",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
         RuntimeExecutionResult result =
@@ -146,6 +148,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult stepResult = new()
         {
             StepIdentity = "test-identity",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = "Route add failed."
         };
@@ -190,11 +194,15 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult succeeded = new()
         {
             StepIdentity = "step-1",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
         RuntimeExecutionStepResult failed = new()
         {
             StepIdentity = "step-2",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = "Failed."
         };
@@ -218,6 +226,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult result = new()
         {
             StepIdentity = "203.0.113.0/24 via 192.168.1.1",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Planned
         };
 
@@ -236,6 +246,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult result = new()
         {
             StepIdentity = "test",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = "Something went wrong."
         };
@@ -249,11 +261,15 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult succeeded = new()
         {
             StepIdentity = "s",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
         RuntimeExecutionStepResult failed = new()
         {
             StepIdentity = "f",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = "err"
         };
@@ -310,6 +326,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult failed = new()
         {
             StepIdentity = "f",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = "err"
         };
@@ -324,6 +342,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult succeeded = new()
         {
             StepIdentity = "s",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
 
@@ -337,11 +357,15 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult succeeded = new()
         {
             StepIdentity = "s",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
         RuntimeExecutionStepResult failed = new()
         {
             StepIdentity = "f",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = "err"
         };
@@ -357,11 +381,15 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult succeeded = new()
         {
             StepIdentity = "s",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
         RuntimeExecutionStepResult cancelled = new()
         {
             StepIdentity = "c",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Cancelled
         };
 
@@ -376,6 +404,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult failed = new()
         {
             StepIdentity = "f",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = "err"
         };
@@ -391,6 +421,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult succeeded = new()
         {
             StepIdentity = "s",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
 
@@ -418,6 +450,8 @@ public sealed class RuntimeExecutionDomainTests
         RuntimeExecutionStepResult step = new()
         {
             StepIdentity = "203.0.113.0/24 via 10.0.0.1",
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
 
@@ -507,8 +541,34 @@ public sealed class RuntimeExecutionDomainTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
+    }
+
+    [Fact]
+    public void StepResult_JsonRoundTrip_PreservesAllFields()
+    {
+        RuntimeExecutionStepResult original = new()
+        {
+            StepIdentity = "203.0.113.0/24|192.168.1.1|10",
+            Kind = RuntimeExecutionStepKind.RemovePrefixRoute,
+            DestinationPrefix = "203.0.113.0/24",
+            Status = RuntimeExecutionStepStatus.Failed,
+            ErrorMessage = "Access denied."
+        };
+
+        string json = System.Text.Json.JsonSerializer.Serialize(original);
+        RuntimeExecutionStepResult? deserialized =
+            System.Text.Json.JsonSerializer.Deserialize<RuntimeExecutionStepResult>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(original.StepIdentity, deserialized.StepIdentity);
+        Assert.Equal(original.Kind, deserialized.Kind);
+        Assert.Equal(original.DestinationPrefix, deserialized.DestinationPrefix);
+        Assert.Equal(original.Status, deserialized.Status);
+        Assert.Equal(original.ErrorMessage, deserialized.ErrorMessage);
     }
 }

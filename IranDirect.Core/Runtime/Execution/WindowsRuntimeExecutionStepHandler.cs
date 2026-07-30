@@ -68,13 +68,13 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 $"Failed to add endpoint route: {ex.Message}");
         }
 
         if (!await RouteExistsAsync(step, cancellationToken))
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 "Endpoint route was not found after add.");
         }
 
@@ -133,10 +133,10 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         catch (Exception ex) when (ex is not ArgumentNullException)
         {
             string msg = await CompensateEndpointRouteCreationAsync(managedRoute, step, ex.Message);
-            return CreateFailedResult(step.Identity, msg);
+            return CreateFailedResult(step, msg);
         }
 
-        return CreateSucceededResult(step.Identity);
+        return CreateSucceededResult(step);
     }
 
     private async Task<RuntimeExecutionStepResult> CheckExistingEndpointOwnershipAsync(
@@ -153,20 +153,20 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             if (item is not null)
             {
                 if (item.AddedByIranDirect)
-                    return CreateSucceededResult(step.Identity);
+                    return CreateSucceededResult(step);
 
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     "Cannot add endpoint route: an exact matching route already exists " +
                     "on the platform but is not owned by IranDirect.");
             }
 
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 "Cannot add endpoint route: an exact matching route already exists " +
                 "on the platform but is not in the endpoint inventory.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 $"Failed to check endpoint inventory for existing route: {ex.Message}");
         }
     }
@@ -192,20 +192,20 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     $"Failed to load endpoint inventory: {ex.Message}");
             }
 
             if (item is null)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     "Cannot remove endpoint route: route is not " +
                     "in the endpoint inventory.");
             }
 
             if (!item.AddedByIranDirect)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     "Cannot remove endpoint route: route was not " +
                     "created by IranDirect and may be a pre-existing " +
                     "VPN endpoint route.");
@@ -221,13 +221,13 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     $"Failed to remove endpoint route: {ex.Message}");
             }
 
             if (await RouteExistsAsync(step, cancellationToken))
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     "Endpoint route still exists after removal.");
             }
 
@@ -247,12 +247,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     $"Endpoint route was removed but inventory " +
                     $"persistence failed: {ex.Message}");
             }
 
-            return CreateSucceededResult(step.Identity);
+            return CreateSucceededResult(step);
         }
 
         try
@@ -284,12 +284,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 $"Endpoint route was already absent but inventory " +
                 $"cleanup failed: {ex.Message}");
         }
 
-        return CreateSucceededResult(step.Identity);
+        return CreateSucceededResult(step);
     }
 
     private async Task<RuntimeExecutionStepResult> ExecuteAddPrefixRouteAsync(
@@ -309,13 +309,13 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 $"Failed to add prefix route: {ex.Message}");
         }
 
         if (!await RouteExistsAsync(step, cancellationToken))
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 "Prefix route was not found after add.");
         }
 
@@ -346,10 +346,10 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         catch (Exception ex) when (ex is not ArgumentNullException)
         {
             string msg = await CompensatePrefixRouteCreationAsync(managedRoute, step, ex.Message);
-            return CreateFailedResult(step.Identity, msg);
+            return CreateFailedResult(step, msg);
         }
 
-        return CreateSucceededResult(step.Identity);
+        return CreateSucceededResult(step);
     }
 
     private async Task<RuntimeExecutionStepResult> CheckExistingPrefixOwnershipAsync(
@@ -363,15 +363,15 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
                 r.Identity.Equals(step.Identity, StringComparison.OrdinalIgnoreCase));
 
             if (owned)
-                return CreateSucceededResult(step.Identity);
+                return CreateSucceededResult(step);
 
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 "Cannot add prefix route: an exact matching route already exists " +
                 "on the platform but is not owned by IranDirect.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 $"Failed to check route inventory for existing route: {ex.Message}");
         }
     }
@@ -452,13 +452,13 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     $"Failed to load route inventory: {ex.Message}");
             }
 
             if (!owned)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     "Cannot remove prefix route: route exists on the " +
                     "platform but is not owned by IranDirect.");
             }
@@ -473,13 +473,13 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     $"Failed to remove prefix route: {ex.Message}");
             }
 
             if (await RouteExistsAsync(step, cancellationToken))
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     "Prefix route still exists after removal.");
             }
 
@@ -499,12 +499,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
             {
-                return CreateFailedResult(step.Identity,
+                return CreateFailedResult(step,
                     $"Prefix route was removed but inventory " +
                     $"persistence failed: {ex.Message}");
             }
 
-            return CreateSucceededResult(step.Identity);
+            return CreateSucceededResult(step);
         }
 
         try
@@ -534,12 +534,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
         {
-            return CreateFailedResult(step.Identity,
+            return CreateFailedResult(step,
                 $"Prefix route was already absent but inventory " +
                 $"cleanup failed: {ex.Message}");
         }
 
-        return CreateSucceededResult(step.Identity);
+        return CreateSucceededResult(step);
     }
 
     private async Task<bool> RouteExistsAsync(
@@ -590,18 +590,22 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
     }
 
     private static RuntimeExecutionStepResult CreateSucceededResult(
-        string identity) =>
+        RuntimeExecutionStep step) =>
         new()
         {
-            StepIdentity = identity,
+            StepIdentity = step.Identity,
+            Kind = step.Kind,
+            DestinationPrefix = step.DestinationPrefix,
             Status = RuntimeExecutionStepStatus.Succeeded
         };
 
     private static RuntimeExecutionStepResult CreateFailedResult(
-        string identity, string errorMessage) =>
+        RuntimeExecutionStep step, string errorMessage) =>
         new()
         {
-            StepIdentity = identity,
+            StepIdentity = step.Identity,
+            Kind = step.Kind,
+            DestinationPrefix = step.DestinationPrefix,
             Status = RuntimeExecutionStepStatus.Failed,
             ErrorMessage = errorMessage
         };

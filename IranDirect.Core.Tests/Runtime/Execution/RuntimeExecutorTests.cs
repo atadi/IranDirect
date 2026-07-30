@@ -211,6 +211,8 @@ public sealed class RuntimeExecutorTests
         RuntimeExecutionStepResult expected = new()
         {
             StepIdentity = SamplePrefixStep.Identity,
+            Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+            DestinationPrefix = "test",
             Status = RuntimeExecutionStepStatus.Succeeded
         };
         FakeStepHandler handler = new(predefinedResult: expected);
@@ -765,6 +767,8 @@ public sealed class RuntimeExecutorTests
                 result = new RuntimeExecutionStepResult
                 {
                     StepIdentity = step.Identity,
+                    Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                    DestinationPrefix = "test",
                     Status = RuntimeExecutionStepStatus.Failed,
                     ErrorMessage = $"Step {current} failed."
                 };
@@ -774,6 +778,8 @@ public sealed class RuntimeExecutorTests
                 result = new RuntimeExecutionStepResult
                 {
                     StepIdentity = step.Identity,
+                    Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                    DestinationPrefix = "test",
                     Status = _succeedAll
                         ? RuntimeExecutionStepStatus.Succeeded
                         : RuntimeExecutionStepStatus.Skipped

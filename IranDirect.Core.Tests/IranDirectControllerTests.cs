@@ -21,6 +21,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -56,6 +58,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Failed,
                 ErrorMessage = "test failure"
             }
@@ -66,7 +70,10 @@ public sealed class IranDirectControllerTests
         Assert.False(result.IsSuccess);
         IranDirectState state = await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
-        Assert.Equal("test failure", state.LastError);
+        Assert.Contains("1 step(s) failed.", state.LastError);
+        Assert.Contains("Type:", state.LastError);
+        Assert.Contains("Target:", state.LastError);
+        Assert.Contains("test failure", state.LastError);
     }
 
     [Fact]
@@ -77,6 +84,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Cancelled
             }
         ], "cancelled");
@@ -96,11 +105,15 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "first|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             },
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "second|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Failed,
                 ErrorMessage = "partial failure"
             }
@@ -121,6 +134,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -163,6 +178,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Failed,
                 ErrorMessage = "test failure"
             }
@@ -237,6 +254,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = expectedStep.Identity,
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -284,6 +303,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -315,6 +336,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -355,6 +378,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Failed,
                 ErrorMessage = "test failure"
             }
@@ -367,7 +392,10 @@ public sealed class IranDirectControllerTests
         IranDirectState state =
             await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
-        Assert.Equal("test failure", state.LastError);
+        Assert.Contains("1 step(s) failed.", state.LastError);
+        Assert.Contains("Type:", state.LastError);
+        Assert.Contains("Target:", state.LastError);
+        Assert.Contains("test failure", state.LastError);
     }
 
     [Fact]
@@ -386,6 +414,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -414,6 +444,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Failed,
                 ErrorMessage = "new error"
             }
@@ -424,7 +456,10 @@ public sealed class IranDirectControllerTests
         IranDirectState state =
             await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
-        Assert.Equal("new error", state.LastError);
+        Assert.Contains("1 step(s) failed.", state.LastError);
+        Assert.Contains("Type:", state.LastError);
+        Assert.Contains("Target:", state.LastError);
+        Assert.Contains("new error", state.LastError);
     }
 
     [Fact]
@@ -530,6 +565,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -550,6 +587,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -568,6 +607,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
@@ -587,6 +628,8 @@ public sealed class IranDirectControllerTests
             new RuntimeExecutionStepResult
             {
                 StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
                 Status = RuntimeExecutionStepStatus.Failed,
                 ErrorMessage = "test failure"
             }

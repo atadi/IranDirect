@@ -52,11 +52,17 @@ public sealed class RuntimeOperationStatusTests
         s.Complete(RuntimeExecutionResult.Completed([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             },
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "b", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "b",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]));
 
@@ -103,11 +109,17 @@ public sealed class RuntimeOperationStatusTests
         RuntimeExecutionResult result = RuntimeExecutionResult.Completed([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             },
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "b", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "b",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]);
         s.Complete(result);
@@ -130,7 +142,10 @@ public sealed class RuntimeOperationStatusTests
         s.Complete(RuntimeExecutionResult.Completed([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]));
 
@@ -146,7 +161,10 @@ public sealed class RuntimeOperationStatusTests
         s.Complete(RuntimeExecutionResult.Completed([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]));
 
@@ -162,7 +180,10 @@ public sealed class RuntimeOperationStatusTests
         s.Complete(RuntimeExecutionResult.Completed([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]));
 
@@ -179,11 +200,17 @@ public sealed class RuntimeOperationStatusTests
         RuntimeExecutionResult result = RuntimeExecutionResult.Failed([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Failed, ErrorMessage = "err"
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Failed, ErrorMessage = "err"
             },
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "b", Status = RuntimeExecutionStepStatus.Skipped
+                StepIdentity = "b",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Skipped
             }
         ], "err");
         s.Complete(result);
@@ -206,11 +233,17 @@ public sealed class RuntimeOperationStatusTests
         RuntimeExecutionResult result = RuntimeExecutionResult.PartiallyCompleted([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             },
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "b", Status = RuntimeExecutionStepStatus.Failed, ErrorMessage = "partial"
+                StepIdentity = "b",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Failed, ErrorMessage = "partial"
             }
         ], "partial");
         s.Complete(result);
@@ -302,7 +335,10 @@ public sealed class RuntimeOperationStatusTests
         s.Complete(RuntimeExecutionResult.Completed([
             new RuntimeExecutionStepResult
             {
-                StepIdentity = "a", Status = RuntimeExecutionStepStatus.Succeeded
+                StepIdentity = "a",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
             }
         ]));
 
