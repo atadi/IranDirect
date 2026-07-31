@@ -618,6 +618,90 @@ public sealed class RuntimeExecutorTests
     }
 
     [Fact]
+    public async Task PrefixGroup_VerificationCalledOnceForAllSteps()
+    {
+        FakeStepHandler handler = new();
+        RuntimeExecutor executor = new(handler);
+        RuntimeExecutionPlan plan = CreatePrefixPlan(5);
+
+        RuntimeExecutionResult result = await executor.ExecuteAsync(plan);
+
+        Assert.Equal(RuntimeExecutionResultStatus.Completed, result.Status);
+        Assert.Equal(1, handler.VerifyCallCount);
+        Assert.Equal(5, handler.VerifiedIdentities.Count);
+        for (int i = 0; i < plan.Steps.Count; i++)
+            Assert.Equal(plan.Steps[i].Identity, handler.VerifiedIdentities[i]);
+    }
+
+    [Fact]
+    public async Task PrefixGroup_MixedResults_StopLaterGroups()
+    {
+        FakeStepHandler handler = new(
+            failVerifyIdentity: "203.0.113.1/24|192.168.1.1|11");
+        RuntimeExecutor executor = new(handler);
+
+        IReadOnlyList<RuntimeExecutionStep> steps =
+        [
+            SamplePrefixStep with
+            {
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                Identity = "203.0.113.0/24|192.168.1.1|10",
+                DestinationPrefix = "203.0.113.0/24"
+            },
+            SamplePrefixStep with
+            {
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                Identity = "203.0.113.1/24|192.168.1.1|11",
+                DestinationPrefix = "203.0.113.1/24"
+            },
+            SampleEndpointStep with
+            {
+                Kind = RuntimeExecutionStepKind.RemoveEndpointRoute,
+                Identity = "ep|192.168.1.1|10"
+            }
+        ];
+
+        RuntimeExecutionPlan plan = new() { Steps = steps };
+        RuntimeExecutionResult result = await executor.ExecuteAsync(plan);
+
+        Assert.Equal(RuntimeExecutionResultStatus.PartiallyCompleted, result.Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, result.StepResults[0].Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, result.StepResults[1].Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Skipped, result.StepResults[2].Status);
+    }
+
+    [Fact]
+    public async Task PrefixGroup_CancellationMidFlight_NoSuccessResults()
+    {
+        FakeStepHandler handler = new(succeedAll: true, cancelOnStep: 0);
+        RuntimeExecutor executor = new(handler);
+        RuntimeExecutionPlan plan = CreatePrefixPlan(3);
+
+        RuntimeExecutionResult result = await executor.ExecuteAsync(plan);
+
+        Assert.Equal(RuntimeExecutionResultStatus.Cancelled, result.Status);
+        Assert.DoesNotContain(result.StepResults,
+            sr => sr.Status == RuntimeExecutionStepStatus.Succeeded);
+        Assert.All(result.StepResults,
+            sr => Assert.True(
+                sr.Status is RuntimeExecutionStepStatus.Cancelled
+                    or RuntimeExecutionStepStatus.Skipped));
+    }
+
+    [Fact]
+    public async Task HandlerWithoutGroupSupport_FallsBackToPerStepExecution()
+    {
+        LegacyStepHandler handler = new();
+        RuntimeExecutor executor = new(handler);
+        RuntimeExecutionPlan plan = CreatePrefixPlan(2);
+
+        RuntimeExecutionResult result = await executor.ExecuteAsync(plan);
+
+        Assert.Equal(RuntimeExecutionResultStatus.Completed, result.Status);
+        Assert.Equal(2, handler.CallCount);
+    }
+
+    [Fact]
     public async Task Progress_ReportsIntermediateUpdates()
     {
         RecordingProgress progress = new();
@@ -730,7 +814,9 @@ public sealed class RuntimeExecutorTests
         }
     }
 
-    private sealed class FakeStepHandler : IRuntimeExecutionStepHandler
+    private sealed class FakeStepHandler :
+        IRuntimeExecutionStepHandler,
+        IPrefixGroupExecutionHandler
     {
         private readonly bool _succeedAll;
         private readonly int _failOnStep;
@@ -741,10 +827,14 @@ public sealed class RuntimeExecutorTests
         private readonly object? _callLock;
         private readonly Action<string>? _onStart;
         private readonly Action<string>? _onEnd;
+        private readonly object _countLock = new();
         private int _callIndex;
 
         public int CallCount { get; private set; }
+        public int VerifyCallCount { get; private set; }
+        public string? FailVerifyIdentity { get; }
         public List<string> ReceivedIdentities { get; } = [];
+        public List<string> VerifiedIdentities { get; } = [];
 
         public FakeStepHandler(
             bool succeedAll = true,
@@ -755,7 +845,8 @@ public sealed class RuntimeExecutorTests
             List<string>? trackOrder = null,
             object? callLock = null,
             Action<string>? onStart = null,
-            Action<string>? onEnd = null)
+            Action<string>? onEnd = null,
+            string? failVerifyIdentity = null)
         {
             _succeedAll = succeedAll;
             _failOnStep = failOnStep;
@@ -766,6 +857,86 @@ public sealed class RuntimeExecutorTests
             _callLock = callLock;
             _onStart = onStart;
             _onEnd = onEnd;
+            FailVerifyIdentity = failVerifyIdentity;
+        }
+
+        public async Task<PrefixMutationResult> MutatePrefixRouteAsync(
+            RuntimeExecutionStep step,
+            CancellationToken cancellationToken = default)
+        {
+            _onStart?.Invoke(step.Identity);
+
+            try
+            {
+                if (_delayMs > 0)
+                    await Task.Delay(_delayMs, cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                lock (_countLock)
+                {
+                    CallCount++;
+                    ReceivedIdentities.Add(step.Identity);
+                    _trackOrder?.Add(step.Identity);
+                }
+
+                int current = _callIndex++;
+
+                if (current == _cancelOnStep)
+                    throw new OperationCanceledException(cancellationToken);
+
+                if (current == _failOnStep)
+                    return PrefixMutationResult.Failure("Mutation failed.");
+
+                return PrefixMutationResult.Success();
+            }
+            finally
+            {
+                _onEnd?.Invoke(step.Identity);
+            }
+        }
+
+        public Task<IReadOnlyList<RuntimeExecutionStepResult>> VerifyPrefixRouteGroupAsync(
+            IReadOnlyList<RuntimeExecutionStep> steps,
+            IReadOnlyList<PrefixMutationResult> mutationResults,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            VerifyCallCount++;
+
+            if (_predefinedResult is not null && steps.Count == 1)
+            {
+                foreach (RuntimeExecutionStep s in steps)
+                    VerifiedIdentities.Add(s.Identity);
+
+                return Task.FromResult<IReadOnlyList<RuntimeExecutionStepResult>>(
+                    [_predefinedResult]);
+            }
+
+            RuntimeExecutionStepResult[] results = new RuntimeExecutionStepResult[steps.Count];
+            for (int i = 0; i < steps.Count; i++)
+            {
+                RuntimeExecutionStep s = steps[i];
+                bool failed = FailVerifyIdentity is not null
+                              && s.Identity.Equals(
+                                  FailVerifyIdentity,
+                                  StringComparison.OrdinalIgnoreCase);
+
+                results[i] = new RuntimeExecutionStepResult
+                {
+                    StepIdentity = s.Identity,
+                    Kind = s.Kind,
+                    DestinationPrefix = "test",
+                    Status = failed
+                        ? RuntimeExecutionStepStatus.Failed
+                        : RuntimeExecutionStepStatus.Succeeded,
+                    ErrorMessage = failed ? "Verified failed." : null
+                };
+                VerifiedIdentities.Add(s.Identity);
+            }
+
+            return Task.FromResult<IReadOnlyList<RuntimeExecutionStepResult>>(results);
         }
 
         public async Task<RuntimeExecutionStepResult> ExecuteAndVerifyAsync(
@@ -779,16 +950,7 @@ public sealed class RuntimeExecutorTests
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (_callLock is not null)
-            {
-                lock (_callLock)
-                {
-                    CallCount++;
-                    ReceivedIdentities.Add(step.Identity);
-                    _trackOrder?.Add(step.Identity);
-                }
-            }
-            else
+            lock (_countLock)
             {
                 CallCount++;
                 ReceivedIdentities.Add(step.Identity);
@@ -833,6 +995,31 @@ public sealed class RuntimeExecutorTests
 
             _onEnd?.Invoke(step.Identity);
             return result;
+        }
+    }
+
+    private sealed class LegacyStepHandler : IRuntimeExecutionStepHandler
+    {
+        private readonly object _countLock = new();
+
+        public int CallCount { get; private set; }
+
+        public Task<RuntimeExecutionStepResult> ExecuteAndVerifyAsync(
+            RuntimeExecutionStep step,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_countLock)
+            {
+                CallCount++;
+            }
+            return Task.FromResult(new RuntimeExecutionStepResult
+            {
+                StepIdentity = step.Identity,
+                Kind = step.Kind,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            });
         }
     }
 }

@@ -5,7 +5,9 @@ using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
 
-public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHandler
+public sealed class WindowsRuntimeExecutionStepHandler :
+    IRuntimeExecutionStepHandler,
+    IPrefixGroupExecutionHandler
 {
     private readonly IRouteManager _routeManager;
     private readonly IRouteInventoryPersistence _routeInventory;
@@ -45,14 +47,363 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
                 await ExecuteRemoveEndpointRouteAsync(step, cancellationToken),
 
             RuntimeExecutionStepKind.AddPrefixRoute =>
-                await ExecuteAddPrefixRouteAsync(step, cancellationToken),
+                await ExecutePrefixRouteStepAsync(step, cancellationToken),
 
             RuntimeExecutionStepKind.RemovePrefixRoute =>
-                await ExecuteRemovePrefixRouteAsync(step, cancellationToken),
+                await ExecutePrefixRouteStepAsync(step, cancellationToken),
 
             _ => throw new ArgumentOutOfRangeException(
                 nameof(step.Kind), step.Kind, null)
         };
+    }
+
+    public async Task<PrefixMutationResult> MutatePrefixRouteAsync(
+        RuntimeExecutionStep step,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+
+        ValidationException.ThrowIfInvalid(step);
+
+        return step.Kind switch
+        {
+            RuntimeExecutionStepKind.AddPrefixRoute =>
+                await MutateAddPrefixRouteAsync(step, cancellationToken),
+
+            RuntimeExecutionStepKind.RemovePrefixRoute =>
+                await MutateRemovePrefixRouteAsync(step, cancellationToken),
+
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(step.Kind), step.Kind, null)
+        };
+    }
+
+    public async Task<IReadOnlyList<RuntimeExecutionStepResult>> VerifyPrefixRouteGroupAsync(
+        IReadOnlyList<RuntimeExecutionStep> steps,
+        IReadOnlyList<PrefixMutationResult> mutationResults,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(mutationResults);
+
+        if (steps.Count == 0)
+            return [];
+
+        if (mutationResults.Count != steps.Count)
+            throw new ArgumentException(
+                "mutationResults must contain one entry per step.",
+                nameof(mutationResults));
+
+        RuntimeExecutionStepKind kind = steps[0].Kind;
+        if (kind is not (RuntimeExecutionStepKind.AddPrefixRoute
+                         or RuntimeExecutionStepKind.RemovePrefixRoute))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(steps), steps[0].Kind,
+                "A prefix route group must contain only prefix steps.");
+        }
+
+        foreach (RuntimeExecutionStep step in steps)
+        {
+            ValidationException.ThrowIfInvalid(step);
+
+            if (step.Kind != kind)
+            {
+                throw new ArgumentException(
+                    $"A prefix route group must be homogeneous; " +
+                    $"found {step.Kind} in a {kind} group.",
+                    nameof(steps));
+            }
+        }
+
+        RuntimePerfCategory verificationCategory =
+            kind == RuntimeExecutionStepKind.AddPrefixRoute
+                ? RuntimePerfCategory.ExecutionPrefixAddGroupVerification
+                : RuntimePerfCategory.ExecutionPrefixRemoveGroupVerification;
+
+        IReadOnlyList<SystemRoute> snapshot;
+        using (_profiler.Measure(verificationCategory))
+        {
+            snapshot =
+                await _routeManager.GetIpv4RoutesAsync(
+                    cancellationToken);
+        }
+
+        RouteInventory inventory =
+            await _routeInventory.LoadAsync(cancellationToken);
+
+        RuntimeExecutionStepResult[] results =
+            new RuntimeExecutionStepResult[steps.Count];
+
+        for (int i = 0; i < steps.Count; i++)
+        {
+            results[i] = kind == RuntimeExecutionStepKind.AddPrefixRoute
+                ? await ClassifyAddPrefixRouteAsync(
+                    steps[i], snapshot, inventory,
+                    mutationResults[i], cancellationToken)
+                : await ClassifyRemovePrefixRouteAsync(
+                    steps[i], snapshot, inventory,
+                    mutationResults[i], cancellationToken);
+        }
+
+        return results;
+    }
+
+    private async Task<RuntimeExecutionStepResult> ExecutePrefixRouteStepAsync(
+        RuntimeExecutionStep step,
+        CancellationToken cancellationToken)
+    {
+        PrefixMutationResult mutation =
+            await MutatePrefixRouteAsync(step, cancellationToken);
+
+        IReadOnlyList<RuntimeExecutionStepResult> verified =
+            await VerifyPrefixRouteGroupAsync(
+                [step], [mutation], cancellationToken);
+
+        return verified[0];
+    }
+
+    private async Task<PrefixMutationResult> MutateAddPrefixRouteAsync(
+        RuntimeExecutionStep step,
+        CancellationToken cancellationToken)
+    {
+        ManagedRoute managedRoute = ToManagedRoute(step);
+
+        try
+        {
+            using (_profiler.Measure(
+                RuntimePerfCategory.ExecutionPrefixAddMutation))
+            {
+                await _routeManager.AddRoutesAsync(
+                    [managedRoute], cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return PrefixMutationResult.Failure(
+                $"Failed to add prefix route: {ex.Message}");
+        }
+
+        return PrefixMutationResult.Success();
+    }
+
+    private async Task<PrefixMutationResult> MutateRemovePrefixRouteAsync(
+        RuntimeExecutionStep step,
+        CancellationToken cancellationToken)
+    {
+        bool owned;
+        try
+        {
+            RouteInventory inventory =
+                await _routeInventory.LoadAsync(cancellationToken);
+
+            owned = inventory.Routes.Any(r =>
+                r.Identity.Equals(
+                    step.Identity,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return PrefixMutationResult.Failure(
+                $"Failed to load route inventory: {ex.Message}");
+        }
+
+        if (!owned)
+        {
+            return PrefixMutationResult.Failure(
+                "Cannot remove prefix route: route exists on the " +
+                "platform but is not owned by IranDirect.");
+        }
+
+        ManagedRoute managedRoute = ToManagedRoute(step);
+
+        try
+        {
+            using (_profiler.Measure(
+                RuntimePerfCategory.ExecutionPrefixRemoveMutation))
+            {
+                await _routeManager.DeleteRoutesAsync(
+                    [managedRoute], cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return PrefixMutationResult.Failure(
+                $"Failed to remove prefix route: {ex.Message}");
+        }
+
+        return PrefixMutationResult.Success();
+    }
+
+    private async Task<RuntimeExecutionStepResult> ClassifyAddPrefixRouteAsync(
+        RuntimeExecutionStep step,
+        IReadOnlyList<SystemRoute> snapshot,
+        RouteInventory inventory,
+        PrefixMutationResult mutation,
+        CancellationToken cancellationToken)
+    {
+        bool exactPresent =
+            snapshot.Any(route => MatchesExact(step, route));
+
+        if (!exactPresent)
+        {
+            if (!mutation.Succeeded)
+            {
+                return CreateFailedResult(step,
+                    mutation.ErrorMessage ?? "Failed to add prefix route.");
+            }
+
+            return CreateFailedResult(step,
+                "Prefix route was not found after add.");
+        }
+
+        bool owned = inventory.Routes.Any(r =>
+            r.Identity.Equals(
+                step.Identity,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (owned)
+            return CreateSucceededResult(step);
+
+        if (mutation.Succeeded)
+        {
+            try
+            {
+                await MutateRouteInventoryAsync(
+                    inventory =>
+                    {
+                        if (inventory.Routes.Any(r =>
+                                r.Identity.Equals(
+                                    step.Identity,
+                                    StringComparison.OrdinalIgnoreCase)))
+                            return inventory;
+
+                        return inventory with
+                        {
+                            Routes =
+                                [.. inventory.Routes, ToInventoryItem(step)]
+                        };
+                    },
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                await CompensatePrefixRouteCreationAsync(
+                    ToManagedRoute(step), step,
+                    "Operation was cancelled during route inventory persistence.");
+                throw;
+            }
+            catch (Exception ex) when (ex is not ArgumentNullException)
+            {
+                string msg = await CompensatePrefixRouteCreationAsync(
+                    ToManagedRoute(step), step, ex.Message);
+                return CreateFailedResult(step, msg);
+            }
+
+            return CreateSucceededResult(step);
+        }
+
+        return CreateFailedResult(step,
+            "Cannot add prefix route: an exact matching route already " +
+            "exists on the platform but is not owned by IranDirect.");
+    }
+
+    private async Task<RuntimeExecutionStepResult> ClassifyRemovePrefixRouteAsync(
+        RuntimeExecutionStep step,
+        IReadOnlyList<SystemRoute> snapshot,
+        RouteInventory inventory,
+        PrefixMutationResult mutation,
+        CancellationToken cancellationToken)
+    {
+        bool present =
+            snapshot.Any(route => MatchesIdentity(step, route));
+
+        bool owned = inventory.Routes.Any(r =>
+            r.Identity.Equals(
+                step.Identity,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (!present)
+        {
+            if (owned)
+            {
+                try
+                {
+                    await MutateRouteInventoryAsync(
+                        inv => inv with
+                        {
+                            Routes = inv.Routes
+                                .Where(r => !r.Identity.Equals(
+                                    step.Identity,
+                                    StringComparison.OrdinalIgnoreCase))
+                                .ToArray()
+                        },
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is not ArgumentNullException)
+                {
+                    return CreateFailedResult(step,
+                        $"Prefix route was already absent but inventory " +
+                        $"cleanup failed: {ex.Message}");
+                }
+            }
+
+            return CreateSucceededResult(step);
+        }
+
+        if (owned)
+        {
+            return CreateFailedResult(step,
+                "Prefix route still exists after removal.");
+        }
+
+        return CreateFailedResult(step,
+            "Cannot remove prefix route: route exists on the " +
+            "platform but is not owned by IranDirect.");
+    }
+
+    private static bool MatchesExact(
+        RuntimeExecutionStep step,
+        SystemRoute route)
+    {
+        return route.DestinationPrefix.Equals(
+                   step.DestinationPrefix,
+                   StringComparison.OrdinalIgnoreCase)
+               && route.NextHop.ToString().Equals(
+                   step.Gateway,
+                   StringComparison.OrdinalIgnoreCase)
+               && route.InterfaceIndex == step.InterfaceIndex
+               && route.RouteMetric == step.Metric;
+    }
+
+    private static bool MatchesIdentity(
+        RuntimeExecutionStep step,
+        SystemRoute route)
+    {
+        string routeIdentity =
+            $"{route.DestinationPrefix}|" +
+            $"{route.NextHop}|" +
+            $"{route.InterfaceIndex}";
+
+        return routeIdentity.Equals(
+            step.Identity,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<RuntimeExecutionStepResult> ExecuteAddEndpointRouteAsync(
@@ -304,94 +655,6 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         return CreateSucceededResult(step);
     }
 
-    private async Task<RuntimeExecutionStepResult> ExecuteAddPrefixRouteAsync(
-        RuntimeExecutionStep step,
-        CancellationToken cancellationToken)
-    {
-        ManagedRoute managedRoute = ToManagedRoute(step);
-
-        if (await RouteExistsAsync(step, cancellationToken))
-            return await CheckExistingPrefixOwnershipAsync(step, cancellationToken);
-
-        try
-        {
-            using (_profiler.Measure(
-                RuntimePerfCategory.ExecutionRouteCreate))
-            {
-                await _routeManager.AddRoutesAsync(
-                    [managedRoute], cancellationToken);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException
-                                   and not ArgumentNullException)
-        {
-            return CreateFailedResult(step,
-                $"Failed to add prefix route: {ex.Message}");
-        }
-
-        if (!await RouteExistsAsync(step, cancellationToken))
-        {
-            return CreateFailedResult(step,
-                "Prefix route was not found after add.");
-        }
-
-        try
-        {
-            await MutateRouteInventoryAsync(
-                inventory =>
-                {
-                    if (inventory.Routes.Any(r =>
-                            r.Identity.Equals(
-                                step.Identity,
-                                StringComparison.OrdinalIgnoreCase)))
-                        return inventory;
-
-                    return inventory with
-                    {
-                        Routes = [.. inventory.Routes, ToInventoryItem(step)]
-                    };
-                },
-                cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            await CompensatePrefixRouteCreationAsync(managedRoute, step,
-                "Operation was cancelled during route inventory persistence.");
-            throw;
-        }
-        catch (Exception ex) when (ex is not ArgumentNullException)
-        {
-            string msg = await CompensatePrefixRouteCreationAsync(managedRoute, step, ex.Message);
-            return CreateFailedResult(step, msg);
-        }
-
-        return CreateSucceededResult(step);
-    }
-
-    private async Task<RuntimeExecutionStepResult> CheckExistingPrefixOwnershipAsync(
-        RuntimeExecutionStep step,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            RouteInventory snapshot = await _routeInventory.LoadAsync(cancellationToken);
-            bool owned = snapshot.Routes.Any(r =>
-                r.Identity.Equals(step.Identity, StringComparison.OrdinalIgnoreCase));
-
-            if (owned)
-                return CreateSucceededResult(step);
-
-            return CreateFailedResult(step,
-                "Cannot add prefix route: an exact matching route already exists " +
-                "on the platform but is not owned by IranDirect.");
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return CreateFailedResult(step,
-                $"Failed to check route inventory for existing route: {ex.Message}");
-        }
-    }
-
     private async Task<string> CompensatePrefixRouteCreationAsync(
         ManagedRoute managedRoute,
         RuntimeExecutionStep step,
@@ -454,120 +717,6 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         return $"Endpoint route was created but inventory persistence failed: " +
                $"{originalError}. Route was removed as compensation.";
-    }
-
-    private async Task<RuntimeExecutionStepResult> ExecuteRemovePrefixRouteAsync(
-        RuntimeExecutionStep step,
-        CancellationToken cancellationToken)
-    {
-        bool routeOnPlatform = await RouteExistsAsync(step, cancellationToken);
-
-        if (routeOnPlatform)
-        {
-            bool owned;
-            try
-            {
-                RouteInventory snapshot = await _routeInventory.LoadAsync(cancellationToken);
-                owned = snapshot.Routes.Any(r =>
-                    r.Identity.Equals(
-                        step.Identity,
-                        StringComparison.OrdinalIgnoreCase));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException
-                                       and not ArgumentNullException)
-            {
-                return CreateFailedResult(step,
-                    $"Failed to load route inventory: {ex.Message}");
-            }
-
-            if (!owned)
-            {
-                return CreateFailedResult(step,
-                    "Cannot remove prefix route: route exists on the " +
-                    "platform but is not owned by IranDirect.");
-            }
-
-            ManagedRoute managedRoute = ToManagedRoute(step);
-
-            try
-            {
-                using (_profiler.Measure(
-                    RuntimePerfCategory.ExecutionRouteDelete))
-                {
-                    await _routeManager.DeleteRoutesAsync(
-                        [managedRoute], cancellationToken);
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException
-                                       and not ArgumentNullException)
-            {
-                return CreateFailedResult(step,
-                    $"Failed to remove prefix route: {ex.Message}");
-            }
-
-            if (await RouteExistsAsync(step, cancellationToken))
-            {
-                return CreateFailedResult(step,
-                    "Prefix route still exists after removal.");
-            }
-
-            try
-            {
-                await MutateRouteInventoryAsync(
-                    inv => inv with
-                    {
-                        Routes = inv.Routes
-                            .Where(r => !r.Identity.Equals(
-                                step.Identity,
-                                StringComparison.OrdinalIgnoreCase))
-                            .ToArray()
-                    },
-                    cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException
-                                       and not ArgumentNullException)
-            {
-                return CreateFailedResult(step,
-                    $"Prefix route was removed but inventory " +
-                    $"persistence failed: {ex.Message}");
-            }
-
-            return CreateSucceededResult(step);
-        }
-
-        try
-        {
-            await MutateRouteInventoryAsync(
-                inv =>
-                {
-                    bool hasStaleOwned = inv.Routes.Any(r =>
-                        r.Identity.Equals(
-                            step.Identity,
-                            StringComparison.OrdinalIgnoreCase));
-
-                    if (!hasStaleOwned)
-                        return inv;
-
-                    return inv with
-                    {
-                        Routes = inv.Routes
-                            .Where(r => !r.Identity.Equals(
-                                step.Identity,
-                                StringComparison.OrdinalIgnoreCase))
-                            .ToArray()
-                    };
-                },
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException
-                                   and not ArgumentNullException)
-        {
-            return CreateFailedResult(step,
-                $"Prefix route was already absent but inventory " +
-                $"cleanup failed: {ex.Message}");
-        }
-
-        return CreateSucceededResult(step);
     }
 
     private async Task<bool> RouteExistsAsync(

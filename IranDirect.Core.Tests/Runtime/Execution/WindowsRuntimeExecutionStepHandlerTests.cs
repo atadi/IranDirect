@@ -2,6 +2,7 @@ namespace IranDirect.Core.Tests.Runtime.Execution;
 
 using System.Net;
 using IranDirect.Core.Runtime.Execution;
+using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Vpn;
 
@@ -42,7 +43,7 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
     };
 
     [Fact]
-    public async Task AddPrefix_MutatesVerifiesAndPersists()
+    public async Task AddPrefixGroup_MutatesVerifiesAndPersists()
     {
         FakeRouteManager routes = new();
         routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
@@ -50,36 +51,66 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
         FakeEndpointInventory endpointInv = new();
         WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
 
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
 
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
         Assert.Equal(1, routes.AddCallCount);
-        Assert.Equal(2, routes.GetCallCount);
+        Assert.Equal(1, routes.GetCallCount);
         RouteInventory saved = await routeInv.LoadAsync();
         Assert.Single(saved.Routes);
         Assert.Equal(AddPrefixStep.Identity, saved.Routes[0].Identity);
     }
 
     [Fact]
-    public async Task AddPrefix_VerificationFailure_NoOwnershipPersisted()
+    public async Task AddPrefixGroup_OneSnapshotForManySteps()
     {
         FakeRouteManager routes = new();
-        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
-        routes.SuppressRouteAdd = true;
+        routes.Present.Clear();
         FakeRouteInventory routeInv = new();
         FakeEndpointInventory endpointInv = new();
         WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
 
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
+        RuntimeExecutionStep[] steps = Enumerable.Range(0, 4)
+            .Select(i => AddPrefixStep with
+            {
+                Identity = $"203.0.113.{i}/24|192.168.1.1|{10 + i}",
+                DestinationPrefix = $"203.0.113.{i}/24",
+                InterfaceIndex = (uint)(10 + i)
+            })
+            .ToArray();
 
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("not found", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, steps);
+
+        Assert.All(r, rr => Assert.Equal(RuntimeExecutionStepStatus.Succeeded, rr.Status));
+        Assert.Equal(4, routes.AddCallCount);
+        Assert.Equal(1, routes.GetCallCount);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Equal(4, saved.Routes.Count);
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_VerificationFailure_NoOwnershipPersisted()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
+        routes.DontAdd.Add("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("not found", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
         RouteInventory saved = await routeInv.LoadAsync();
         Assert.Empty(saved.Routes);
     }
 
     [Fact]
-    public async Task AddPrefix_MutationFailure_ReturnsFailed()
+    public async Task AddPrefixGroup_MutationFailure_ReturnsFailed()
     {
         FakeRouteManager routes = new(throwOnAdd: true);
         routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
@@ -87,15 +118,197 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
         FakeEndpointInventory endpointInv = new();
         WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
 
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
 
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("failed", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("failed", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, routes.GetCallCount);
     }
 
     [Fact]
-    public async Task RemovePrefix_OwnedRoute_RemovesVerifiesAndClearsOwnership()
+    public async Task AddPrefixGroup_AlreadyExistsOwned_ResolvedSucceeded()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Clear();
+        routes.Present.Add("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        routeInv.Seed(AddPrefixStep.Identity);
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        Assert.Equal(1, routes.GetCallCount);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Single(saved.Routes);
+        Assert.Equal(AddPrefixStep.Identity, saved.Routes[0].Identity);
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_AlreadyExistsUnowned_ReturnsFailedAndDoesNotClaim()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Clear();
+        routes.Present.Add("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("not owned by IranDirect", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Empty(saved.Routes);
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_PreexistingOwned_IdempotentSuccess()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Clear();
+        routes.Present.Add("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        routeInv.Seed(AddPrefixStep.Identity);
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        Assert.Equal(0, routes.DeleteCallCount);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Single(saved.Routes);
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_PreexistingUnowned_ReturnsFailed()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Clear();
+        routes.Present.Add("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("not owned by IranDirect", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_ExactMatchRequiresAllFourFields()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Clear();
+        routes.Present.Add("203.0.113.0/24|192.168.1.1|10");
+        routes.RouteMetrics["203.0.113.0/24|192.168.1.1|10"] = 100;
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Empty(saved.Routes);
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_MixedOutcomes_ResultsInInputOrder()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Clear();
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        RuntimeExecutionStep[] steps =
+        [
+            AddPrefixStep with
+            {
+                Identity = "203.0.113.0/24|192.168.1.1|10",
+                DestinationPrefix = "203.0.113.0/24",
+                InterfaceIndex = 10
+            },
+            AddPrefixStep with
+            {
+                Identity = "203.0.113.1/24|192.168.1.1|11",
+                DestinationPrefix = "203.0.113.1/24",
+                InterfaceIndex = 11
+            },
+            AddPrefixStep with
+            {
+                Identity = "203.0.113.2/24|192.168.1.1|12",
+                DestinationPrefix = "203.0.113.2/24",
+                InterfaceIndex = 12
+            }
+        ];
+        routes.DontAdd.Add("203.0.113.1/24|192.168.1.1|11");
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, steps);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[1].Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[2].Status);
+        Assert.Equal(steps[0].Identity, r[0].StepIdentity);
+        Assert.Equal(steps[1].Identity, r[1].StepIdentity);
+        Assert.Equal(steps[2].Identity, r[2].StepIdentity);
+        Assert.Equal(1, routes.GetCallCount);
+
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Equal(2, saved.Routes.Count);
+        Assert.DoesNotContain("203.0.113.1/24|192.168.1.1|11", saved.Routes.Select(x => x.Identity));
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_InventoryFailure_CompensatesSuccessfully()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
+        routes.TrackDeletions = true;
+        FakeRouteInventory routeInv = new(throwOnSave: true);
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("removed as compensation", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, routes.AddCallCount);
+        Assert.Equal(1, routes.DeleteCallCount);
+        Assert.DoesNotContain(AddPrefixStep.Identity, routes.Present);
+    }
+
+    [Fact]
+    public async Task AddPrefixGroup_InventoryFailure_OrphanReported()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new(throwOnSave: true);
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("Orphaned route", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(AddPrefixStep.Identity, routes.Present);
+    }
+
+    [Fact]
+    public async Task RemovePrefixGroup_OwnedRoute_RemovesVerifiesAndClearsOwnership()
     {
         FakeRouteManager routes = new();
         FakeRouteInventory routeInv = new();
@@ -105,31 +318,65 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
 
         routes.TrackDeletions = true;
 
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemovePrefixStep);
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, RemovePrefixStep);
 
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
         Assert.Equal(1, routes.DeleteCallCount);
+        Assert.Equal(1, routes.GetCallCount);
         RouteInventory saved = await routeInv.LoadAsync();
         Assert.Empty(saved.Routes);
     }
 
     [Fact]
-    public async Task RemovePrefix_NonOwnedRouteOnPlatform_ReturnsFailed()
+    public async Task RemovePrefixGroup_OneSnapshotForManySteps()
+    {
+        FakeRouteManager routes = new();
+        routes.TrackDeletions = true;
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        RuntimeExecutionStep[] steps = Enumerable.Range(0, 4)
+            .Select(i => RemovePrefixStep with
+            {
+                Identity = $"203.0.113.{i}/24|192.168.1.1|{10 + i}",
+                DestinationPrefix = $"203.0.113.{i}/24",
+                InterfaceIndex = (uint)(10 + i)
+            })
+            .ToArray();
+
+        foreach (RuntimeExecutionStep step in steps)
+            routeInv.Seed(step.Identity, additive: true);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, steps);
+
+        Assert.All(r, rr => Assert.Equal(RuntimeExecutionStepStatus.Succeeded, rr.Status));
+        Assert.Equal(4, routes.DeleteCallCount);
+        Assert.Equal(1, routes.GetCallCount);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Empty(saved.Routes);
+    }
+
+    [Fact]
+    public async Task RemovePrefixGroup_NonOwnedRouteOnPlatform_ReturnsFailed()
     {
         FakeRouteManager routes = new();
         FakeRouteInventory routeInv = new();
         FakeEndpointInventory endpointInv = new();
         WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
 
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemovePrefixStep);
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, RemovePrefixStep);
 
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("not owned by IranDirect", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("not owned by IranDirect", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, routes.DeleteCallCount);
     }
 
     [Fact]
-    public async Task RemovePrefix_RouteStillExistsAfterDelete_ReturnsFailedAndPreservesOwnership()
+    public async Task RemovePrefixGroup_RouteStillExistsAfterDelete_ReturnsFailedAndPreservesOwnership()
     {
         FakeRouteManager routes = new();
         FakeRouteInventory routeInv = new();
@@ -137,12 +384,121 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
         FakeEndpointInventory endpointInv = new();
         WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
 
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemovePrefixStep);
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, RemovePrefixStep);
 
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("still exists", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("still exists", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
         RouteInventory saved = await routeInv.LoadAsync();
         Assert.NotEmpty(saved.Routes);
+    }
+
+    [Fact]
+    public async Task RemovePrefixGroup_ExactRemoveUsesIdentityRegardlessOfMetric()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Clear();
+        routes.Present.Add("203.0.113.0/24|192.168.1.1|10");
+        routes.RouteMetrics["203.0.113.0/24|192.168.1.1|10"] = 100;
+        routes.TrackDeletions = true;
+        FakeRouteInventory routeInv = new();
+        routeInv.Seed(AddPrefixStep.Identity);
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, RemovePrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Empty(saved.Routes);
+    }
+
+    [Fact]
+    public async Task RemovePrefixGroup_AlreadyAbsentWithStaleInventory_RemovesStaleAndSucceeds()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        routeInv.Seed(AddPrefixStep.Identity);
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, RemovePrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        RouteInventory saved = await routeInv.LoadAsync();
+        Assert.Empty(saved.Routes);
+    }
+
+    [Fact]
+    public async Task RemovePrefixGroup_AlreadyAbsentNoInventory_NoopSucceeds()
+    {
+        FakeRouteManager routes = new();
+        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, RemovePrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        Assert.Equal(0, routes.DeleteCallCount);
+    }
+
+    [Fact]
+    public async Task RemovePrefixGroup_InventoryFailureAfterVerify_StepFails()
+    {
+        FakeRouteManager routes = new();
+        routes.TrackDeletions = true;
+        FakeRouteInventory routeInv = new(throwOnSave: true);
+        routeInv.Seed(AddPrefixStep.Identity);
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, RemovePrefixStep);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[0].Status);
+        Assert.Contains("inventory", r[0].ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RemovePrefixGroup_InventoryOnlyForVerifiedRemovals()
+    {
+        FakeRouteManager routes = new();
+        routes.TrackDeletions = true;
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        RuntimeExecutionStep ok = RemovePrefixStep with
+        {
+            Identity = "203.0.113.0/24|192.168.1.1|10",
+            DestinationPrefix = "203.0.113.0/24",
+            InterfaceIndex = 10
+        };
+        RuntimeExecutionStep stuck = RemovePrefixStep with
+        {
+            Identity = "203.0.113.1/24|192.168.1.1|11",
+            DestinationPrefix = "203.0.113.1/24",
+            InterfaceIndex = 11
+        };
+        routeInv.Seed(ok.Identity);
+        routeInv.Seed(stuck.Identity, additive: true);
+        routes.Present.Add(stuck.Identity);
+        routes.DoNotDelete.Add(stuck.Identity);
+
+        IReadOnlyList<RuntimeExecutionStepResult> r =
+            await ExecutePrefixGroupAsync(h, ok, stuck);
+
+        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        Assert.Equal(RuntimeExecutionStepStatus.Failed, r[1].Status);
+        RouteInventory saved = await routeInv.LoadAsync();
+        RouteInventoryItem remaining = Assert.Single(saved.Routes);
+        Assert.Equal(stuck.Identity, remaining.Identity);
     }
 
     [Fact]
@@ -260,7 +616,10 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
 
         cts.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => h.ExecuteAndVerifyAsync(AddPrefixStep, cts.Token));
+            () => h.MutatePrefixRouteAsync(AddPrefixStep, cts.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => h.VerifyPrefixRouteGroupAsync(
+                [AddPrefixStep], [PrefixMutationResult.Success()], cts.Token));
     }
 
     [Fact]
@@ -272,61 +631,12 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
         WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => h.ExecuteAndVerifyAsync(AddPrefixStep with { Gateway = "not-an-ip" }));
+            () => h.MutatePrefixRouteAsync(
+                AddPrefixStep with { Gateway = "not-an-ip" }));
     }
 
     [Fact]
-    public async Task AddPrefix_InventoryFailureAfterVerify_StepFails()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
-        FakeRouteInventory routeInv = new(throwOnSave: true);
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("inventory", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task RemovePrefix_InventoryFailureAfterVerify_StepFails()
-    {
-        FakeRouteManager routes = new();
-        FakeRouteInventory routeInv = new(throwOnSave: true);
-        routeInv.Seed(AddPrefixStep.Identity);
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        routes.TrackDeletions = true;
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemovePrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("inventory", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task RemovePrefix_AlreadyAbsentWithStaleInventory_RemovesStaleAndSucceeds()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
-        FakeRouteInventory routeInv = new();
-        routeInv.Seed(AddPrefixStep.Identity);
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemovePrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
-        RouteInventory saved = await routeInv.LoadAsync();
-        Assert.Empty(saved.Routes);
-        Assert.Equal(0, routes.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RemovePrefix_AlreadyAbsentNoInventory_NoopSucceeds()
+    public async Task AddPrefix_ExecuteAndVerify_DelegatesToGroupPath()
     {
         FakeRouteManager routes = new();
         routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
@@ -334,225 +644,103 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
         FakeEndpointInventory endpointInv = new();
         WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
 
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemovePrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
-        Assert.Equal(0, routes.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RemoveEndpoint_AlreadyAbsentWithStaleOwnedInventory_RemovesStaleAndSucceeds()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("10.0.0.1/32|192.168.1.1|10");
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new();
-        endpointInv.SeedOwned(AddEndpointStep.Identity, addedByIranDirect: true);
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemoveEndpointStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
-        VpnEndpointInventory saved = await endpointInv.LoadAsync();
-        Assert.Empty(saved.Endpoints);
-        Assert.Equal(0, routes.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RemoveEndpoint_AlreadyAbsentNoInventory_NoopSucceeds()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("10.0.0.1/32|192.168.1.1|10");
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemoveEndpointStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
-        Assert.Equal(0, routes.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RemoveEndpoint_AlreadyAbsentWithNonOwnedInventory_PreservesEntry()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("10.0.0.1/32|192.168.1.1|10");
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new();
-        endpointInv.SeedOwned(AddEndpointStep.Identity, addedByIranDirect: false);
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemoveEndpointStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
-        VpnEndpointInventory saved = await endpointInv.LoadAsync();
-        Assert.NotEmpty(saved.Endpoints);
-        Assert.Equal(0, routes.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task AddPrefix_PreexistingOwned_IdempotentSuccess()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Clear();
-        routes.Present.Add("203.0.113.0/24|192.168.1.1|10");
-        FakeRouteInventory routeInv = new();
-        routeInv.Seed(AddPrefixStep.Identity);
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
         RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
 
         Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
-        Assert.Equal(0, routes.AddCallCount);
-        Assert.Equal(0, routes.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task AddPrefix_PreexistingUnowned_ReturnsFailed()
-    {
-        FakeRouteManager routes = new();
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("not owned by IranDirect", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(0, routes.AddCallCount);
-    }
-
-    [Fact]
-    public async Task AddPrefix_InventoryFailure_CompensatesSuccessfully()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
-        routes.TrackDeletions = true;
-        FakeRouteInventory routeInv = new(throwOnSave: true);
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("removed as compensation", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, routes.AddCallCount);
-        Assert.Equal(1, routes.DeleteCallCount);
-        Assert.DoesNotContain(AddPrefixStep.Identity, routes.Present);
-    }
-
-    [Fact]
-    public async Task AddPrefix_InventoryFailure_OrphanReported()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
-        FakeRouteInventory routeInv = new(throwOnSave: true);
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddPrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("Orphaned route", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(AddPrefixStep.Identity, routes.Present);
-    }
-
-    [Fact]
-    public async Task AddEndpoint_PreexistingOwned_IdempotentSuccess()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Clear();
-        routes.Present.Add("10.0.0.1/32|192.168.1.1|10");
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new();
-        endpointInv.SeedOwned(AddEndpointStep.Identity, addedByIranDirect: true);
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddEndpointStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
-        Assert.Equal(0, routes.AddCallCount);
-        Assert.Equal(0, routes.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task AddEndpoint_PreexistingUnowned_ReturnsFailed()
-    {
-        FakeRouteManager routes = new();
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddEndpointStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("not in the endpoint inventory", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(0, routes.AddCallCount);
-    }
-
-    [Fact]
-    public async Task AddEndpoint_InventoryFailure_CompensatesSuccessfully()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("10.0.0.1/32|192.168.1.1|10");
-        routes.TrackDeletions = true;
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new(throwOnSave: true);
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddEndpointStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("removed as compensation", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, routes.AddCallCount);
-        Assert.Equal(1, routes.DeleteCallCount);
-        Assert.DoesNotContain(AddEndpointStep.Identity, routes.Present);
-    }
-
-    [Fact]
-    public async Task AddEndpoint_InventoryFailure_OrphanReported()
-    {
-        FakeRouteManager routes = new();
-        routes.Present.Remove("10.0.0.1/32|192.168.1.1|10");
-        FakeRouteInventory routeInv = new();
-        FakeEndpointInventory endpointInv = new(throwOnSave: true);
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(AddEndpointStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Failed, r.Status);
-        Assert.Contains("Orphaned route", r.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(AddEndpointStep.Identity, routes.Present);
-    }
-
-    [Fact]
-    public async Task ConcurrentRemoval_DoesNotLoseUnrelatedEntries()
-    {
-        FakeRouteManager routes = new();
-        routes.TrackDeletions = true;
-        FakeRouteInventory routeInv = new();
-        routeInv.Seed(AddPrefixStep.Identity);
-        string otherIdentity = "198.51.100.0/24|192.168.1.1|10";
-        routeInv.Seed(otherIdentity, additive: true);
-        FakeEndpointInventory endpointInv = new();
-        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
-
-        RuntimeExecutionStepResult r = await h.ExecuteAndVerifyAsync(RemovePrefixStep);
-
-        Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r.Status);
+        Assert.Equal(1, routes.GetCallCount);
         RouteInventory saved = await routeInv.LoadAsync();
         Assert.Single(saved.Routes);
-        Assert.Equal(otherIdentity, saved.Routes[0].Identity);
+    }
+
+    [Fact]
+    public async Task VerifyPrefixRouteGroup_RejectsMixedKinds()
+    {
+        FakeRouteManager routes = new();
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => h.VerifyPrefixRouteGroupAsync(
+                [AddPrefixStep, RemovePrefixStep],
+                [PrefixMutationResult.Success(), PrefixMutationResult.Success()]));
+    }
+
+    [Fact]
+    public async Task VerifyPrefixRouteGroup_RejectsEndpointKinds()
+    {
+        FakeRouteManager routes = new();
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => h.VerifyPrefixRouteGroupAsync(
+                [AddEndpointStep], [PrefixMutationResult.Success()]));
+    }
+
+    [Fact]
+    public async Task VerifyPrefixRouteGroup_MismatchedMutationCount_Throws()
+    {
+        FakeRouteManager routes = new();
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => h.VerifyPrefixRouteGroupAsync(
+                [AddPrefixStep, AddPrefixStep],
+                [PrefixMutationResult.Success()]));
+    }
+
+    [Fact]
+    public async Task PrefixGroup_RecordsProfilingCategories()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(enabled: true, store: store);
+
+        FakeRouteManager routes = new();
+        routes.Present.Remove("203.0.113.0/24|192.168.1.1|10");
+        FakeRouteInventory routeInv = new();
+        FakeEndpointInventory endpointInv = new();
+        WindowsRuntimeExecutionStepHandler h = CreateHandler(routes, routeInv, endpointInv, profiler);
+
+        using (profiler.BeginCycleIfNone("enable"))
+        {
+            IReadOnlyList<RuntimeExecutionStepResult> r =
+                await ExecutePrefixGroupAsync(h, AddPrefixStep);
+
+            Assert.Equal(RuntimeExecutionStepStatus.Succeeded, r[0].Status);
+        }
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        Assert.Contains(report.Categories,
+            c => c.Category == RuntimePerfCategory.ExecutionPrefixAddMutation);
+        Assert.Contains(report.Categories,
+            c => c.Category == RuntimePerfCategory.ExecutionPrefixAddGroupVerification);
+    }
+
+    private static async Task<IReadOnlyList<RuntimeExecutionStepResult>> ExecutePrefixGroupAsync(
+        WindowsRuntimeExecutionStepHandler handler,
+        params RuntimeExecutionStep[] steps)
+    {
+        PrefixMutationResult[] mutations = new PrefixMutationResult[steps.Length];
+        for (int i = 0; i < steps.Length; i++)
+            mutations[i] = await handler.MutatePrefixRouteAsync(steps[i]);
+
+        return await handler.VerifyPrefixRouteGroupAsync(steps, mutations);
     }
 
     private static WindowsRuntimeExecutionStepHandler CreateHandler(
         FakeRouteManager routes,
         FakeRouteInventory routeInv,
-        FakeEndpointInventory endpointInv)
+        FakeEndpointInventory endpointInv,
+        RuntimeCycleProfiler? profiler = null)
     {
-        return new WindowsRuntimeExecutionStepHandler(routes, routeInv, endpointInv);
+        return new WindowsRuntimeExecutionStepHandler(routes, routeInv, endpointInv, profiler);
     }
 
     private sealed class FakeRouteManager : IRouteManager
@@ -564,6 +752,10 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
             "203.0.113.0/24|192.168.1.1|10",
             "10.0.0.1/32|192.168.1.1|10"
         };
+
+        public HashSet<string> DontAdd { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> DoNotDelete { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> RouteMetrics { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public int AddCallCount { get; private set; }
         public int DeleteCallCount { get; private set; }
@@ -591,7 +783,7 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
                         DestinationPrefix = p[0],
                         NextHop = IPAddress.Parse(p[1]),
                         InterfaceIndex = uint.Parse(p[2]),
-                        RouteMetric = 256
+                        RouteMetric = RouteMetrics.GetValueOrDefault(identity, 256)
                     };
                 }).ToArray());
         }
@@ -604,10 +796,15 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
             cancellationToken.ThrowIfCancellationRequested();
             if (_throwOnAdd) throw new InvalidOperationException("Add failed.");
 
-            if (!SuppressRouteAdd)
+            foreach (ManagedRoute r in routes)
             {
-                foreach (ManagedRoute r in routes)
-                    Present.Add(r.Identity);
+                if (Present.Contains(r.Identity))
+                    throw new InvalidOperationException("The route already exists.");
+
+                if (SuppressRouteAdd || DontAdd.Contains(r.Identity))
+                    continue;
+
+                Present.Add(r.Identity);
             }
 
             return Task.CompletedTask;
@@ -623,7 +820,10 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
             if (TrackDeletions)
             {
                 foreach (ManagedRoute r in routes)
-                    Present.Remove(r.Identity);
+                {
+                    if (!DoNotDelete.Contains(r.Identity))
+                        Present.Remove(r.Identity);
+                }
             }
 
             return Task.CompletedTask;
@@ -726,6 +926,27 @@ public sealed class WindowsRuntimeExecutionStepHandlerTests
             VpnEndpointInventory current = _stored ?? new VpnEndpointInventory();
             _stored = transform(current);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class TempDirectory : IDisposable
+    {
+        public string Path { get; } =
+            System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                "irandirect-tests-" + Guid.NewGuid().ToString("N"));
+
+        public TempDirectory() => Directory.CreateDirectory(Path);
+
+        public void Dispose()
+        {
+            try
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+            catch
+            {
+            }
         }
     }
 }

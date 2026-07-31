@@ -20,6 +20,11 @@ public enum RuntimePerfCategory
     ExecutionRouteVerify,
     ExecutionInventoryMutation,
 
+    ExecutionPrefixAddMutation,
+    ExecutionPrefixRemoveMutation,
+    ExecutionPrefixAddGroupVerification,
+    ExecutionPrefixRemoveGroupVerification,
+
     PersistenceStateSave,
     PersistenceInventorySave
 }
