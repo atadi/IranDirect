@@ -10,6 +10,11 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>tray-icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="tray-icon.ico" LogicalName="IranDirect.Tray.tray-icon.ico" />
+  </ItemGroup>
 
 </Project>

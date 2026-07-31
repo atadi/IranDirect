@@ -169,7 +169,7 @@ public sealed class TrayApplicationContext :
         _notifyIcon = new NotifyIcon
         {
             Text = "IranDirect",
-            Icon = SystemIcons.Application,
+            Icon = LoadApplicationIcon(),
             ContextMenuStrip = menu,
             Visible = true
         };
@@ -600,6 +600,18 @@ public sealed class TrayApplicationContext :
         WindowsPrincipal principal = new(identity);
         return principal.IsInRole(
             WindowsBuiltInRole.Administrator);
+    }
+
+    private static Icon LoadApplicationIcon()
+    {
+        using Stream stream =
+            typeof(TrayApplicationContext).Assembly
+                .GetManifestResourceStream(
+                    "IranDirect.Tray.tray-icon.ico")
+            ?? throw new InvalidOperationException(
+                "Embedded tray icon resource is missing.");
+
+        return new Icon(stream);
     }
 
     private void ExitApplication()
