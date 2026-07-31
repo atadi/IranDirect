@@ -1,6 +1,8 @@
+using IranDirect.Core.Models;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
+using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
 
 namespace IranDirect.Core.Runtime;
@@ -13,19 +15,22 @@ public sealed class IranDirectRuntimeObservationSource :
     private readonly GatewayDetector _gatewayDetector;
     private readonly PrefixFileRepository _prefixRepository;
     private readonly IRouteManager _routeManager;
+    private readonly RuntimeCycleProfiler _profiler;
 
     public IranDirectRuntimeObservationSource(
         string profilePath,
         OpenVpnEndpointProvider vpnEndpointProvider,
         GatewayDetector gatewayDetector,
         PrefixFileRepository prefixRepository,
-        IRouteManager routeManager)
+        IRouteManager routeManager,
+        RuntimeCycleProfiler? profiler = null)
     {
         _profilePath = profilePath;
         _vpnEndpointProvider = vpnEndpointProvider;
         _gatewayDetector = gatewayDetector;
         _prefixRepository = prefixRepository;
         _routeManager = routeManager;
+        _profiler = profiler ?? RuntimeCycleProfiler.Noop;
     }
 
     public bool VpnProfileExists =>
@@ -45,9 +50,15 @@ public sealed class IranDirectRuntimeObservationSource :
 
         try
         {
-            IReadOnlyList<ResolvedVpnEndpoint> endpoints =
-                await _vpnEndpointProvider.GetEndpointsAsync(
-                    cancellationToken);
+            IReadOnlyList<ResolvedVpnEndpoint> endpoints;
+
+            using (_profiler.Measure(
+                RuntimePerfCategory.ObservationVpnEndpointLoad))
+            {
+                endpoints =
+                    await _vpnEndpointProvider.GetEndpointsAsync(
+                        cancellationToken);
+            }
 
             ObservedVpnEndpoint[] observed = endpoints
                 .Select(endpoint =>
@@ -78,7 +89,13 @@ public sealed class IranDirectRuntimeObservationSource :
     {
         try
         {
-            var gateway = _gatewayDetector.Detect();
+            DirectGateway gateway;
+
+            using (_profiler.Measure(
+                RuntimePerfCategory.ObservationGatewayDetection))
+            {
+                gateway = _gatewayDetector.Detect();
+            }
 
             return RuntimeObservationSourceResult<
                 ObservedDirectGateway>.Success(
@@ -106,17 +123,27 @@ public sealed class IranDirectRuntimeObservationSource :
         ObservePrefixesAsync(
             CancellationToken cancellationToken = default)
     {
-        return await _prefixRepository.LoadAsync(
-            cancellationToken);
+        using (_profiler.Measure(
+            RuntimePerfCategory.ObservationPrefixLoad))
+        {
+            return await _prefixRepository.LoadAsync(
+                cancellationToken);
+        }
     }
 
     public async Task<IReadOnlyList<ObservedRoute>>
         ObserveRoutesAsync(
             CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<SystemRoute> routes =
-            await _routeManager.GetIpv4RoutesAsync(
-                cancellationToken);
+        IReadOnlyList<SystemRoute> routes;
+
+        using (_profiler.Measure(
+            RuntimePerfCategory.ObservationRouteTableRead))
+        {
+            routes =
+                await _routeManager.GetIpv4RoutesAsync(
+                    cancellationToken);
+        }
 
         return routes
             .Select(route =>

@@ -5,6 +5,7 @@ using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
+using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.State;
 using IranDirect.Core.Vpn;
 using System.Net;
@@ -32,6 +33,7 @@ public sealed class IranDirectController
     private readonly DesiredConfigurationService
         _configurationService;
     private readonly RuntimeOperationStatus _operationStatus;
+    private readonly RuntimeCycleProfiler _profiler;
 
     public IranDirectController(
         IranPrefixProvider prefixProvider,
@@ -46,7 +48,8 @@ public sealed class IranDirectController
         RuntimeCycleCoordinator runtimeCycleCoordinator,
         IRuntimeExecutor runtimeExecutor,
         DesiredConfigurationService configurationService,
-        RuntimeOperationStatus operationStatus)
+        RuntimeOperationStatus operationStatus,
+        RuntimeCycleProfiler? profiler = null)
     {
         _prefixProvider = prefixProvider;
         _prefixRepository = prefixRepository;
@@ -62,6 +65,7 @@ public sealed class IranDirectController
         _runtimeExecutor = runtimeExecutor;
         _configurationService = configurationService;
         _operationStatus = operationStatus;
+        _profiler = profiler ?? RuntimeCycleProfiler.Noop;
     }
 
     public async Task<int> UpdatePrefixesAsync(
@@ -95,6 +99,8 @@ public sealed class IranDirectController
     public async Task<RuntimeCycleExecutionResult> EnableAsync(
         CancellationToken cancellationToken = default)
     {
+        using IDisposable cycle = _profiler.BeginCycle("enable");
+
         _operationStatus.Begin(OperationState.Enabling, "user");
 
         await EnsurePrefixesAsync(cancellationToken);
@@ -108,6 +114,8 @@ public sealed class IranDirectController
     public async Task<RuntimeCycleExecutionResult> DisableAsync(
         CancellationToken cancellationToken = default)
     {
+        using IDisposable cycle = _profiler.BeginCycle("disable");
+
         _operationStatus.Begin(OperationState.Disabling, "user");
 
         await _configurationService.SetEnabledAsync(
@@ -119,6 +127,8 @@ public sealed class IranDirectController
     public async Task<RuntimeCycleExecutionResult> RunCycleAsync(
         CancellationToken cancellationToken = default)
     {
+        using IDisposable cycle = _profiler.BeginCycle("repair");
+
         _operationStatus.Begin(OperationState.Repairing, "cycle");
         return await RunCycleCoreAsync(cancellationToken);
     }
@@ -134,11 +144,17 @@ public sealed class IranDirectController
 
             _operationStatus.SetPlannedSteps(decision.ExecutionPlan.Count);
 
-            RuntimeExecutionResult execution =
-                await _runtimeExecutor.ExecuteAsync(
-                    decision.ExecutionPlan,
-                    _operationStatus,
-                    cancellationToken);
+            RuntimeExecutionResult execution;
+
+            using (_profiler.Measure(
+                RuntimePerfCategory.ExecutionTotal))
+            {
+                execution =
+                    await _runtimeExecutor.ExecuteAsync(
+                        decision.ExecutionPlan,
+                        _operationStatus,
+                        cancellationToken);
+            }
 
             _operationStatus.Complete(execution);
 
@@ -272,39 +288,51 @@ public sealed class IranDirectController
                     await _prefixRepository.LoadAsync(
                         cancellationToken);
 
-                await _stateRepository.SaveAsync(
-                    state with
-                    {
-                        Enabled = true,
-                        Gateway = gateway?.Address
-                            ?? state.Gateway,
-                        InterfaceIndex = gateway?.InterfaceIndex
-                            ?? state.InterfaceIndex,
-                        InterfaceName = gateway?.InterfaceName
-                            ?? state.InterfaceName,
-                        PrefixCount = prefixes.Count,
-                        EnabledAt = state.EnabledAt
-                            ?? DateTimeOffset.UtcNow,
-                        PrefixesUpdatedAt =
-                            _prefixRepository.GetLastModified(),
-                        LastError = null
-                    },
-                    cancellationToken);
+                using (_profiler.Measure(
+                    RuntimePerfCategory.PersistenceStateSave))
+                {
+                    await _stateRepository.SaveAsync(
+                        state with
+                        {
+                            Enabled = true,
+                            Gateway = gateway?.Address
+                                ?? state.Gateway,
+                            InterfaceIndex = gateway?.InterfaceIndex
+                                ?? state.InterfaceIndex,
+                            InterfaceName = gateway?.InterfaceName
+                                ?? state.InterfaceName,
+                            PrefixCount = prefixes.Count,
+                            EnabledAt = state.EnabledAt
+                                ?? DateTimeOffset.UtcNow,
+                            PrefixesUpdatedAt =
+                                _prefixRepository.GetLastModified(),
+                            LastError = null
+                        },
+                        cancellationToken);
+                }
             }
             else
             {
-                await _stateRepository.SaveAsync(
-                    state with
-                    {
-                        Enabled = false,
-                        LastError = null
-                    },
-                    cancellationToken);
+                using (_profiler.Measure(
+                    RuntimePerfCategory.PersistenceStateSave))
+                {
+                    await _stateRepository.SaveAsync(
+                        state with
+                        {
+                            Enabled = false,
+                            LastError = null
+                        },
+                        cancellationToken);
+                }
 
                 if (execution.MutatedInfrastructure)
                 {
-                    await _routeInventoryStore.ClearAsync(
-                        cancellationToken);
+                    using (_profiler.Measure(
+                        RuntimePerfCategory.PersistenceInventorySave))
+                    {
+                        await _routeInventoryStore.ClearAsync(
+                            cancellationToken);
+                    }
                 }
             }
         }
@@ -312,9 +340,13 @@ public sealed class IranDirectController
         {
             string failureSummary = BuildFailureSummary(execution);
 
-            await _stateRepository.SaveAsync(
-                state with { LastError = failureSummary },
-                cancellationToken);
+            using (_profiler.Measure(
+                RuntimePerfCategory.PersistenceStateSave))
+            {
+                await _stateRepository.SaveAsync(
+                    state with { LastError = failureSummary },
+                    cancellationToken);
+            }
         }
     }
 

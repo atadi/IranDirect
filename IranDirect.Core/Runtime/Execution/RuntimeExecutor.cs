@@ -1,22 +1,16 @@
 namespace IranDirect.Core.Runtime.Execution;
 
-using System.Diagnostics;
-using Microsoft.Extensions.Logging;
-
 public sealed class RuntimeExecutor : IRuntimeExecutor
 {
     private const int DefaultMaxDegreeOfParallelism = 8;
     private readonly IRuntimeExecutionStepHandler _handler;
-    private readonly ILogger<RuntimeExecutor>? _logger;
 
     public RuntimeExecutor(
-        IRuntimeExecutionStepHandler handler,
-        ILogger<RuntimeExecutor>? logger = null)
+        IRuntimeExecutionStepHandler handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
 
         _handler = handler;
-        _logger = logger;
     }
 
     public async Task<RuntimeExecutionResult> ExecuteAsync(
@@ -28,8 +22,6 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
 
         if (plan.IsEmpty)
             return RuntimeExecutionResult.NoExecutionRequired();
-
-        long totalStart = Stopwatch.GetTimestamp();
 
         RuntimeExecutionStepResult[] results = new RuntimeExecutionStepResult[plan.Steps.Count];
         bool hasSuccess = false;
@@ -81,9 +73,6 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
             FillNullResults(plan.Steps, results, UpdateProgress);
             return BuildFinalResult(results, hasSuccess);
         }
-
-        TimeSpan totalDuration = Stopwatch.GetElapsedTime(totalStart);
-        LogPerformanceMetrics(plan, results, totalDuration);
 
         return BuildFinalResult(results, hasSuccess);
     }
@@ -318,31 +307,4 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
             DestinationPrefix = step.DestinationPrefix,
             Status = status
         };
-
-    private void LogPerformanceMetrics(
-        RuntimeExecutionPlan plan,
-        RuntimeExecutionStepResult[] results,
-        TimeSpan totalDuration)
-    {
-        if (_logger is null)
-            return;
-
-        int totalSteps = results.Length;
-        int succeeded = results.Count(r => r.Status == RuntimeExecutionStepStatus.Succeeded);
-        int failedCount = results.Count(r => r.Status == RuntimeExecutionStepStatus.Failed);
-        int cancelledCount = results.Count(r => r.Status == RuntimeExecutionStepStatus.Cancelled);
-
-        long avgMs = totalSteps > 0 ? (long)totalDuration.TotalMilliseconds / totalSteps : 0;
-
-        _logger.LogInformation(
-            "PERF: " +
-            "TotalSteps={TotalSteps} " +
-            "Succeeded={Succeeded} " +
-            "Failed={Failed} " +
-            "Cancelled={Cancelled} " +
-            "TotalDurationMs={TotalDurationMs} " +
-            "AvgPerStepMs={AvgPerStepMs}",
-            totalSteps, succeeded, failedCount, cancelledCount,
-            (long)totalDuration.TotalMilliseconds, avgMs);
-    }
 }

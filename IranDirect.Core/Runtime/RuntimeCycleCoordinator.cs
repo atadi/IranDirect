@@ -1,21 +1,30 @@
 namespace IranDirect.Core.Runtime;
 
+using IranDirect.Core.Runtime.Profiling;
+
 public sealed class RuntimeCycleCoordinator
 {
     private readonly IRuntimeDecisionBuilder _decisionBuilder;
+    private readonly RuntimeCycleProfiler _profiler;
 
     public RuntimeCycleCoordinator(
-        IRuntimeDecisionBuilder decisionBuilder)
+        IRuntimeDecisionBuilder decisionBuilder,
+        RuntimeCycleProfiler? profiler = null)
     {
         ArgumentNullException.ThrowIfNull(decisionBuilder);
 
         _decisionBuilder = decisionBuilder;
+        _profiler = profiler ?? RuntimeCycleProfiler.Noop;
     }
 
-    public Task<RuntimeDecision> RunCycleAsync(
+    public async Task<RuntimeDecision> RunCycleAsync(
         CancellationToken cancellationToken = default)
     {
-        return _decisionBuilder.BuildAsync(
-            cancellationToken);
+        using (_profiler.Measure(
+            RuntimePerfCategory.PlanningDecisionBuild))
+        {
+            return await _decisionBuilder.BuildAsync(
+                cancellationToken);
+        }
     }
 }

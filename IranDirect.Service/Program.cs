@@ -6,6 +6,7 @@ using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
+using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Runtime.Reconciliation;
 using IranDirect.Core.State;
 using IranDirect.Core.SystemTools;
@@ -149,6 +150,13 @@ builder.Services.AddSingleton<
 builder.Services.AddSingleton<
     IRuntimeExecutor, RuntimeExecutor>();
 builder.Services.AddSingleton<RuntimeOperationStatus>();
+builder.Services.AddSingleton(
+    serviceProvider => new RuntimeCycleProfiler(
+        builder.Configuration.GetValue(
+            "Profiling:Enabled", defaultValue: true),
+        serviceProvider.GetService<
+            Microsoft.Extensions.Logging.ILogger<
+                RuntimeCycleProfiler>>()));
 builder.Services.AddSingleton<RuntimeCycleCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();

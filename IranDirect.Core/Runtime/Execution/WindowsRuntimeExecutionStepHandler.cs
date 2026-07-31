@@ -2,6 +2,7 @@ namespace IranDirect.Core.Runtime.Execution;
 
 using System.Net;
 using IranDirect.Core.Routing;
+using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
 
 public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHandler
@@ -9,11 +10,13 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
     private readonly IRouteManager _routeManager;
     private readonly IRouteInventoryPersistence _routeInventory;
     private readonly IEndpointInventoryPersistence _endpointInventory;
+    private readonly RuntimeCycleProfiler _profiler;
 
     public WindowsRuntimeExecutionStepHandler(
         IRouteManager routeManager,
         IRouteInventoryPersistence routeInventory,
-        IEndpointInventoryPersistence endpointInventory)
+        IEndpointInventoryPersistence endpointInventory,
+        RuntimeCycleProfiler? profiler = null)
     {
         ArgumentNullException.ThrowIfNull(routeManager);
         ArgumentNullException.ThrowIfNull(routeInventory);
@@ -22,6 +25,7 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         _routeManager = routeManager;
         _routeInventory = routeInventory;
         _endpointInventory = endpointInventory;
+        _profiler = profiler ?? RuntimeCycleProfiler.Noop;
     }
 
     public async Task<RuntimeExecutionStepResult> ExecuteAndVerifyAsync(
@@ -62,8 +66,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            await _routeManager.AddRoutesAsync(
-                [managedRoute], cancellationToken);
+            using (_profiler.Measure(
+                RuntimePerfCategory.ExecutionRouteCreate))
+            {
+                await _routeManager.AddRoutesAsync(
+                    [managedRoute], cancellationToken);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
@@ -80,7 +88,7 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            await _endpointInventory.MutateAsync(
+            await MutateEndpointInventoryAsync(
                 inventory =>
                 {
                     VpnEndpointInventoryItem? existing = inventory.Endpoints
@@ -215,8 +223,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
             try
             {
-                await _routeManager.DeleteRoutesAsync(
-                    [managedRoute], cancellationToken);
+                using (_profiler.Measure(
+                    RuntimePerfCategory.ExecutionRouteDelete))
+                {
+                    await _routeManager.DeleteRoutesAsync(
+                        [managedRoute], cancellationToken);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
@@ -233,7 +245,7 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
             try
             {
-                await _endpointInventory.MutateAsync(
+                await MutateEndpointInventoryAsync(
                     inv => inv with
                     {
                         Endpoints = inv.Endpoints
@@ -257,7 +269,7 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            await _endpointInventory.MutateAsync(
+            await MutateEndpointInventoryAsync(
                 inv =>
                 {
                     VpnEndpointInventoryItem? stale = inv.Endpoints
@@ -303,8 +315,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            await _routeManager.AddRoutesAsync(
-                [managedRoute], cancellationToken);
+            using (_profiler.Measure(
+                RuntimePerfCategory.ExecutionRouteCreate))
+            {
+                await _routeManager.AddRoutesAsync(
+                    [managedRoute], cancellationToken);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not ArgumentNullException)
@@ -321,7 +337,7 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            await _routeInventory.MutateAsync(
+            await MutateRouteInventoryAsync(
                 inventory =>
                 {
                     if (inventory.Routes.Any(r =>
@@ -383,8 +399,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
     {
         try
         {
-            await _routeManager.DeleteRoutesAsync(
-                [managedRoute], CancellationToken.None);
+            using (_profiler.Measure(
+                RuntimePerfCategory.ExecutionRouteDelete))
+            {
+                await _routeManager.DeleteRoutesAsync(
+                    [managedRoute], CancellationToken.None);
+            }
         }
         catch (Exception compEx)
         {
@@ -411,8 +431,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
     {
         try
         {
-            await _routeManager.DeleteRoutesAsync(
-                [managedRoute], CancellationToken.None);
+            using (_profiler.Measure(
+                RuntimePerfCategory.ExecutionRouteDelete))
+            {
+                await _routeManager.DeleteRoutesAsync(
+                    [managedRoute], CancellationToken.None);
+            }
         }
         catch (Exception compEx)
         {
@@ -467,8 +491,12 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
             try
             {
-                await _routeManager.DeleteRoutesAsync(
-                    [managedRoute], cancellationToken);
+                using (_profiler.Measure(
+                    RuntimePerfCategory.ExecutionRouteDelete))
+                {
+                    await _routeManager.DeleteRoutesAsync(
+                        [managedRoute], cancellationToken);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException
                                        and not ArgumentNullException)
@@ -485,7 +513,7 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
             try
             {
-                await _routeInventory.MutateAsync(
+                await MutateRouteInventoryAsync(
                     inv => inv with
                     {
                         Routes = inv.Routes
@@ -509,7 +537,7 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
 
         try
         {
-            await _routeInventory.MutateAsync(
+            await MutateRouteInventoryAsync(
                 inv =>
                 {
                     bool hasStaleOwned = inv.Routes.Any(r =>
@@ -546,9 +574,15 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
         RuntimeExecutionStep step,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<SystemRoute> routes =
-            await _routeManager.GetIpv4RoutesAsync(
-                cancellationToken);
+        IReadOnlyList<SystemRoute> routes;
+
+        using (_profiler.Measure(
+            RuntimePerfCategory.ExecutionRouteVerify))
+        {
+            routes =
+                await _routeManager.GetIpv4RoutesAsync(
+                    cancellationToken);
+        }
 
         string expectedIdentity = step.Identity;
 
@@ -587,6 +621,30 @@ public sealed class WindowsRuntimeExecutionStepHandler : IRuntimeExecutionStepHa
             InterfaceIndex = step.InterfaceIndex,
             Metric = step.Metric
         };
+    }
+
+    private async Task MutateRouteInventoryAsync(
+        Func<RouteInventory, RouteInventory> transform,
+        CancellationToken cancellationToken)
+    {
+        using (_profiler.Measure(
+            RuntimePerfCategory.ExecutionInventoryMutation))
+        {
+            await _routeInventory.MutateAsync(
+                transform, cancellationToken);
+        }
+    }
+
+    private async Task MutateEndpointInventoryAsync(
+        Func<VpnEndpointInventory, VpnEndpointInventory> transform,
+        CancellationToken cancellationToken)
+    {
+        using (_profiler.Measure(
+            RuntimePerfCategory.ExecutionInventoryMutation))
+        {
+            await _endpointInventory.MutateAsync(
+                transform, cancellationToken);
+        }
     }
 
     private static RuntimeExecutionStepResult CreateSucceededResult(
