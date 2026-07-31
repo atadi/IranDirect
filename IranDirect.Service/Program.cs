@@ -151,12 +151,11 @@ builder.Services.AddSingleton<
     IRuntimeExecutor, RuntimeExecutor>();
 builder.Services.AddSingleton<RuntimeOperationStatus>();
 builder.Services.AddSingleton(
-    serviceProvider => new RuntimeCycleProfiler(
+    _ => new RuntimeCycleProfiler(
         builder.Configuration.GetValue(
             "Profiling:Enabled", defaultValue: true),
-        serviceProvider.GetService<
-            Microsoft.Extensions.Logging.ILogger<
-                RuntimeCycleProfiler>>()));
+        new RuntimePerfReportStore(
+            RuntimePerfReportStore.DefaultDirectory)));
 builder.Services.AddSingleton<RuntimeCycleCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();

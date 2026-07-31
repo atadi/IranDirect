@@ -7,6 +7,7 @@ using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
+using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Runtime.Reconciliation;
 using IranDirect.Core.State;
 using IranDirect.Core.Vpn;
@@ -680,6 +681,240 @@ public sealed class IranDirectControllerTests
         Assert.False(status.Operation.IsCompleted);
     }
 
+    [Fact]
+    public async Task Enable_ProducesExactlyOneEnableReport()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(
+            enabled: true,
+            store);
+        await using TestContext ctx = new(profiler);
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+        ctx.DesiredEnabled = true;
+
+        RuntimeCycleExecutionResult result =
+            await ctx.Controller.EnableAsync();
+
+        Assert.True(result.IsSuccess);
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        Assert.Equal("enable", report.Trigger);
+        Assert.Equal(
+            CycleCompletionStatus.Completed,
+            report.CompletionStatus);
+        Assert.Single(
+            Directory.GetFiles(
+                temp.Path, RuntimePerfReportStore.FilePattern));
+    }
+
+    [Fact]
+    public async Task Disable_ProducesExactlyOneDisableReport()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(
+            enabled: true,
+            store);
+        await using TestContext ctx = new(profiler);
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.RemovePrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+        ctx.DesiredEnabled = true;
+
+        RuntimeCycleExecutionResult result =
+            await ctx.Controller.DisableAsync();
+
+        Assert.True(result.IsSuccess);
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        Assert.Equal("disable", report.Trigger);
+        Assert.Single(
+            Directory.GetFiles(
+                temp.Path, RuntimePerfReportStore.FilePattern));
+    }
+
+    [Fact]
+    public async Task RunCycle_InsideActiveEnableScope_KeepsEnableTrigger()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(
+            enabled: true,
+            store);
+        await using TestContext ctx = new(profiler);
+        ctx.ExecutorResult = RuntimeExecutionResult.NoExecutionRequired();
+        ctx.DesiredEnabled = true;
+
+        using (profiler.BeginCycle("enable"))
+        {
+            RuntimeCycleExecutionResult result =
+                await ctx.Controller.RunCycleAsync();
+
+            Assert.True(result.IsSuccess);
+        }
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        Assert.Equal("enable", report.Trigger);
+        Assert.Single(
+            Directory.GetFiles(
+                temp.Path, RuntimePerfReportStore.FilePattern));
+    }
+
+    [Fact]
+    public async Task Enable_WhenExecutorThrows_StillWritesFailedReport()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(
+            enabled: true,
+            store);
+        await using TestContext ctx = new(profiler);
+        ctx.ExecutorResult = RuntimeExecutionResult.NoExecutionRequired();
+        ctx.FakeExecutor.ThrowOnExecute =
+            new InvalidOperationException(
+                "Inventory persistence failed.");
+        ctx.DesiredEnabled = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ctx.Controller.EnableAsync());
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        Assert.Equal("enable", report.Trigger);
+        Assert.Equal(
+            CycleCompletionStatus.Failed,
+            report.CompletionStatus);
+        Assert.Contains(
+            "Inventory persistence failed.",
+            report.ErrorSummary);
+        Assert.Single(
+            Directory.GetFiles(
+                temp.Path, RuntimePerfReportStore.FilePattern));
+    }
+
+    [Fact]
+    public async Task Enable_PartiallyCompleted_StillWritesReport()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(
+            enabled: true,
+            store);
+        await using TestContext ctx = new(profiler);
+        ctx.ExecutorResult = RuntimeExecutionResult.PartiallyCompleted(
+        [
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "ok|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            },
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "bad|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Failed,
+                ErrorMessage = "route not created"
+            }
+        ]);
+        ctx.DesiredEnabled = true;
+
+        RuntimeCycleExecutionResult result =
+            await ctx.Controller.EnableAsync();
+
+        Assert.False(result.IsSuccess);
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        Assert.Equal("enable", report.Trigger);
+        Assert.Equal(
+            CycleCompletionStatus.PartiallyCompleted,
+            report.CompletionStatus);
+    }
+
+    [Fact]
+    public async Task Enable_Cancelled_StillWritesCancelledReport()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(
+            enabled: true,
+            store);
+        await using TestContext ctx = new(profiler);
+        ctx.ExecutorResult = RuntimeExecutionResult.NoExecutionRequired();
+        ctx.DesiredEnabled = true;
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ctx.Controller.EnableAsync(cts.Token));
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        Assert.Equal("enable", report.Trigger);
+        Assert.Equal(
+            CycleCompletionStatus.Cancelled,
+            report.CompletionStatus);
+    }
+
+    [Fact]
+    public async Task Enable_RecordsExecutionTotalWhenExecutorRuns()
+    {
+        using TempDirectory temp = new();
+        RuntimePerfReportStore store = new(temp.Path);
+        RuntimeCycleProfiler profiler = new(
+            enabled: true,
+            store);
+        await using TestContext ctx = new(profiler);
+        ctx.ExecutorResult = RuntimeExecutionResult.Completed([
+            new RuntimeExecutionStepResult
+            {
+                StepIdentity = "test|id",
+                Kind = RuntimeExecutionStepKind.AddPrefixRoute,
+                DestinationPrefix = "test",
+                Status = RuntimeExecutionStepStatus.Succeeded
+            }
+        ]);
+        ctx.DesiredEnabled = true;
+
+        await ctx.Controller.EnableAsync();
+
+        RuntimeCyclePerfReport? report = store.ReadLatest();
+
+        Assert.NotNull(report);
+        RuntimePerfCategorySummary total = Assert.Single(
+            report.Categories,
+            c => c.Category ==
+                RuntimePerfCategory.ExecutionTotal);
+        Assert.True(total.Count >= 1);
+    }
+
     internal sealed class FakeDecisionBuilder : IRuntimeDecisionBuilder
     {
         public RuntimeDecision? Decision { get; set; }
@@ -697,6 +932,8 @@ public sealed class IranDirectControllerTests
         public RuntimeExecutionResult Result { get; set; } =
             RuntimeExecutionResult.NoExecutionRequired();
 
+        public Exception? ThrowOnExecute { get; set; }
+
         public RuntimeExecutionPlan? ExecutedPlan { get; private set; }
 
         public Task<RuntimeExecutionResult> ExecuteAsync(
@@ -706,6 +943,10 @@ public sealed class IranDirectControllerTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             ExecutedPlan = plan;
+
+            if (ThrowOnExecute is not null)
+                throw ThrowOnExecute;
+
             return Task.FromResult(Result);
         }
     }
@@ -762,6 +1003,8 @@ public sealed class IranDirectControllerTests
         public FakeExecutor FakeExecutor { get; }
         public FakeDecisionBuilder FakeDecisionBuilder { get; }
         public RuntimeOperationStatus OperationStatus { get; }
+        public RuntimeCycleProfiler Profiler { get; }
+        public string? PerfDirectory { get; }
 
         public RuntimeExecutionResult ExecutorResult
         {
@@ -812,11 +1055,16 @@ public sealed class IranDirectControllerTests
             }
         }
 
-        public TestContext()
+        public TestContext(
+            RuntimeCycleProfiler? profiler = null,
+            string? perfDirectory = null)
         {
             _tempDir = Path.Combine(
                 Path.GetTempPath(), $"IranDirectTest_{Guid.NewGuid()}");
             Directory.CreateDirectory(_tempDir);
+
+            Profiler = profiler ?? RuntimeCycleProfiler.Noop;
+            PerfDirectory = perfDirectory;
 
             StateRepository = new StateRepository(
                 Path.Combine(_tempDir, "state.json"));
@@ -862,7 +1110,8 @@ public sealed class IranDirectControllerTests
                 coordinator,
                 FakeExecutor,
                 _configurationService,
-                OperationStatus);
+                OperationStatus,
+                Profiler);
 
             // Set a default decision so first call doesn't NPE
             DesiredEnabled = false;
@@ -949,5 +1198,26 @@ public sealed class IranDirectControllerTests
                 RuntimeChangeKind.RemovePrefixRoute,
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
+    }
+
+    private sealed class TempDirectory : IDisposable
+    {
+        public string Path { get; } =
+            System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                $"IranPerfControllerTest_{Guid.NewGuid()}");
+
+        public void Dispose()
+        {
+            try
+            {
+                if (Directory.Exists(Path))
+                    Directory.Delete(Path, recursive: true);
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+        }
     }
 }

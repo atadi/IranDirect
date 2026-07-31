@@ -1,10 +1,30 @@
 using IranDirect.Core;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Runtime.Execution;
+using IranDirect.Core.Runtime.Profiling;
+using System.Linq;
 
 string commandText = args.Length == 0
     ? "status"
     : args[0].ToLowerInvariant();
+
+    if (commandText == "profile")
+    {
+        string subcommand =
+            args.ElementAtOrDefault(1)?.ToLowerInvariant()
+            ?? "last";
+
+        return subcommand switch
+        {
+            "last" => await ShowLatestProfileAsync(null),
+            "enable" => await ShowLatestProfileAsync("enable"),
+            "disable" => await ShowLatestProfileAsync("disable"),
+            "repair" => await ShowLatestProfileAsync("repair"),
+            "list" => await ShowProfileListAsync(
+                args.ElementAtOrDefault(2)),
+            _ => ShowProfileUsage()
+        };
+    }
 
 if (!TryParseCommand(
         commandText,
@@ -12,7 +32,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|profile]");
 
     return 6;
 }
@@ -306,4 +326,153 @@ static void WriteRuntimePlan(
         Console.WriteLine(
             $"- [{blocker.Code}] {blocker.Message}");
     }
+}
+
+static async Task<int> ShowLatestProfileAsync(
+    string? trigger)
+{
+    RuntimePerfReportStore store = new(
+        RuntimePerfReportStore.DefaultDirectory);
+
+    RuntimeCyclePerfReport? report;
+
+    try
+    {
+        report = trigger is null
+            ? await store.ReadLatestAsync()
+            : await store.ReadLatestAsync(trigger);
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine(
+            $"Failed to read profile report: {exception.Message}");
+
+        return 1;
+    }
+
+    if (report is null)
+    {
+        Console.WriteLine(
+            trigger is null
+                ? "No profile reports found."
+                : $"No '{trigger}' profile reports found.");
+        Console.WriteLine(
+            "Reports are written to " +
+            RuntimePerfReportStore.DefaultDirectory +
+            " after each enable/disable/repair cycle.");
+
+        return 0;
+    }
+
+    WriteReport(report);
+
+    return 0;
+}
+
+static void WriteReport(RuntimeCyclePerfReport report)
+{
+    Console.WriteLine("=== Latest profile report ===");
+    Console.WriteLine($"Trigger: {report.Trigger}");
+    Console.WriteLine($"Status: {report.CompletionStatus}");
+    Console.WriteLine(
+        $"Started: {report.StartedAt:yyyy-MM-dd HH:mm:ss} UTC");
+    Console.WriteLine(
+        $"Completed: {report.CompletedAt:yyyy-MM-dd HH:mm:ss} UTC");
+    Console.WriteLine($"Total: {report.TotalMs:F1} ms");
+    Console.WriteLine(
+        $"Steps: {report.CompletedSteps}/{report.PlannedSteps}");
+
+    if (!string.IsNullOrWhiteSpace(report.ErrorSummary))
+    {
+        Console.WriteLine(
+            $"Error: {report.ErrorSummary.ReplaceLineEndings(" ")}");
+    }
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        $"{"Category",-32} " +
+        $"{"Count",6} " +
+        $"{"Total ms",10} " +
+        $"{"Avg ms",8} " +
+        $"{"Min ms",8} " +
+        $"{"Max ms",8} " +
+        $"{"P95 ms",8}");
+
+    foreach (RuntimePerfCategorySummary category
+        in report.Categories)
+    {
+        Console.WriteLine(
+            $"{category.Category,-32} " +
+            $"{category.Count,6} " +
+            $"{category.TotalMs,10:F1} " +
+            $"{category.AverageMs,8:F2} " +
+            $"{category.MinMs,8:F1} " +
+            $"{category.MaxMs,8:F1} " +
+            $"{category.P95Ms,8:F1}");
+    }
+}
+
+static async Task<int> ShowProfileListAsync(
+    string? limitText)
+{
+    RuntimePerfReportStore store = new(
+        RuntimePerfReportStore.DefaultDirectory);
+
+    int limit = 10;
+
+    if (!string.IsNullOrWhiteSpace(limitText)
+        && !int.TryParse(limitText, out limit))
+    {
+        Console.Error.WriteLine(
+            "Usage: IranDirect.Cli profile list [limit]");
+        return 6;
+    }
+
+    try
+    {
+        IReadOnlyList<RuntimeCyclePerfReport> reports =
+            await store.ListAsync(limit: limit);
+
+        if (reports.Count == 0)
+        {
+            Console.WriteLine("No profile reports found.");
+            return 0;
+        }
+
+        Console.WriteLine("=== Recent profile reports ===");
+        Console.WriteLine(
+            $"{"Trigger",-8} " +
+            $"{"Status",-18} " +
+            $"{"Completed",-20} " +
+            $"{"Duration ms",-12} " +
+            $"{"Steps",-8}");
+
+        foreach (RuntimeCyclePerfReport report in reports)
+        {
+            Console.WriteLine(
+                $"{report.Trigger,-8} " +
+                $"{report.CompletionStatus,-18} " +
+                $"{report.CompletedAt:yyyy-MM-dd HH:mm:ss} " +
+                $"{report.TotalMs,12:F1} " +
+                $"{report.CompletedSteps,5}/" +
+                $"{report.PlannedSteps,2}");
+        }
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine(
+            $"Failed to list profile reports: {exception.Message}");
+        return 1;
+    }
+
+    return 0;
+}
+
+static int ShowProfileUsage()
+{
+    Console.Error.WriteLine(
+        "Usage: IranDirect.Cli profile " +
+        "[last|enable|disable|repair|list [limit]]");
+    return 6;
 }

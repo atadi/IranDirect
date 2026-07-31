@@ -620,18 +620,15 @@ public sealed class RuntimeExecutorTests
     [Fact]
     public async Task Progress_ReportsIntermediateUpdates()
     {
-        List<RuntimeExecutionProgress> updates = [];
+        RecordingProgress progress = new();
         FakeStepHandler handler = new(delayMs: 5);
         RuntimeExecutor executor = new(handler);
         RuntimeExecutionPlan plan = CreatePrefixPlan(4);
 
-        RuntimeExecutionResult result = await executor.ExecuteAsync(
-            plan,
-            new Progress<RuntimeExecutionProgress>(updates.Add));
+        RuntimeExecutionResult result = await executor.ExecuteAsync(plan, progress);
 
         Assert.Equal(RuntimeExecutionResultStatus.Completed, result.Status);
-        Assert.True(updates.Count > 0, "Expected at least one progress update");
-        RuntimeExecutionProgress last = updates[^1];
+        RuntimeExecutionProgress last = progress.Last;
         Assert.Equal(4, last.TotalSteps);
         Assert.Equal(4, last.ProcessedSteps);
         Assert.Equal(4, last.SucceededSteps);
@@ -640,21 +637,43 @@ public sealed class RuntimeExecutorTests
     [Fact]
     public async Task Progress_Failure_ReportsCorrectCounts()
     {
-        List<RuntimeExecutionProgress> updates = [];
+        RecordingProgress progress = new();
         FakeStepHandler handler = new(succeedAll: true, failOnStep: 1);
         RuntimeExecutor executor = new(handler);
         RuntimeExecutionPlan plan = CreateEndpointPlan(3);
 
-        RuntimeExecutionResult result = await executor.ExecuteAsync(
-            plan,
-            new Progress<RuntimeExecutionProgress>(updates.Add));
+        RuntimeExecutionResult result = await executor.ExecuteAsync(plan, progress);
 
         Assert.Equal(RuntimeExecutionResultStatus.PartiallyCompleted, result.Status);
-        RuntimeExecutionProgress last = updates[^1];
+        RuntimeExecutionProgress last = progress.Last;
         Assert.Equal(3, last.TotalSteps);
+        Assert.Equal(3, last.ProcessedSteps);
         Assert.Equal(1, last.SucceededSteps);
         Assert.Equal(1, last.FailedSteps);
         Assert.Equal(1, last.SkippedSteps);
+    }
+
+    [Fact]
+    public async Task Progress_Failure_FinalSnapshotIsStableAcrossRuns()
+    {
+        for (int i = 0; i < 100; i++)
+        {
+            RecordingProgress progress = new();
+            FakeStepHandler handler = new(succeedAll: true, failOnStep: 1);
+            RuntimeExecutor executor = new(handler);
+            RuntimeExecutionPlan plan = CreateEndpointPlan(3);
+
+            RuntimeExecutionResult result = await executor.ExecuteAsync(plan, progress);
+
+            Assert.Equal(RuntimeExecutionResultStatus.PartiallyCompleted, result.Status);
+            RuntimeExecutionProgress last = progress.Last;
+            Assert.Equal(3, last.TotalSteps);
+            Assert.Equal(3, last.ProcessedSteps);
+            Assert.Equal(1, last.SucceededSteps);
+            Assert.Equal(1, last.FailedSteps);
+            Assert.Equal(0, last.CancelledSteps);
+            Assert.Equal(1, last.SkippedSteps);
+        }
     }
 
     private static RuntimeExecutionPlan CreateEndpointPlan(int stepCount)
@@ -683,6 +702,32 @@ public sealed class RuntimeExecutorTests
                 })
                 .ToArray()
         };
+    }
+
+    private sealed class RecordingProgress
+        : IProgress<RuntimeExecutionProgress>
+    {
+        private readonly object _lock = new();
+        private readonly List<RuntimeExecutionProgress> _values = [];
+
+        public void Report(RuntimeExecutionProgress value)
+        {
+            lock (_lock)
+            {
+                _values.Add(value);
+            }
+        }
+
+        public RuntimeExecutionProgress Last
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _values[^1];
+                }
+            }
+        }
     }
 
     private sealed class FakeStepHandler : IRuntimeExecutionStepHandler

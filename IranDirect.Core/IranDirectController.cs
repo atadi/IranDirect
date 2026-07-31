@@ -99,38 +99,90 @@ public sealed class IranDirectController
     public async Task<RuntimeCycleExecutionResult> EnableAsync(
         CancellationToken cancellationToken = default)
     {
-        using IDisposable cycle = _profiler.BeginCycle("enable");
+        using IDisposable cycle = _profiler.BeginCycleIfNone("enable");
 
         _operationStatus.Begin(OperationState.Enabling, "user");
 
-        await EnsurePrefixesAsync(cancellationToken);
+        try
+        {
+            await EnsurePrefixesAsync(cancellationToken);
 
-        await _configurationService.SetEnabledAsync(
-            true, cancellationToken);
+            await _configurationService.SetEnabledAsync(
+                true, cancellationToken);
 
-        return await RunCycleCoreAsync(cancellationToken);
+            return await RunCycleCoreAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            RecordCycleOutcome(
+                CycleCompletionStatus.Cancelled,
+                "Operation was cancelled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            RecordCycleOutcome(
+                CycleCompletionStatus.Failed,
+                ex.Message);
+            throw;
+        }
     }
 
     public async Task<RuntimeCycleExecutionResult> DisableAsync(
         CancellationToken cancellationToken = default)
     {
-        using IDisposable cycle = _profiler.BeginCycle("disable");
+        using IDisposable cycle = _profiler.BeginCycleIfNone("disable");
 
         _operationStatus.Begin(OperationState.Disabling, "user");
 
-        await _configurationService.SetEnabledAsync(
-            false, cancellationToken);
+        try
+        {
+            await _configurationService.SetEnabledAsync(
+                false, cancellationToken);
 
-        return await RunCycleCoreAsync(cancellationToken);
+            return await RunCycleCoreAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            RecordCycleOutcome(
+                CycleCompletionStatus.Cancelled,
+                "Operation was cancelled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            RecordCycleOutcome(
+                CycleCompletionStatus.Failed,
+                ex.Message);
+            throw;
+        }
     }
 
     public async Task<RuntimeCycleExecutionResult> RunCycleAsync(
         CancellationToken cancellationToken = default)
     {
-        using IDisposable cycle = _profiler.BeginCycle("repair");
+        using IDisposable cycle = _profiler.BeginCycleIfNone("repair");
 
         _operationStatus.Begin(OperationState.Repairing, "cycle");
-        return await RunCycleCoreAsync(cancellationToken);
+
+        try
+        {
+            return await RunCycleCoreAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            RecordCycleOutcome(
+                CycleCompletionStatus.Cancelled,
+                "Operation was cancelled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            RecordCycleOutcome(
+                CycleCompletionStatus.Failed,
+                ex.Message);
+            throw;
+        }
     }
 
     private async Task<RuntimeCycleExecutionResult> RunCycleCoreAsync(
@@ -161,6 +213,8 @@ public sealed class IranDirectController
             await UpdateStateAsync(
                 decision, execution, cancellationToken);
 
+            RecordCycleOutcome(execution, decision);
+
             return new RuntimeCycleExecutionResult
             {
                 Decision = decision,
@@ -178,6 +232,48 @@ public sealed class IranDirectController
             throw;
         }
     }
+
+    private void RecordCycleOutcome(
+        RuntimeExecutionResult execution,
+        RuntimeDecision decision)
+    {
+        _profiler.SetCycleOutcome(
+            MapCompletionStatus(execution.Status),
+            execution.ErrorMessage,
+            decision.ExecutionPlan.Count,
+            _operationStatus.CompletedSteps);
+    }
+
+    private void RecordCycleOutcome(
+        CycleCompletionStatus status,
+        string error)
+    {
+        RuntimeOperationSnapshot snapshot =
+            _operationStatus.CreateSnapshot();
+        _profiler.SetCycleOutcome(
+            status,
+            error,
+            snapshot.PlannedSteps,
+            snapshot.CompletedSteps);
+    }
+
+    private static CycleCompletionStatus MapCompletionStatus(
+        RuntimeExecutionResultStatus status) => status switch
+    {
+        RuntimeExecutionResultStatus.Completed =>
+            CycleCompletionStatus.Completed,
+        RuntimeExecutionResultStatus.NoExecutionRequired =>
+            CycleCompletionStatus.Completed,
+        RuntimeExecutionResultStatus.Planned =>
+            CycleCompletionStatus.Completed,
+        RuntimeExecutionResultStatus.PartiallyCompleted =>
+            CycleCompletionStatus.PartiallyCompleted,
+        RuntimeExecutionResultStatus.Failed =>
+            CycleCompletionStatus.Failed,
+        RuntimeExecutionResultStatus.Cancelled =>
+            CycleCompletionStatus.Cancelled,
+        _ => CycleCompletionStatus.Failed
+    };
 
     public async Task<IranDirectStatus> GetStatusAsync(
         CancellationToken cancellationToken = default)

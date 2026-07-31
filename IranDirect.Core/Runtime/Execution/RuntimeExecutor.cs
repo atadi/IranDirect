@@ -47,7 +47,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
         if (stopped)
         {
             FillNullResults(plan.Steps, results, UpdateProgress);
-            return BuildFinalResult(results, hasSuccess);
+            return BuildFinalResultAndReport(results, hasSuccess, progress);
         }
 
         (stopped, hasSuccess) = await ExecuteBoundedGroupAsync(
@@ -55,7 +55,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
         if (stopped)
         {
             FillNullResults(plan.Steps, results, UpdateProgress);
-            return BuildFinalResult(results, hasSuccess);
+            return BuildFinalResultAndReport(results, hasSuccess, progress);
         }
 
         (stopped, hasSuccess) = await ExecuteBoundedGroupAsync(
@@ -63,7 +63,7 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
         if (stopped)
         {
             FillNullResults(plan.Steps, results, UpdateProgress);
-            return BuildFinalResult(results, hasSuccess);
+            return BuildFinalResultAndReport(results, hasSuccess, progress);
         }
 
         (stopped, hasSuccess) = await ExecuteSequentialGroupAsync(
@@ -71,10 +71,10 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
         if (stopped)
         {
             FillNullResults(plan.Steps, results, UpdateProgress);
-            return BuildFinalResult(results, hasSuccess);
+            return BuildFinalResultAndReport(results, hasSuccess, progress);
         }
 
-        return BuildFinalResult(results, hasSuccess);
+        return BuildFinalResultAndReport(results, hasSuccess, progress);
     }
 
     private async Task<(bool Stopped, bool HasSuccess)> ExecuteSequentialGroupAsync(
@@ -296,6 +296,38 @@ public sealed class RuntimeExecutor : IRuntimeExecutor
             return RuntimeExecutionResult.PartiallyCompleted(finalResults);
 
         return RuntimeExecutionResult.Completed(finalResults);
+    }
+
+    private static RuntimeExecutionResult BuildFinalResultAndReport(
+        RuntimeExecutionStepResult[] results,
+        bool hasSuccess,
+        IProgress<RuntimeExecutionProgress>? progress)
+    {
+        RuntimeExecutionResult finalResult = BuildFinalResult(results, hasSuccess);
+
+        progress?.Report(SummarizeProgress(results));
+
+        return finalResult;
+    }
+
+    private static RuntimeExecutionProgress SummarizeProgress(
+        RuntimeExecutionStepResult[] results)
+    {
+        int succeeded = 0, failed = 0, cancelled = 0, skipped = 0;
+
+        foreach (RuntimeExecutionStepResult? r in results)
+        {
+            switch (r?.Status)
+            {
+                case RuntimeExecutionStepStatus.Succeeded: succeeded++; break;
+                case RuntimeExecutionStepStatus.Failed: failed++; break;
+                case RuntimeExecutionStepStatus.Cancelled: cancelled++; break;
+                case RuntimeExecutionStepStatus.Skipped: skipped++; break;
+            }
+        }
+
+        return new RuntimeExecutionProgress(
+            results.Length, results.Length, succeeded, failed, cancelled, skipped);
     }
 
     private static RuntimeExecutionStepResult CreateStepResult(
