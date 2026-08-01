@@ -1,5 +1,6 @@
 using IranDirect.Core;
 using IranDirect.Core.Configuration;
+using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
@@ -69,6 +70,18 @@ builder.Services.AddSingleton(
             serviceProvider.GetRequiredService<
                 DesiredConfigurationValidator>()));
 builder.Services.AddSingleton<DesiredConfigurationService>();
+builder.Services.AddSingleton(
+    new CustomRouteStore(
+        Path.Combine(
+            dataDirectory,
+            "custom-routes.json")));
+builder.Services.AddSingleton<ICustomRouteRepository>(
+    serviceProvider =>
+        new CustomRouteRepository(
+            serviceProvider.GetRequiredService<
+                CustomRouteStore>()));
+builder.Services.AddSingleton<CustomRouteEntryValidator>();
+builder.Services.AddSingleton<CustomRouteService>();
 builder.Services.AddSingleton<OpenVpnProfileParser>();
 builder.Services.AddSingleton<VpnEndpointResolver>();
 builder.Services.AddSingleton(
