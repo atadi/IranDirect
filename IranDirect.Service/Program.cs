@@ -82,6 +82,7 @@ builder.Services.AddSingleton<ICustomRouteRepository>(
                 CustomRouteStore>()));
 builder.Services.AddSingleton<CustomRouteEntryValidator>();
 builder.Services.AddSingleton<CustomRouteService>();
+builder.Services.AddSingleton<ICustomRouteResolver, CustomRouteResolver>();
 builder.Services.AddSingleton<OpenVpnProfileParser>();
 builder.Services.AddSingleton<VpnEndpointResolver>();
 builder.Services.AddSingleton(
@@ -138,7 +139,10 @@ builder.Services.AddSingleton<IRuntimeObservationSource>(
             serviceProvider.GetRequiredService<
                 PrefixFileRepository>(),
             serviceProvider.GetRequiredService<
-                IRouteManager>()));
+                IRouteManager>(),
+            customRouteResolver:
+                serviceProvider.GetRequiredService<
+                    ICustomRouteResolver>()));
 
 builder.Services.AddSingleton<RuntimeObserver>();
 builder.Services.AddSingleton<RuntimePlanner>();

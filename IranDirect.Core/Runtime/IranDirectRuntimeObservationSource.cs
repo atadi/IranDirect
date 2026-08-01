@@ -1,3 +1,4 @@
+using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Models;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
@@ -16,6 +17,7 @@ public sealed class IranDirectRuntimeObservationSource :
     private readonly PrefixFileRepository _prefixRepository;
     private readonly IRouteManager _routeManager;
     private readonly RuntimeCycleProfiler _profiler;
+    private readonly ICustomRouteResolver? _customRouteResolver;
 
     public IranDirectRuntimeObservationSource(
         string profilePath,
@@ -23,7 +25,8 @@ public sealed class IranDirectRuntimeObservationSource :
         GatewayDetector gatewayDetector,
         PrefixFileRepository prefixRepository,
         IRouteManager routeManager,
-        RuntimeCycleProfiler? profiler = null)
+        RuntimeCycleProfiler? profiler = null,
+        ICustomRouteResolver? customRouteResolver = null)
     {
         _profilePath = profilePath;
         _vpnEndpointProvider = vpnEndpointProvider;
@@ -31,6 +34,7 @@ public sealed class IranDirectRuntimeObservationSource :
         _prefixRepository = prefixRepository;
         _routeManager = routeManager;
         _profiler = profiler ?? RuntimeCycleProfiler.Noop;
+        _customRouteResolver = customRouteResolver;
     }
 
     public bool VpnProfileExists =>
@@ -126,8 +130,28 @@ public sealed class IranDirectRuntimeObservationSource :
         using (_profiler.Measure(
             RuntimePerfCategory.ObservationPrefixLoad))
         {
-            return await _prefixRepository.LoadAsync(
-                cancellationToken);
+            IReadOnlyList<string> prefixes =
+                await _prefixRepository.LoadAsync(
+                    cancellationToken);
+
+            if (_customRouteResolver is null)
+            {
+                return prefixes;
+            }
+
+            CustomRouteResolutionResult customResult =
+                await _customRouteResolver.ResolveAsync(
+                    cancellationToken);
+
+            if (customResult.Prefixes.Count == 0)
+            {
+                return prefixes;
+            }
+
+            return prefixes
+                .Concat(customResult.Prefixes)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
     }
 
