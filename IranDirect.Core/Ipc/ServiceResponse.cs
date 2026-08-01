@@ -1,3 +1,4 @@
+using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Configuration;
@@ -33,4 +34,10 @@ public sealed record ServiceResponse
     public RuntimeDecision? Decision { get; init; }
 
     public RuntimeExecutionResult? Execution { get; init; }
+
+    public IReadOnlyList<CustomRouteEntry> CustomRoutes
+        { get; init; } = [];
+
+    public CustomRouteResolutionResult?
+        CustomRouteResolution { get; init; }
 }

@@ -2,6 +2,7 @@ using IranDirect.Core;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
+using IranDirect.Cli;
 using System.Linq;
 
 string commandText = args.Length == 0
@@ -26,13 +27,20 @@ string commandText = args.Length == 0
         };
     }
 
+    if (commandText == "custom-routes")
+    {
+        return await CustomRouteCliRunner.RunAsync(
+            args.Skip(1).ToArray(),
+            new IranDirectServiceClient());
+    }
+
 if (!TryParseCommand(
         commandText,
         out IranDirectCommand command))
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|profile]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|custom-routes|profile]");
 
     return 6;
 }

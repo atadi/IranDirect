@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\IranDirect.Core\IranDirect.Core.csproj" />
+    <ProjectReference Include="..\IranDirect.Cli\IranDirect.Cli.csproj" />
+    <ProjectReference Include="..\IranDirect.Tray\IranDirect.Tray.csproj" />
   </ItemGroup>
 
 </Project>

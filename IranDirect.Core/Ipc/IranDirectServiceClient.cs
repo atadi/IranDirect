@@ -4,7 +4,8 @@ using System.Text.Json;
 
 namespace IranDirect.Core.Ipc;
 
-public sealed class IranDirectServiceClient
+public sealed class IranDirectServiceClient :
+    ICustomRouteCommandSender
 {
     private static readonly TimeSpan DefaultConnectTimeout =
         TimeSpan.FromSeconds(5);
@@ -12,6 +13,7 @@ public sealed class IranDirectServiceClient
     public async Task<ServiceResponse> SendAsync(
         IranDirectCommand command,
         string? value = null,
+        string? description = null,
         CancellationToken cancellationToken = default)
     {
         await using NamedPipeClientStream pipe =
@@ -60,7 +62,8 @@ public sealed class IranDirectServiceClient
         ServiceRequest request = new()
         {
             Command = command,
-            Value = value
+            Value = value,
+            Description = description
         };
 
         string requestJson =

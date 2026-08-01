@@ -12,5 +12,13 @@ public enum IranDirectCommand
     GetConfiguration,
     SetConfigurationEnabled,
     SetConfigurationProfilePath,
-    RuntimePlan
+    RuntimePlan,
+    CustomRoutesList,
+    CustomRoutesAddDomain,
+    CustomRoutesAddIp,
+    CustomRoutesAddCidr,
+    CustomRoutesEnable,
+    CustomRoutesDisable,
+    CustomRoutesRemove,
+    CustomRoutesResolve
 }

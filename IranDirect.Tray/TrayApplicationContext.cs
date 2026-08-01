@@ -33,6 +33,7 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _updateItem;
     private readonly ToolStripMenuItem _repairItem;
     private readonly ToolStripMenuItem _configItem;
+    private readonly ToolStripMenuItem _customRoutesItem;
     private readonly ToolStripMenuItem _logsItem;
 
     private readonly System.Windows.Forms.Timer _timer;
@@ -86,6 +87,8 @@ public sealed class TrayApplicationContext :
             "Repair routes");
         _configItem = new ToolStripMenuItem(
             "View configuration");
+        _customRoutesItem =
+            CustomRouteMenuFactory.CreateCustomRoutesItem();
         _logsItem = new ToolStripMenuItem(
             "Open Event Viewer");
 
@@ -141,6 +144,9 @@ public sealed class TrayApplicationContext :
         _configItem.Click +=
             async (_, _) => await ShowConfigurationAsync();
 
+        _customRoutesItem.Click +=
+            async (_, _) => await ShowCustomRoutesDialogAsync();
+
         _logsItem.Click += (_, _) => OpenEventViewer();
 
         exitItem.Click += (_, _) => ExitApplication();
@@ -162,6 +168,7 @@ public sealed class TrayApplicationContext :
         menu.Items.Add(_repairItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_configItem);
+        menu.Items.Add(_customRoutesItem);
         menu.Items.Add(_logsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -435,6 +442,10 @@ public sealed class TrayApplicationContext :
         _repairItem.Enabled =
             status.Enabled && !_busy;
         _configItem.Enabled = !_busy;
+        _customRoutesItem.Enabled =
+            CustomRouteMenuPolicy.IsAvailable(
+                serviceRunning: true,
+                _busy);
 
         _notifyIcon.Text =
             status.Enabled
@@ -463,6 +474,7 @@ public sealed class TrayApplicationContext :
         _updateItem.Enabled = false;
         _repairItem.Enabled = false;
         _configItem.Enabled = false;
+        _customRoutesItem.Enabled = false;
 
         if (!_notifyIcon.Text.StartsWith(
                 "IranDirect — Service",
@@ -487,6 +499,7 @@ public sealed class TrayApplicationContext :
         _updateItem.Enabled = false;
         _repairItem.Enabled = false;
         _configItem.Enabled = false;
+        _customRoutesItem.Enabled = false;
 
         _startServiceItem.Enabled = false;
         _stopServiceItem.Enabled = false;
@@ -535,6 +548,32 @@ public sealed class TrayApplicationContext :
                 "IranDirect service unavailable",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task ShowCustomRoutesDialogAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        try
+        {
+            using CustomRouteDialog dialog = new(_client);
+            dialog.ShowDialog();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                exception.Message,
+                "IranDirect custom routes",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            await PollAsync();
         }
     }
 

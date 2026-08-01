@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using IranDirect.Core;
 using IranDirect.Core.Configuration;
+using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Routing;
@@ -21,6 +22,7 @@ public sealed class NamedPipeCommandServer
     private readonly IranDirectDiagnosticsService _diagnosticsService;
     private readonly DesiredConfigurationService _configurationService;
     private readonly RuntimeCoordinator _runtimeCoordinator;
+    private readonly CustomRouteCommandHandler _customRoutes;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -30,6 +32,7 @@ public sealed class NamedPipeCommandServer
         IranDirectDiagnosticsService diagnosticsService,
         DesiredConfigurationService configurationService,
         RuntimeCoordinator runtimeCoordinator,
+        CustomRouteCommandHandler customRoutes,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -38,6 +41,7 @@ public sealed class NamedPipeCommandServer
         _diagnosticsService = diagnosticsService;
         _configurationService = configurationService;
         _runtimeCoordinator = runtimeCoordinator;
+        _customRoutes = customRoutes;
         _logger = logger;
     }
 
@@ -216,6 +220,50 @@ public sealed class NamedPipeCommandServer
 
             IranDirectCommand.RuntimePlan =>
                 GetRuntimePlanAsync(cancellationToken),
+
+            IranDirectCommand.CustomRoutesList =>
+                _customRoutes.ListAsync(cancellationToken),
+
+            IranDirectCommand.CustomRoutesAddDomain =>
+                _customRoutes.AddAsync(
+                    CustomRouteEntryType.Domain,
+                    request.Value,
+                    request.Description,
+                    cancellationToken),
+
+            IranDirectCommand.CustomRoutesAddIp =>
+                _customRoutes.AddAsync(
+                    CustomRouteEntryType.IpAddress,
+                    request.Value,
+                    request.Description,
+                    cancellationToken),
+
+            IranDirectCommand.CustomRoutesAddCidr =>
+                _customRoutes.AddAsync(
+                    CustomRouteEntryType.Cidr,
+                    request.Value,
+                    request.Description,
+                    cancellationToken),
+
+            IranDirectCommand.CustomRoutesEnable =>
+                _customRoutes.SetEnabledAsync(
+                    request.Value,
+                    enabled: true,
+                    cancellationToken),
+
+            IranDirectCommand.CustomRoutesDisable =>
+                _customRoutes.SetEnabledAsync(
+                    request.Value,
+                    enabled: false,
+                    cancellationToken),
+
+            IranDirectCommand.CustomRoutesRemove =>
+                _customRoutes.RemoveAsync(
+                    request.Value,
+                    cancellationToken),
+
+            IranDirectCommand.CustomRoutesResolve =>
+                _customRoutes.ResolveAsync(cancellationToken),
 
             _ => Task.FromResult(
                 Failure(

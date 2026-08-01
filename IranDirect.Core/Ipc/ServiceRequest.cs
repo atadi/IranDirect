@@ -8,4 +8,6 @@ public sealed record ServiceRequest
     public required IranDirectCommand Command { get; init; }
 
     public string? Value { get; init; }
+
+    public string? Description { get; init; }
 }
