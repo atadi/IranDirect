@@ -4,6 +4,7 @@ using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Networking;
+using IranDirect.Core.Observability;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
@@ -188,13 +189,18 @@ builder.Services.AddSingleton<
     IRuntimeExecutor, RuntimeExecutor>();
 builder.Services.AddSingleton<RuntimeOperationStatus>();
 builder.Services.AddSingleton(
-    _ => new RuntimeCycleProfiler(
+    _ => new RuntimePerfReportStore(
+        RuntimePerfReportStore.DefaultDirectory));
+builder.Services.AddSingleton(
+    serviceProvider => new RuntimeCycleProfiler(
         builder.Configuration.GetValue(
             "Profiling:Enabled", defaultValue: true),
-        new RuntimePerfReportStore(
-            RuntimePerfReportStore.DefaultDirectory)));
+        serviceProvider.GetRequiredService<
+            RuntimePerfReportStore>()));
 builder.Services.AddSingleton<RuntimeCycleCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
+builder.Services.AddSingleton<
+    IRuntimeSnapshotProvider, RuntimeSnapshotProvider>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
 
