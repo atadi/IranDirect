@@ -1,6 +1,7 @@
 namespace IranDirect.Core.CustomRoutes;
 
-public sealed class CustomRouteDnsCacheService
+public sealed class CustomRouteDnsCacheService :
+    ICustomRouteDnsCacheService
 {
     private readonly CustomRouteService _service;
     private readonly ICustomRouteDnsCacheRepository _cacheRepository;

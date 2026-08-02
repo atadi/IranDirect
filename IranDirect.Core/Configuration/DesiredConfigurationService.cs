@@ -1,6 +1,7 @@
 namespace IranDirect.Core.Configuration;
 
-public sealed class DesiredConfigurationService
+public sealed class DesiredConfigurationService :
+    IDesiredConfigurationService
 {
     private readonly DesiredConfigurationStore _store;
 
