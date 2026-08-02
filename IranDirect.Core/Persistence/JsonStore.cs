@@ -65,6 +65,33 @@ public class JsonStore<T>
         }
     }
 
+    // Performs a read-modify-write atomically under the file lock so
+    // that the mutation never observes or produces an intermediate
+    // state of the underlying document.
+    public async Task<T> MutateAsync(
+        Func<T, Task<T>> mutation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+
+        await _fileLock.WaitAsync(cancellationToken);
+
+        try
+        {
+            T value = await LoadCoreAsync(cancellationToken);
+
+            value = await mutation(value);
+
+            await SaveCoreAsync(value, cancellationToken);
+
+            return value;
+        }
+        finally
+        {
+            _fileLock.Release();
+        }
+    }
+
     private async Task<T> LoadCoreAsync(
         CancellationToken cancellationToken)
     {

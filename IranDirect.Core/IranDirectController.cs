@@ -37,6 +37,8 @@ public sealed class IranDirectController
     private readonly RuntimeCycleProfiler _profiler;
     private readonly IPrefixSourceMetadataService?
         _prefixSourceMetadataService;
+    private readonly IPrefixSourceUpdateHistoryService?
+        _prefixSourceUpdateHistoryService;
     private readonly ILogger<IranDirectController>? _logger;
 
     public IranDirectController(
@@ -56,6 +58,8 @@ public sealed class IranDirectController
         RuntimeCycleProfiler? profiler = null,
         IPrefixSourceMetadataService? prefixSourceMetadataService =
             null,
+        IPrefixSourceUpdateHistoryService?
+            prefixSourceUpdateHistoryService = null,
         ILogger<IranDirectController>? logger = null)
     {
         _prefixSource = prefixSource;
@@ -75,6 +79,8 @@ public sealed class IranDirectController
         _profiler = profiler ?? RuntimeCycleProfiler.Noop;
         _prefixSourceMetadataService =
             prefixSourceMetadataService;
+        _prefixSourceUpdateHistoryService =
+            prefixSourceUpdateHistoryService;
         _logger = logger;
     }
 
@@ -95,6 +101,10 @@ public sealed class IranDirectController
                 exception,
                 cancellationToken);
 
+            await TryRecordHistoryFailureAsync(
+                exception,
+                cancellationToken);
+
             throw;
         }
 
@@ -110,6 +120,11 @@ public sealed class IranDirectController
         }
 
         await TryRecordMetadataSuccessAsync(
+            fetch,
+            previousPrefixes,
+            cancellationToken);
+
+        await TryRecordHistorySuccessAsync(
             fetch,
             previousPrefixes,
             cancellationToken);
@@ -191,6 +206,86 @@ public sealed class IranDirectController
                 "Failed to persist prefix source failure " +
                 "metadata: {Error}",
                 metadataException.Message);
+        }
+    }
+
+    private async Task TryRecordHistorySuccessAsync(
+        PrefixSourceFetchResult fetch,
+        IReadOnlyList<string> previousPrefixes,
+        CancellationToken cancellationToken)
+    {
+        if (_prefixSourceUpdateHistoryService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (fetch.NotModified)
+            {
+                PrefixSourceMetadata? current =
+                    _prefixSourceMetadataService is null
+                        ? null
+                        : await _prefixSourceMetadataService
+                            .GetCurrentAsync(cancellationToken);
+
+                await _prefixSourceUpdateHistoryService
+                    .RecordNotModifiedAsync(
+                        fetch,
+                        current?.PrefixCount
+                            ?? previousPrefixes.Count,
+                        current?.ContentHash,
+                        cancellationToken);
+            }
+            else
+            {
+                PrefixSourceChangeSummary? changeSummary =
+                    _prefixSourceMetadataService is null
+                        ? null
+                        : await _prefixSourceMetadataService
+                            .GetLatestChangeSummaryAsync(
+                                cancellationToken);
+
+                await _prefixSourceUpdateHistoryService
+                    .RecordSuccessAsync(
+                        fetch,
+                        changeSummary,
+                        previousPrefixes,
+                        cancellationToken);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(
+                "Failed to persist prefix source update history: " +
+                "{Error}",
+                exception.Message);
+        }
+    }
+
+    private async Task TryRecordHistoryFailureAsync(
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        if (_prefixSourceUpdateHistoryService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _prefixSourceUpdateHistoryService
+                .RecordFailureAsync(
+                    _prefixSource.Descriptor,
+                    exception.Message,
+                    cancellationToken);
+        }
+        catch (Exception historyException)
+        {
+            _logger?.LogWarning(
+                "Failed to persist prefix source update history: " +
+                "{Error}",
+                historyException.Message);
         }
     }
 

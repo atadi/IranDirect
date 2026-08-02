@@ -74,6 +74,40 @@ builder.Services.AddSingleton<
             serviceProvider.GetRequiredService<
                 TimeProvider>()));
 
+PrefixSourceHistoryOptions historyOptions = new();
+builder.Configuration.GetSection(
+    "PrefixSourceHistory").Bind(historyOptions);
+PrefixSourceHistoryOptions.Validate(historyOptions);
+builder.Services.AddSingleton(historyOptions);
+
+builder.Services.AddSingleton(
+    new PrefixSourceUpdateHistoryStore(
+        Path.Combine(
+            dataDirectory,
+            "prefix-source-update-history.json")));
+builder.Services.AddSingleton<
+    PrefixSourceUpdateHistoryValidator>();
+builder.Services.AddSingleton<
+    IPrefixSourceUpdateHistoryRepository>(
+    serviceProvider =>
+        new PrefixSourceUpdateHistoryRepository(
+            serviceProvider.GetRequiredService<
+                PrefixSourceUpdateHistoryStore>(),
+            serviceProvider.GetRequiredService<
+                PrefixSourceUpdateHistoryValidator>(),
+            serviceProvider.GetRequiredService<
+                PrefixSourceHistoryOptions>()));
+builder.Services.AddSingleton<
+    IPrefixSourceUpdateHistoryService>(
+    serviceProvider =>
+        new PrefixSourceUpdateHistoryService(
+            serviceProvider.GetRequiredService<
+                IPrefixSourceUpdateHistoryRepository>(),
+            serviceProvider.GetRequiredService<
+                PrefixSourceHistoryOptions>(),
+            serviceProvider.GetRequiredService<
+                TimeProvider>()));
+
 builder.Services.AddSingleton(
     new StateRepository(
         Path.Combine(
