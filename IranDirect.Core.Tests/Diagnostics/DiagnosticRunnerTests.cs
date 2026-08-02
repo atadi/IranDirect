@@ -176,7 +176,7 @@ public sealed class DiagnosticRunnerTests
             await runner.RunAllAsync(
                 CancellationToken.None);
 
-        Assert.Equal(0, report.Results.Count);
+        Assert.Empty(report.Results);
         Assert.Equal(0, report.PassedCount);
         Assert.Equal(0, report.WarningCount);
         Assert.Equal(0, report.FailedCount);

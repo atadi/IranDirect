@@ -9,7 +9,7 @@ public sealed class RouteInventoryDiagnosticCheckTests
     private sealed class FakeRouteInventoryPersistence :
         IRouteInventoryPersistence
     {
-        private readonly RouteInventory _inventory;
+        private readonly RouteInventory _inventory = null!;
         private readonly Exception? _exception;
 
         public FakeRouteInventoryPersistence(

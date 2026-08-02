@@ -146,16 +146,12 @@ public sealed class DiagnosticReportTests
 
         var categories = report.Categories;
 
-        Assert.Equal(
-            1,
-            categories[DiagnosticCategory.Configuration]
-                .Count);
-        Assert.Equal(
-            1,
-            categories[DiagnosticCategory.Runtime].Count);
-        Assert.Equal(
-            1,
-            categories[DiagnosticCategory.Routing].Count);
+        Assert.Single(
+            categories[DiagnosticCategory.Configuration]);
+        Assert.Single(
+            categories[DiagnosticCategory.Runtime]);
+        Assert.Single(
+            categories[DiagnosticCategory.Routing]);
         Assert.Empty(
             categories[DiagnosticCategory.Vpn]);
     }
@@ -229,10 +225,8 @@ public sealed class DiagnosticReportTests
 
         var categories = report.Categories;
 
-        Assert.Equal(
-            1,
-            categories[DiagnosticCategory.Configuration]
-                .Count);
+        Assert.Single(
+            categories[DiagnosticCategory.Configuration]);
     }
 
     [Fact]

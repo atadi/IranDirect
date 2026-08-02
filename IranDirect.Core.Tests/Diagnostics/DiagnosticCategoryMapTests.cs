@@ -142,15 +142,13 @@ public sealed class DiagnosticCategoryMapTests
             DiagnosticCategoryMap.Default.GroupResults(
                 results);
 
-        Assert.Equal(
-            1,
-            groups[DiagnosticCategory.Configuration].Count);
+        Assert.Single(
+            groups[DiagnosticCategory.Configuration]);
         Assert.Equal(
             2,
             groups[DiagnosticCategory.Runtime].Count);
-        Assert.Equal(
-            1,
-            groups[DiagnosticCategory.Routing].Count);
+        Assert.Single(
+            groups[DiagnosticCategory.Routing]);
     }
 
     [Fact]
@@ -172,9 +170,8 @@ public sealed class DiagnosticCategoryMapTests
             DiagnosticCategoryMap.Default.GroupResults(
                 results);
 
-        Assert.Equal(
-            1,
-            groups[DiagnosticCategory.Configuration].Count);
+        Assert.Single(
+            groups[DiagnosticCategory.Configuration]);
     }
 
     [Fact]

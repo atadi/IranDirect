@@ -12,7 +12,7 @@ public sealed class RuntimeSnapshotDiagnosticCheckTests
     private sealed class FakeSnapshotProvider :
         IRuntimeSnapshotProvider
     {
-        private readonly RuntimeSnapshot _snapshot;
+        private readonly RuntimeSnapshot _snapshot = null!;
         private readonly Exception? _exception;
 
         public FakeSnapshotProvider(RuntimeSnapshot snapshot)

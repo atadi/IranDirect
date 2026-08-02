@@ -97,10 +97,10 @@ public sealed class RuntimeChangeSetPlannerTests
 
         RuntimeChange removal =
             Assert.Single(
-                result.Changes.Where(
-                    change =>
-                        change.Kind ==
-                        RuntimeChangeKind.RemovePrefixRoute));
+                result.Changes,
+                change =>
+                    change.Kind ==
+                    RuntimeChangeKind.RemovePrefixRoute);
 
         Assert.Equal(owned.Identity, removal.Identity);
 
