@@ -3,6 +3,8 @@ using IranDirect.Core.Configuration;
 using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Diagnostics.Configuration;
+using IranDirect.Core.Diagnostics.Routing;
+using IranDirect.Core.Diagnostics.Runtime;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Observability;
@@ -224,6 +226,9 @@ builder.Services.AddSingleton<
 
 builder.Services.AddSingleton<VpnEndpointRouteManager>();
 builder.Services.AddSingleton<IranDirectController>();
+builder.Services.AddSingleton<IIranDirectStatusProvider>(
+    serviceProvider =>
+        serviceProvider.GetRequiredService<IranDirectController>());
 
 builder.Services.AddSingleton<
     DesiredConfigurationDiagnosticCheck>();
@@ -235,6 +240,20 @@ builder.Services.AddSingleton<
     PrefixHistoryDiagnosticCheck>();
 builder.Services.AddSingleton<
     CustomRoutesDiagnosticCheck>();
+builder.Services.AddSingleton<
+    RuntimeStateDiagnosticCheck>();
+builder.Services.AddSingleton<
+    RuntimeOperationDiagnosticCheck>();
+builder.Services.AddSingleton<
+    RouteInventoryDiagnosticCheck>();
+builder.Services.AddSingleton<
+    RuntimeSnapshotDiagnosticCheck>();
+builder.Services.AddSingleton<
+    WindowsRouteTableDiagnosticCheck>();
+builder.Services.AddSingleton<
+    RouteOwnershipDiagnosticCheck>();
+builder.Services.AddSingleton<
+    ManagedRouteConsistencyDiagnosticCheck>();
 builder.Services.AddSingleton<IDiagnosticRunner>(
     serviceProvider =>
         new DiagnosticRunner(
@@ -249,7 +268,21 @@ builder.Services.AddSingleton<IDiagnosticRunner>(
                 serviceProvider.GetRequiredService<
                     PrefixHistoryDiagnosticCheck>(),
                 serviceProvider.GetRequiredService<
-                    CustomRoutesDiagnosticCheck>()
+                    CustomRoutesDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    RuntimeStateDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    RuntimeOperationDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    RouteInventoryDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    RuntimeSnapshotDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    WindowsRouteTableDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    RouteOwnershipDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    ManagedRouteConsistencyDiagnosticCheck>()
             }));
 
 builder.Services.AddSingleton(

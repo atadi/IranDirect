@@ -1,4 +1,5 @@
 using IranDirect.Core.Configuration;
+using IranDirect.Core.Diagnostics.Runtime;
 using IranDirect.Core.Models;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
@@ -14,7 +15,8 @@ using System.Text;
 
 namespace IranDirect.Core;
 
-public sealed class IranDirectController
+public sealed class IranDirectController :
+    IIranDirectStatusProvider
 {
     private const int RouteMetric = 5;
 
