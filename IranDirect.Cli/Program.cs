@@ -42,6 +42,13 @@ string commandText = args.Length == 0
             new IranDirectServiceClient());
     }
 
+    if (commandText == "doctor")
+    {
+        return await DiagnosticCliRunner.RunAsync(
+            args.Skip(1).ToArray(),
+            new IranDirectServiceClient());
+    }
+
     if (commandText == "snapshot")
     {
         return await ShowSnapshotAsync();
@@ -53,7 +60,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|profile]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|doctor|profile]");
 
     return 6;
 }
