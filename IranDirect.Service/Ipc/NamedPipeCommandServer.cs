@@ -29,6 +29,8 @@ public sealed class NamedPipeCommandServer
     private readonly DiagnosticCommandHandler _diagnosticsHandler;
     private readonly ExecutionPreviewCommandHandler
         _executionPreviewHandler;
+    private readonly SupportBundleCommandHandler
+        _supportBundleHandler;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -43,6 +45,7 @@ public sealed class NamedPipeCommandServer
         PrefixUpdateCheckCommandHandler prefixUpdateCheck,
         DiagnosticCommandHandler diagnosticsHandler,
         ExecutionPreviewCommandHandler executionPreviewHandler,
+        SupportBundleCommandHandler supportBundleHandler,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -56,6 +59,7 @@ public sealed class NamedPipeCommandServer
         _prefixUpdateCheck = prefixUpdateCheck;
         _diagnosticsHandler = diagnosticsHandler;
         _executionPreviewHandler = executionPreviewHandler;
+        _supportBundleHandler = supportBundleHandler;
         _logger = logger;
     }
 
@@ -300,6 +304,11 @@ public sealed class NamedPipeCommandServer
 
             IranDirectCommand.ExecutionPreview =>
                 _executionPreviewHandler.GetAsync(
+                    cancellationToken),
+
+            IranDirectCommand.SupportBundleExport =>
+                _supportBundleHandler.ExportAsync(
+                    request.Value ?? string.Empty,
                     cancellationToken),
 
             _ => Task.FromResult(

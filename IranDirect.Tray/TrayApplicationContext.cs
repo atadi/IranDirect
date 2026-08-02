@@ -40,6 +40,7 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _runtimeSnapshotItem;
     private readonly ToolStripMenuItem _executionPreviewItem;
     private readonly ToolStripMenuItem _diagnosticsItem;
+    private readonly ToolStripMenuItem _supportBundleItem;
     private readonly ToolStripMenuItem _logsItem;
 
     private readonly System.Windows.Forms.Timer _timer;
@@ -108,6 +109,8 @@ public sealed class TrayApplicationContext :
             ExecutionPreviewMenuPolicy.MenuItemText);
         _diagnosticsItem = new ToolStripMenuItem(
             "Run Diagnostics...");
+        _supportBundleItem = new ToolStripMenuItem(
+            SupportBundleMenuPolicy.MenuItemText);
         _logsItem = new ToolStripMenuItem(
             "Open Event Viewer");
 
@@ -180,6 +183,9 @@ public sealed class TrayApplicationContext :
         _diagnosticsItem.Click +=
             async (_, _) => await ShowDiagnosticsDialogAsync();
 
+        _supportBundleItem.Click +=
+            async (_, _) => await ShowSupportBundleExportAsync();
+
         _logsItem.Click += (_, _) => OpenEventViewer();
 
         exitItem.Click += (_, _) => ExitApplication();
@@ -206,6 +212,7 @@ public sealed class TrayApplicationContext :
         menu.Items.Add(_runtimeSnapshotItem);
         menu.Items.Add(_executionPreviewItem);
         menu.Items.Add(_diagnosticsItem);
+        menu.Items.Add(_supportBundleItem);
         menu.Items.Add(_logsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -592,6 +599,10 @@ finally
                 serviceRunning: true,
                 _busy);
         _diagnosticsItem.Enabled = !_busy;
+        _supportBundleItem.Enabled =
+            SupportBundleMenuPolicy.IsAvailable(
+                serviceRunning: true,
+                _busy);
 
         _notifyIcon.Text =
             status.Enabled
@@ -625,6 +636,7 @@ finally
         _runtimeSnapshotItem.Enabled = false;
         _executionPreviewItem.Enabled = false;
         _diagnosticsItem.Enabled = false;
+        _supportBundleItem.Enabled = false;
 
         if (!_notifyIcon.Text.StartsWith(
                 "IranDirect — Service",
@@ -654,6 +666,7 @@ finally
         _runtimeSnapshotItem.Enabled = false;
         _executionPreviewItem.Enabled = false;
         _diagnosticsItem.Enabled = false;
+        _supportBundleItem.Enabled = false;
 
         _startServiceItem.Enabled = false;
         _stopServiceItem.Enabled = false;
@@ -800,6 +813,39 @@ finally
             MessageBox.Show(
                 exception.Message,
                 "IranDirect diagnostics",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            await PollAsync();
+        }
+    }
+
+    private async Task ShowSupportBundleExportAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        try
+        {
+            SaveFileDialogAdapter dialog = new();
+
+            MessageBoxStatusSink statusSink = new();
+
+            await SupportBundleTrayFlow.ExportAsync(
+                _client,
+                dialog,
+                statusSink,
+                TimeProvider.System);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                exception.Message,
+                "IranDirect support bundle",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }

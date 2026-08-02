@@ -16,6 +16,7 @@ using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Runtime.Reconciliation;
 using IranDirect.Core.State;
+using IranDirect.Core.Support;
 using IranDirect.Core.SystemTools;
 using IranDirect.Core.Vpn;
 using IranDirect.Service;
@@ -371,6 +372,23 @@ builder.Services.AddSingleton<
     IRuntimePreviewPlanner, RuntimePreviewPlanner>();
 builder.Services.AddSingleton<
     ExecutionPreviewCommandHandler>();
+builder.Services.AddSingleton<SupportSnapshotSerializer>();
+builder.Services.AddSingleton<SupportSnapshotProvider>();
+builder.Services.AddSingleton<SupportSnapshotExporter>();
+builder.Services.AddSingleton<ISupportBundleExporter>(
+    serviceProvider =>
+    {
+        SupportSnapshotProvider provider =
+            serviceProvider.GetRequiredService<
+                SupportSnapshotProvider>();
+        SupportSnapshotSerializer serializer =
+            serviceProvider.GetRequiredService<
+                SupportSnapshotSerializer>();
+        SupportSnapshotExporter snapshotExporter =
+            new(provider, serializer);
+        return new SupportBundleExporter(snapshotExporter);
+    });
+builder.Services.AddSingleton<SupportBundleCommandHandler>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
 

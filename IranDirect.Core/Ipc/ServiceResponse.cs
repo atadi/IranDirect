@@ -55,4 +55,8 @@ public sealed record ServiceResponse
     public DiagnosticReport? Report { get; init; }
 
     public ExecutionPreview? Preview { get; init; }
+
+    public string? SupportBundlePath { get; init; }
+
+    public long? SupportBundleBytesWritten { get; init; }
 }

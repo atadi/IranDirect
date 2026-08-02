@@ -26,5 +26,6 @@ public enum IranDirectCommand
     CustomRoutesInvalidateAllCaches,
     RuntimeSnapshot,
     PrefixUpdateCheckNow,
-    ExecutionPreview
+    ExecutionPreview,
+    SupportBundleExport
 }
