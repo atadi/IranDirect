@@ -27,6 +27,8 @@ public sealed class NamedPipeCommandServer
     private readonly PrefixUpdateCheckCommandHandler
         _prefixUpdateCheck;
     private readonly DiagnosticCommandHandler _diagnosticsHandler;
+    private readonly ExecutionPreviewCommandHandler
+        _executionPreviewHandler;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -40,6 +42,7 @@ public sealed class NamedPipeCommandServer
         RuntimeSnapshotCommandHandler runtimeSnapshot,
         PrefixUpdateCheckCommandHandler prefixUpdateCheck,
         DiagnosticCommandHandler diagnosticsHandler,
+        ExecutionPreviewCommandHandler executionPreviewHandler,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -52,6 +55,7 @@ public sealed class NamedPipeCommandServer
         _runtimeSnapshot = runtimeSnapshot;
         _prefixUpdateCheck = prefixUpdateCheck;
         _diagnosticsHandler = diagnosticsHandler;
+        _executionPreviewHandler = executionPreviewHandler;
         _logger = logger;
     }
 
@@ -292,6 +296,10 @@ public sealed class NamedPipeCommandServer
 
             IranDirectCommand.PrefixUpdateCheckNow =>
                 _prefixUpdateCheck.CheckNowAsync(
+                    cancellationToken),
+
+            IranDirectCommand.ExecutionPreview =>
+                _executionPreviewHandler.GetAsync(
                     cancellationToken),
 
             _ => Task.FromResult(

@@ -1,4 +1,5 @@
 using IranDirect.Core.CustomRoutes;
+using IranDirect.Core.Planning;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Configuration;
@@ -52,4 +53,6 @@ public sealed record ServiceResponse
         { get; init; }
 
     public DiagnosticReport? Report { get; init; }
+
+    public ExecutionPreview? Preview { get; init; }
 }

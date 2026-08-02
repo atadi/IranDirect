@@ -8,6 +8,7 @@ using IranDirect.Core.Diagnostics.Runtime;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Observability;
+using IranDirect.Core.Planning;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
@@ -363,6 +364,11 @@ builder.Services.AddSingleton<RuntimeSnapshotCommandHandler>();
 builder.Services.AddSingleton<
     PrefixUpdateCheckCommandHandler>();
 builder.Services.AddSingleton<DiagnosticCommandHandler>();
+builder.Services.AddSingleton<
+    ExecutionPreviewCommandHandler>();
+builder.Services.AddSingleton<
+    IExecutionPreviewBuilder,
+    ExecutionPreviewBuilder>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
 
