@@ -38,6 +38,7 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _configItem;
     private readonly ToolStripMenuItem _customRoutesItem;
     private readonly ToolStripMenuItem _runtimeSnapshotItem;
+    private readonly ToolStripMenuItem _diagnosticsItem;
     private readonly ToolStripMenuItem _logsItem;
 
     private readonly System.Windows.Forms.Timer _timer;
@@ -102,6 +103,8 @@ public sealed class TrayApplicationContext :
             CustomRouteMenuFactory.CreateCustomRoutesItem();
         _runtimeSnapshotItem = new ToolStripMenuItem(
             "View Runtime Snapshot...");
+        _diagnosticsItem = new ToolStripMenuItem(
+            "Run Diagnostics...");
         _logsItem = new ToolStripMenuItem(
             "Open Event Viewer");
 
@@ -167,6 +170,9 @@ public sealed class TrayApplicationContext :
         _runtimeSnapshotItem.Click +=
             async (_, _) => await ShowRuntimeSnapshotDialogAsync();
 
+        _diagnosticsItem.Click +=
+            async (_, _) => await ShowDiagnosticsDialogAsync();
+
         _logsItem.Click += (_, _) => OpenEventViewer();
 
         exitItem.Click += (_, _) => ExitApplication();
@@ -191,6 +197,7 @@ public sealed class TrayApplicationContext :
         menu.Items.Add(_configItem);
         menu.Items.Add(_customRoutesItem);
         menu.Items.Add(_runtimeSnapshotItem);
+        menu.Items.Add(_diagnosticsItem);
         menu.Items.Add(_logsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -572,6 +579,7 @@ finally
                 serviceRunning: true,
                 _busy);
         _runtimeSnapshotItem.Enabled = !_busy;
+        _diagnosticsItem.Enabled = !_busy;
 
         _notifyIcon.Text =
             status.Enabled
@@ -603,6 +611,7 @@ finally
         _configItem.Enabled = false;
         _customRoutesItem.Enabled = false;
         _runtimeSnapshotItem.Enabled = false;
+        _diagnosticsItem.Enabled = false;
 
         if (!_notifyIcon.Text.StartsWith(
                 "IranDirect — Service",
@@ -630,6 +639,7 @@ finally
         _configItem.Enabled = false;
         _customRoutesItem.Enabled = false;
         _runtimeSnapshotItem.Enabled = false;
+        _diagnosticsItem.Enabled = false;
 
         _startServiceItem.Enabled = false;
         _stopServiceItem.Enabled = false;
@@ -724,6 +734,32 @@ finally
             MessageBox.Show(
                 exception.Message,
                 "IranDirect runtime snapshot",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            await PollAsync();
+        }
+    }
+
+    private async Task ShowDiagnosticsDialogAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        try
+        {
+            using DiagnosticReportDialog dialog = new(_client);
+            dialog.ShowDialog();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                exception.Message,
+                "IranDirect diagnostics",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
