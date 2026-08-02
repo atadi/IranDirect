@@ -242,6 +242,83 @@ public sealed class RuntimeSnapshotProviderTests
     }
 
     [Fact]
+    public async Task GetSnapshotAsync_WithoutMetadata_PrefixSourceIsNull()
+    {
+        await using Fixture fixture = Fixture.Create();
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.Null(snapshot.PrefixSource);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_WithRecordedSuccess_PrefixSourcePopulated()
+    {
+        await using Fixture fixture = Fixture.Create();
+
+        await fixture.MetadataService.RecordSuccessAsync(
+            CreateFetchResult());
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixSource);
+        Assert.Equal(
+            "ripe-stat-country-resource-list-ipv4",
+            snapshot.PrefixSource.SourceId);
+        Assert.Equal(
+            "RIPE",
+            snapshot.PrefixSource.SourceDisplayName);
+        Assert.Equal(
+            PrefixSourceUpdateStatus.Succeeded,
+            snapshot.PrefixSource.LastStatus);
+        Assert.Equal(2, snapshot.PrefixSource.PrefixCount);
+        Assert.NotNull(snapshot.PrefixSource.ChangeSummary);
+        Assert.True(snapshot.PrefixSource.ChangeSummary.HasChanges);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_WithRecordedFailure_PrefixSourceFailed()
+    {
+        await using Fixture fixture = Fixture.Create();
+
+        await fixture.MetadataService.RecordFailureAsync(
+            CreateDescriptor(),
+            "network down");
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixSource);
+        Assert.Equal(
+            PrefixSourceUpdateStatus.Failed,
+            snapshot.PrefixSource.LastStatus);
+        Assert.Equal(
+            "network down",
+            snapshot.PrefixSource.LastError);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_WithRecordedNotModified_PrefixSourceNotModified()
+    {
+        await using Fixture fixture = Fixture.Create();
+
+        await fixture.MetadataService.RecordSuccessAsync(
+            CreateFetchResult());
+        await fixture.MetadataService.RecordNotModifiedAsync(
+            CreateFetchResult(notModified: true));
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixSource);
+        Assert.Equal(
+            PrefixSourceUpdateStatus.NotModified,
+            snapshot.PrefixSource.LastStatus);
+    }
+
+    [Fact]
     public void Snapshot_IsImmutableRecord()
     {
         RuntimeSnapshot original = new()
@@ -274,6 +351,7 @@ public sealed class RuntimeSnapshotProviderTests
         public ICustomRouteDnsCacheRepository DnsCacheRepository
             { get; }
         public RuntimeOperationStatus OperationStatus { get; }
+        public PrefixSourceMetadataService MetadataService { get; }
         public RuntimeSnapshotProvider Provider { get; }
 
         private Fixture(
@@ -285,6 +363,7 @@ public sealed class RuntimeSnapshotProviderTests
             CustomRouteService customRouteService,
             ICustomRouteDnsCacheRepository dnsCacheRepository,
             RuntimeOperationStatus operationStatus,
+            PrefixSourceMetadataService metadataService,
             RuntimeSnapshotProvider provider)
         {
             _directory = directory;
@@ -295,6 +374,7 @@ public sealed class RuntimeSnapshotProviderTests
             CustomRouteService = customRouteService;
             DnsCacheRepository = dnsCacheRepository;
             OperationStatus = operationStatus;
+            MetadataService = metadataService;
             Provider = provider;
         }
 
@@ -375,12 +455,23 @@ public sealed class RuntimeSnapshotProviderTests
                 dnsCacheRepository,
                 clock);
 
+            PrefixSourceMetadataService metadataService =
+                new(
+                    new PrefixSourceMetadataRepository(
+                        new PrefixSourceMetadataStore(
+                            Path.Combine(
+                                directory,
+                                "prefix-source-metadata.json")),
+                        new PrefixSourceMetadataValidator()),
+                    clock);
+
             RuntimeSnapshotProvider provider = new(
                 controller,
                 configurationService,
                 routeInventoryStore,
                 dnsCacheService,
                 perfStore,
+                metadataService,
                 clock);
 
             return new Fixture(
@@ -392,6 +483,7 @@ public sealed class RuntimeSnapshotProviderTests
                 customRouteService,
                 dnsCacheRepository,
                 operationStatus,
+                metadataService,
                 provider);
         }
 
@@ -402,6 +494,57 @@ public sealed class RuntimeSnapshotProviderTests
             await ValueTask.CompletedTask;
         }
     }
+
+    private static PrefixSourceFetchResult CreateFetchResult(
+        bool notModified = false)
+    {
+        string[] prefixes =
+        [
+            "1.2.3.0/24",
+            "10.0.0.0/8"
+        ];
+
+        PrefixSourceDescriptor descriptor = CreateDescriptor();
+
+        if (notModified)
+        {
+            return new PrefixSourceFetchResult
+            {
+                Source = descriptor,
+                Prefixes = [],
+                StartedAt = new DateTimeOffset(
+                    2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                CompletedAt = new DateTimeOffset(
+                    2026, 1, 1, 0, 0, 1, TimeSpan.Zero),
+                Duration = TimeSpan.FromSeconds(1),
+                NotModified = true
+            };
+        }
+
+        return new PrefixSourceFetchResult
+        {
+            Source = descriptor,
+            Prefixes = prefixes,
+            StartedAt = new DateTimeOffset(
+                2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            CompletedAt = new DateTimeOffset(
+                2026, 1, 1, 0, 0, 4, TimeSpan.Zero),
+            Duration = TimeSpan.FromSeconds(4),
+            ContentHash = new string('a', 64),
+            ContentLength = 512
+        };
+    }
+
+    private static PrefixSourceDescriptor CreateDescriptor() =>
+        new()
+        {
+            Id = "ripe-stat-country-resource-list-ipv4",
+            DisplayName = "RIPE",
+            Uri =
+                "https://stat.ripe.net/data/country-resource-list/data.json?resource=IR",
+            Format = "ripestat-country-resource-list-json",
+            ParserVersion = "1"
+        };
 
     internal sealed class FakeDecisionBuilder : IRuntimeDecisionBuilder
     {

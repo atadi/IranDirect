@@ -1,5 +1,6 @@
 using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Observability;
+using IranDirect.Core.Prefixes;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
@@ -47,6 +48,30 @@ public static class RuntimeSnapshotCliRenderer
         yield return "Performance:";
         yield return $"Last cycle: {FormatPerformance(snapshot.Performance)}";
         yield return "";
+
+        yield return "Prefix Source:";
+
+        if (snapshot.PrefixSource is null)
+        {
+            yield return "Unavailable.";
+            yield return "";
+        }
+        else
+        {
+            PrefixSourceMetadata source = snapshot.PrefixSource;
+
+            yield return $"Source: {FormatSourceName(source)}";
+            yield return $"Status: {FormatStatus(source.LastStatus)}";
+            yield return $"Last success: {FormatTimestamp(source.LastSucceededAt)}";
+            yield return $"Last attempted: {FormatTimestamp(source.LastAttemptedAt)}";
+            yield return $"Prefixes: {source.PrefixCount}";
+            yield return $"Hash: {ShortenHash(source.ContentHash)}";
+            yield return $"Added: {FormatChange(source.ChangeSummary?.AddedCount)}";
+            yield return $"Removed: {FormatChange(source.ChangeSummary?.RemovedCount)}";
+            yield return $"Unchanged: {FormatChange(source.ChangeSummary?.UnchangedCount)}";
+            yield return $"Changed: {FormatChanged(source.ChangeSummary)}";
+            yield return "";
+        }
 
         yield return "Configuration:";
 
@@ -96,6 +121,52 @@ public static class RuntimeSnapshotCliRenderer
     private static string FormatCount(
         int? count) =>
         count is null ? "-" : count.Value.ToString();
+
+    private static string FormatSourceName(
+        PrefixSourceMetadata source) =>
+        string.IsNullOrWhiteSpace(source.SourceDisplayName)
+            ? source.SourceId
+            : source.SourceDisplayName;
+
+    private static string FormatStatus(
+        PrefixSourceUpdateStatus status) =>
+        status switch
+        {
+            PrefixSourceUpdateStatus.NeverUpdated => "Never updated",
+            PrefixSourceUpdateStatus.Succeeded => "Succeeded",
+            PrefixSourceUpdateStatus.NotModified => "Not modified",
+            PrefixSourceUpdateStatus.Failed => "Failed",
+            _ => status.ToString()
+        };
+
+    private static string FormatTimestamp(
+        DateTimeOffset? timestamp) =>
+        timestamp is null
+            ? "-"
+            : Format(timestamp.Value);
+
+    private static string ShortenHash(
+        string? hash)
+    {
+        if (string.IsNullOrEmpty(hash))
+        {
+            return "-";
+        }
+
+        return hash.Length <= 8
+            ? hash
+            : hash[..8] + "...";
+    }
+
+    private static string FormatChange(
+        int? count) =>
+        count is null ? "-" : count.Value.ToString();
+
+    private static string FormatChanged(
+        PrefixSourceChangeSummary? summary) =>
+        summary is null
+            ? "-"
+            : summary.HasChanges ? "Yes" : "No";
 
     private static string YesNo(
         bool? enabled) =>

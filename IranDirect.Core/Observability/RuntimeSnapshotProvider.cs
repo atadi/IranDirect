@@ -2,6 +2,7 @@ namespace IranDirect.Core.Observability;
 
 using IranDirect.Core.Configuration;
 using IranDirect.Core.CustomRoutes;
+using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
@@ -13,6 +14,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
     private readonly IRouteInventoryPersistence _routeInventory;
     private readonly CustomRouteDnsCacheService _dnsCacheService;
     private readonly RuntimePerfReportStore? _perfStore;
+    private readonly IPrefixSourceMetadataService?
+        _prefixSourceMetadataService;
     private readonly TimeProvider _timeProvider;
 
     public RuntimeSnapshotProvider(
@@ -21,6 +24,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         IRouteInventoryPersistence routeInventory,
         CustomRouteDnsCacheService dnsCacheService,
         RuntimePerfReportStore? perfStore = null,
+        IPrefixSourceMetadataService?
+            prefixSourceMetadataService = null,
         TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(controller);
@@ -33,6 +38,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         _routeInventory = routeInventory;
         _dnsCacheService = dnsCacheService;
         _perfStore = perfStore;
+        _prefixSourceMetadataService =
+            prefixSourceMetadataService;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -64,12 +71,20 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
                 : await _perfStore.ReadLatestAsync(
                     cancellationToken);
 
+        PrefixSourceMetadata? prefixSource =
+            _prefixSourceMetadataService is null
+                ? null
+                : await _prefixSourceMetadataService
+                    .GetCurrentAsync(
+                        cancellationToken);
+
         return new RuntimeSnapshot
         {
             CapturedAt = capturedAt,
             Configuration = configuration,
             Runtime = runtime,
             Operation = runtime.Operation,
+            PrefixSource = prefixSource,
             PrefixCount = runtime.PrefixCount,
             InstalledRouteCount =
                 runtime.InstalledRouteCount,

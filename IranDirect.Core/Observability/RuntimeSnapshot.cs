@@ -2,6 +2,7 @@ namespace IranDirect.Core.Observability;
 
 using IranDirect.Core.Configuration;
 using IranDirect.Core.CustomRoutes;
+using IranDirect.Core.Prefixes;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
@@ -17,6 +18,8 @@ public sealed record RuntimeSnapshot
     public IranDirectStatus? Runtime { get; init; }
 
     public RuntimeOperationSnapshot? Operation { get; init; }
+
+    public PrefixSourceMetadata? PrefixSource { get; init; }
 
     public int? PrefixCount { get; init; }
 

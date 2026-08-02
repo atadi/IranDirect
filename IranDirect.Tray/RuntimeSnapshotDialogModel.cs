@@ -1,5 +1,6 @@
 using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Observability;
+using IranDirect.Core.Prefixes;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
@@ -105,7 +106,62 @@ public static class RuntimeSnapshotDialogModel
                     new SnapshotSectionRow(
                         "Last cycle",
                         FormatPerformance(snapshot.Performance))
-                ])
+                ]),
+            new SnapshotSection(
+                "Prefix Source",
+                BuildPrefixSourceRows(
+                    snapshot.PrefixSource))
+        ];
+    }
+
+    private static IReadOnlyList<SnapshotSectionRow>
+        BuildPrefixSourceRows(
+            PrefixSourceMetadata? source)
+    {
+        if (source is null)
+        {
+            return
+            [
+                new SnapshotSectionRow("Source", NotAvailable),
+                new SnapshotSectionRow("Status", NotAvailable),
+                new SnapshotSectionRow("Last Success", NotAvailable),
+                new SnapshotSectionRow("Prefix Count", NotAvailable),
+                new SnapshotSectionRow("Added", NotAvailable),
+                new SnapshotSectionRow("Removed", NotAvailable),
+                new SnapshotSectionRow("Unchanged", NotAvailable),
+                new SnapshotSectionRow("Hash", NotAvailable)
+            ];
+        }
+
+        return
+        [
+            new SnapshotSectionRow(
+                "Source",
+                FormatSourceName(source)),
+            new SnapshotSectionRow(
+                "Status",
+                FormatStatus(source.LastStatus)),
+            new SnapshotSectionRow(
+                "Last Success",
+                FormatTimestamp(source.LastSucceededAt)),
+            new SnapshotSectionRow(
+                "Prefix Count",
+                FormatCount(source.PrefixCount)),
+            new SnapshotSectionRow(
+                "Added",
+                FormatCount(
+                    source.ChangeSummary?.AddedCount)),
+            new SnapshotSectionRow(
+                "Removed",
+                FormatCount(
+                    source.ChangeSummary?.RemovedCount)),
+            new SnapshotSectionRow(
+                "Unchanged",
+                FormatCount(
+                    source.ChangeSummary?.UnchangedCount)),
+            new SnapshotSectionRow(
+                "Hash",
+                ShortenHash(source.ContentHash))
         ];
     }
 
@@ -140,6 +196,47 @@ public static class RuntimeSnapshotDialogModel
             ? NotAvailable
             : $"{health.ProtectedEndpointCount} / " +
               $"{health.CurrentEndpointCount}";
+
+    private static string FormatSourceName(
+        PrefixSourceMetadata source) =>
+        string.IsNullOrWhiteSpace(source.SourceDisplayName)
+            ? source.SourceId
+            : source.SourceDisplayName;
+
+    private static string FormatStatus(
+        PrefixSourceUpdateStatus status) =>
+        status switch
+        {
+            PrefixSourceUpdateStatus.NeverUpdated =>
+                "Never updated",
+            PrefixSourceUpdateStatus.Succeeded =>
+                "Succeeded",
+            PrefixSourceUpdateStatus.NotModified =>
+                "Not modified",
+            PrefixSourceUpdateStatus.Failed =>
+                "Failed",
+            _ => status.ToString()
+        };
+
+    private static string FormatTimestamp(
+        DateTimeOffset? timestamp) =>
+        timestamp is null
+            ? NotAvailable
+            : timestamp.Value.ToLocalTime().ToString(
+                "yyyy-MM-dd HH:mm:ss");
+
+    private static string ShortenHash(
+        string? hash)
+    {
+        if (string.IsNullOrEmpty(hash))
+        {
+            return NotAvailable;
+        }
+
+        return hash.Length <= 8
+            ? hash
+            : hash[..8] + "...";
+    }
 
     private static string FormatCount(
         int? count) =>

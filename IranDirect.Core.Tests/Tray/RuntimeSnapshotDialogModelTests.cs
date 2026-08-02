@@ -1,6 +1,7 @@
 using IranDirect.Core.Configuration;
 using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Observability;
+using IranDirect.Core.Prefixes;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.Vpn;
@@ -26,7 +27,8 @@ public sealed class RuntimeSnapshotDialogModelTests
                 "Routes",
                 "VPN",
                 "DNS",
-                "Performance"
+                "Performance",
+                "Prefix Source"
             ],
             sections.Select(section => section.Title));
     }
@@ -94,6 +96,199 @@ public sealed class RuntimeSnapshotDialogModelTests
         Assert.Contains(
             new SnapshotSectionRow("Last cycle", "42.1 sec"),
             performance.Rows);
+
+        SnapshotSection prefixSource = sections[7];
+        Assert.Contains(
+            new SnapshotSectionRow("Source", "RIPE"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Status", "Succeeded"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Prefix Count", "1946"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Added", "14"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Removed", "6"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Unchanged", "1940"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Hash", "ab12ef34..."),
+            prefixSource.Rows);
+    }
+
+    [Fact]
+    public void MapSections_MissingPrefixSource_ShowsNotAvailable()
+    {
+        RuntimeSnapshot snapshot =
+            CreateSnapshot() with { PrefixSource = null };
+
+        SnapshotSection prefixSource = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[7];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Source", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Status", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Last Success", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Prefix Count", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Added", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Removed", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Unchanged", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Hash", "-"),
+            prefixSource.Rows);
+    }
+
+    [Fact]
+    public void MapSections_PrefixSource_NeverUpdated()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixSource = CreatePrefixSource() with
+            {
+                LastStatus = PrefixSourceUpdateStatus.NeverUpdated,
+                LastSucceededAt = null,
+                PrefixCount = 0,
+                ContentHash = null
+            }
+        };
+
+        SnapshotSection prefixSource = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[7];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Status", "Never updated"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Last Success", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Hash", "-"),
+            prefixSource.Rows);
+    }
+
+    [Fact]
+    public void MapSections_PrefixSource_FailedAndNotModifiedStatuses()
+    {
+        RuntimeSnapshot failed = CreateSnapshot() with
+        {
+            PrefixSource = CreatePrefixSource() with
+            {
+                LastStatus = PrefixSourceUpdateStatus.Failed
+            }
+        };
+        RuntimeSnapshot notModified = CreateSnapshot() with
+        {
+            PrefixSource = CreatePrefixSource() with
+            {
+                LastStatus = PrefixSourceUpdateStatus.NotModified
+            }
+        };
+
+        SnapshotSection failedSection = RuntimeSnapshotDialogModel
+            .MapSections(failed)[7];
+        SnapshotSection notModifiedSection =
+            RuntimeSnapshotDialogModel
+                .MapSections(notModified)[7];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Status", "Failed"),
+            failedSection.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Status", "Not modified"),
+            notModifiedSection.Rows);
+    }
+
+    [Fact]
+    public void MapSections_PrefixSource_MissingChangeSummary_ShowsDashes()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixSource = CreatePrefixSource() with
+            {
+                ChangeSummary = null
+            }
+        };
+
+        SnapshotSection prefixSource = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[7];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Added", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Removed", "-"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Unchanged", "-"),
+            prefixSource.Rows);
+    }
+
+    [Fact]
+    public void MapSections_PrefixSource_NoChanges()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixSource = CreatePrefixSource() with
+            {
+                ChangeSummary = CreateChangeSummary() with
+                {
+                    HasChanges = false,
+                    AddedCount = 0,
+                    RemovedCount = 0,
+                    UnchangedCount = 1946
+                }
+            }
+        };
+
+        SnapshotSection prefixSource = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[7];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Added", "0"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Removed", "0"),
+            prefixSource.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Unchanged", "1946"),
+            prefixSource.Rows);
+    }
+
+    [Fact]
+    public void MapSections_PrefixSource_ShortHashNotTruncated()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixSource = CreatePrefixSource() with
+            {
+                ContentHash = "abc123"
+            }
+        };
+
+        SnapshotSection prefixSource = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[7];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Hash", "abc123"),
+            prefixSource.Rows);
     }
 
     [Fact]
@@ -173,6 +368,7 @@ public sealed class RuntimeSnapshotDialogModelTests
             PrefixCount = 5,
             InstalledRouteCount = 3,
             RouteInventoryCount = 4,
+            PrefixSource = CreatePrefixSource(),
             Operation = new RuntimeOperationSnapshot
             {
                 State = OperationState.Idle
@@ -211,6 +407,46 @@ public sealed class RuntimeSnapshotDialogModelTests
                 TotalMs = 42100,
                 Categories = []
             }
+        };
+    }
+
+    private static PrefixSourceMetadata CreatePrefixSource()
+    {
+        return new PrefixSourceMetadata
+        {
+            SourceId = "ripe-stat-country-resource-list-ipv4",
+            SourceDisplayName = "RIPE",
+            SourceUri =
+                "https://stat.ripe.net/data/country-resource-list/data.json?resource=IR",
+            Format = "ripestat-country-resource-list-json",
+            ParserVersion = "1",
+            LastAttemptedAt = new DateTimeOffset(
+                2026, 8, 3, 14, 10, 0, TimeSpan.Zero),
+            LastSucceededAt = new DateTimeOffset(
+                2026, 8, 3, 14, 10, 0, TimeSpan.Zero),
+            ContentHash =
+                "ab12ef34" + new string('c', 56),
+            ContentLength = 512,
+            PrefixCount = 1946,
+            DownloadDuration = TimeSpan.FromSeconds(4),
+            LastStatus = PrefixSourceUpdateStatus.Succeeded,
+            ChangeSummary = CreateChangeSummary()
+        };
+    }
+
+    private static PrefixSourceChangeSummary CreateChangeSummary()
+    {
+        return new PrefixSourceChangeSummary
+        {
+            PreviousContentHash = new string('b', 64),
+            CurrentContentHash =
+                "ab12ef34" + new string('c', 56),
+            AddedCount = 14,
+            RemovedCount = 6,
+            UnchangedCount = 1940,
+            HasChanges = true,
+            ComparedAt = new DateTimeOffset(
+                2026, 8, 3, 14, 10, 0, TimeSpan.Zero)
         };
     }
 }
