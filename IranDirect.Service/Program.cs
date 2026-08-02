@@ -33,18 +33,46 @@ builder.Services.AddWindowsService(options =>
     options.ServiceName = "IranDirect Service";
 });
 
-builder.Services.AddHttpClient<IranPrefixProvider>(client =>
+builder.Services.AddHttpClient<OfficialIranPrefixSource>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
     client.DefaultRequestHeaders.UserAgent.ParseAdd(
         "IranDirect/1.0");
 });
+builder.Services.AddSingleton<IPrefixSource>(
+    serviceProvider =>
+        serviceProvider.GetRequiredService<
+            OfficialIranPrefixSource>());
 
 builder.Services.AddSingleton(
     new PrefixFileRepository(
         Path.Combine(
             dataDirectory,
             "iran-ipv4-prefixes.txt")));
+
+builder.Services.AddSingleton(
+    new PrefixSourceMetadataStore(
+        Path.Combine(
+            dataDirectory,
+            "prefix-source-metadata.json")));
+builder.Services.AddSingleton<
+    PrefixSourceMetadataValidator>();
+builder.Services.AddSingleton<
+    IPrefixSourceMetadataRepository>(
+    serviceProvider =>
+        new PrefixSourceMetadataRepository(
+            serviceProvider.GetRequiredService<
+                PrefixSourceMetadataStore>(),
+            serviceProvider.GetRequiredService<
+                PrefixSourceMetadataValidator>()));
+builder.Services.AddSingleton<
+    IPrefixSourceMetadataService>(
+    serviceProvider =>
+        new PrefixSourceMetadataService(
+            serviceProvider.GetRequiredService<
+                IPrefixSourceMetadataRepository>(),
+            serviceProvider.GetRequiredService<
+                TimeProvider>()));
 
 builder.Services.AddSingleton(
     new StateRepository(

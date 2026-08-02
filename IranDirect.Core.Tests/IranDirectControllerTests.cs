@@ -1098,7 +1098,7 @@ public sealed class IranDirectControllerTests
             VpnEndpointRouteManager vpnRouteManager = new(routeManager);
 
             Controller = new IranDirectController(
-                null!, // IranPrefixProvider - not called
+                null!, // IPrefixSource - not called
                 prefixRepo,
                 gatewayDetector,
                 routeManager,

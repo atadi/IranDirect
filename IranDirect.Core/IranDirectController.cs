@@ -8,6 +8,7 @@ using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.State;
 using IranDirect.Core.Vpn;
+using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text;
 
@@ -17,7 +18,7 @@ public sealed class IranDirectController
 {
     private const int RouteMetric = 5;
 
-    private readonly IranPrefixProvider _prefixProvider;
+    private readonly IPrefixSource _prefixSource;
     private readonly PrefixFileRepository _prefixRepository;
     private readonly GatewayDetector _gatewayDetector;
     private readonly StateRepository _stateRepository;
@@ -34,9 +35,12 @@ public sealed class IranDirectController
         _configurationService;
     private readonly RuntimeOperationStatus _operationStatus;
     private readonly RuntimeCycleProfiler _profiler;
+    private readonly IPrefixSourceMetadataService?
+        _prefixSourceMetadataService;
+    private readonly ILogger<IranDirectController>? _logger;
 
     public IranDirectController(
-        IranPrefixProvider prefixProvider,
+        IPrefixSource prefixSource,
         PrefixFileRepository prefixRepository,
         GatewayDetector gatewayDetector,
         IRouteManager routeManager,
@@ -49,9 +53,12 @@ public sealed class IranDirectController
         IRuntimeExecutor runtimeExecutor,
         DesiredConfigurationService configurationService,
         RuntimeOperationStatus operationStatus,
-        RuntimeCycleProfiler? profiler = null)
+        RuntimeCycleProfiler? profiler = null,
+        IPrefixSourceMetadataService? prefixSourceMetadataService =
+            null,
+        ILogger<IranDirectController>? logger = null)
     {
-        _prefixProvider = prefixProvider;
+        _prefixSource = prefixSource;
         _prefixRepository = prefixRepository;
         _gatewayDetector = gatewayDetector;
         _stateRepository = stateRepository;
@@ -66,17 +73,37 @@ public sealed class IranDirectController
         _configurationService = configurationService;
         _operationStatus = operationStatus;
         _profiler = profiler ?? RuntimeCycleProfiler.Noop;
+        _prefixSourceMetadataService =
+            prefixSourceMetadataService;
+        _logger = logger;
     }
 
     public async Task<int> UpdatePrefixesAsync(
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<string> prefixes =
-            await _prefixProvider.DownloadIpv4PrefixesAsync(
+        PrefixSourceFetchResult fetch;
+
+        try
+        {
+            fetch = await _prefixSource.FetchAsync(
+                new PrefixSourceRequest(),
+                cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            await TryRecordMetadataFailureAsync(
+                exception,
                 cancellationToken);
 
+            throw;
+        }
+
         await _prefixRepository.SaveAsync(
-            prefixes,
+            fetch.Prefixes,
+            cancellationToken);
+
+        await TryRecordMetadataSuccessAsync(
+            fetch,
             cancellationToken);
 
         IranDirectState state =
@@ -86,14 +113,75 @@ public sealed class IranDirectController
         await _stateRepository.SaveAsync(
             state with
             {
-                PrefixCount = prefixes.Count,
+                PrefixCount = fetch.Prefixes.Count,
                 PrefixesUpdatedAt =
                     DateTimeOffset.UtcNow,
                 LastError = null
             },
             cancellationToken);
 
-        return prefixes.Count;
+        return fetch.Prefixes.Count;
+    }
+
+    private async Task TryRecordMetadataSuccessAsync(
+        PrefixSourceFetchResult fetch,
+        CancellationToken cancellationToken)
+    {
+        if (_prefixSourceMetadataService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (fetch.NotModified)
+            {
+                await _prefixSourceMetadataService
+                    .RecordNotModifiedAsync(
+                        fetch,
+                        cancellationToken);
+            }
+            else
+            {
+                await _prefixSourceMetadataService
+                    .RecordSuccessAsync(
+                        fetch,
+                        cancellationToken);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(
+                "Failed to persist prefix source metadata: " +
+                "{Error}",
+                exception.Message);
+        }
+    }
+
+    private async Task TryRecordMetadataFailureAsync(
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        if (_prefixSourceMetadataService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _prefixSourceMetadataService
+                .RecordFailureAsync(
+                    _prefixSource.Descriptor,
+                    exception.Message,
+                    cancellationToken);
+        }
+        catch (Exception metadataException)
+        {
+            _logger?.LogWarning(
+                "Failed to persist prefix source failure " +
+                "metadata: {Error}",
+                metadataException.Message);
+        }
     }
 
     public async Task<RuntimeCycleExecutionResult> EnableAsync(
