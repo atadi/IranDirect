@@ -26,6 +26,7 @@ public sealed class NamedPipeCommandServer
     private readonly RuntimeSnapshotCommandHandler _runtimeSnapshot;
     private readonly PrefixUpdateCheckCommandHandler
         _prefixUpdateCheck;
+    private readonly DiagnosticCommandHandler _diagnosticsHandler;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -38,6 +39,7 @@ public sealed class NamedPipeCommandServer
         CustomRouteCommandHandler customRoutes,
         RuntimeSnapshotCommandHandler runtimeSnapshot,
         PrefixUpdateCheckCommandHandler prefixUpdateCheck,
+        DiagnosticCommandHandler diagnosticsHandler,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -49,6 +51,7 @@ public sealed class NamedPipeCommandServer
         _customRoutes = customRoutes;
         _runtimeSnapshot = runtimeSnapshot;
         _prefixUpdateCheck = prefixUpdateCheck;
+        _diagnosticsHandler = diagnosticsHandler;
         _logger = logger;
     }
 
@@ -418,13 +421,23 @@ public sealed class NamedPipeCommandServer
             await _diagnosticsService.RunAsync(
                 cancellationToken);
 
-        return new ServiceResponse
+        ServiceResponse legacyResponse =
+            new ServiceResponse
+            {
+                Success = true,
+                Message =
+                    $"Diagnostics completed: " +
+                    $"{diagnostics.OverallSeverity}.",
+                Diagnostics = diagnostics
+            };
+
+        ServiceResponse reportResponse =
+            await _diagnosticsHandler.RunAsync(
+                cancellationToken);
+
+        return legacyResponse with
         {
-            Success = true,
-            Message =
-                $"Diagnostics completed: " +
-                $"{diagnostics.OverallSeverity}.",
-            Diagnostics = diagnostics
+            Report = reportResponse.Report
         };
     }
     private async Task<ServiceResponse> GetConfigurationAsync(

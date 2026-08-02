@@ -50,4 +50,6 @@ public sealed record ServiceResponse
 
     public PrefixUpdateMonitorSnapshot? PrefixUpdateMonitor
         { get; init; }
+
+    public DiagnosticReport? Report { get; init; }
 }

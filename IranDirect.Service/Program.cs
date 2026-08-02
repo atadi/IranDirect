@@ -362,6 +362,7 @@ builder.Services.AddSingleton<
 builder.Services.AddSingleton<RuntimeSnapshotCommandHandler>();
 builder.Services.AddSingleton<
     PrefixUpdateCheckCommandHandler>();
+builder.Services.AddSingleton<DiagnosticCommandHandler>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
 
