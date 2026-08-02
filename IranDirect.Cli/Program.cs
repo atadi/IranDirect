@@ -1,8 +1,15 @@
 using IranDirect.Core;
 using IranDirect.Core.Cli;
+using IranDirect.Core.Configuration;
+using IranDirect.Core.CustomRoutes;
+using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Ipc;
+using IranDirect.Core.Observability;
+using IranDirect.Core.Planning;
+using IranDirect.Core.Prefixes;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
+using IranDirect.Core.Support;
 using IranDirect.Cli;
 using System.Linq;
 
@@ -56,6 +63,16 @@ string commandText = args.Length == 0
             new IranDirectServiceClient());
     }
 
+    if (commandText == "support-bundle")
+    {
+        ISupportBundleExporter bundleExporter =
+            CreateSupportBundleExporter();
+
+        return await SupportBundleCliRunner.RunAsync(
+            args.Skip(1).ToArray(),
+            bundleExporter);
+    }
+
     if (commandText == "snapshot")
     {
         return await ShowSnapshotAsync();
@@ -67,7 +84,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|doctor|plan|profile]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|doctor|plan|profile|support-bundle]");
 
     return 6;
 }
@@ -555,4 +572,123 @@ static int ShowProfileUsage()
         "Usage: IranDirect.Cli profile " +
         "[last|enable|disable|repair|list [limit]]");
     return 6;
+}
+
+static ISupportBundleExporter CreateSupportBundleExporter()
+{
+    // Composition root: wire every dependency the support pipeline
+    // needs. The CLI only consumes ISupportBundleExporter.
+    RuntimeSnapshotProvider runtimeProvider = new(
+        null!,
+        null!,
+        null!,
+        null!);
+
+    DiagnosticRunner diagnosticRunner = new([]);
+
+    RuntimePreviewPlanner previewPlanner = new(
+        null!,
+        null!);
+
+    DesiredConfigurationService configurationService = new(
+        null!);
+
+    IPrefixSourceMetadataService prefixMetadataService =
+        new NoopPrefixMetadataService();
+
+    IPrefixSourceUpdateHistoryService prefixHistoryService =
+        new NoopPrefixHistoryService();
+
+    ICustomRouteDnsCacheService dnsCacheService =
+        new NoopDnsCacheService();
+
+    SupportSnapshotProvider snapshotProvider = new(
+        runtimeProvider,
+        diagnosticRunner,
+        previewPlanner,
+        configurationService,
+        prefixMetadataService,
+        prefixHistoryService,
+        dnsCacheService);
+
+    SupportSnapshotSerializer snapshotSerializer = new();
+
+    SupportSnapshotExporter snapshotExporter = new(
+        snapshotProvider,
+        snapshotSerializer);
+
+    return new SupportBundleExporter(snapshotExporter);
+}
+
+internal sealed class NoopPrefixMetadataService :
+    IPrefixSourceMetadataService
+{
+    public Task<PrefixSourceMetadata?> GetCurrentAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<PrefixSourceMetadata?>(null);
+
+    public Task<PrefixSourceChangeSummary?> GetLatestChangeSummaryAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<PrefixSourceChangeSummary?>(null);
+
+    public Task RecordSuccessAsync(
+        PrefixSourceFetchResult result,
+        IReadOnlyList<string>? previousPrefixes = null,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task RecordNotModifiedAsync(
+        PrefixSourceFetchResult result,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task RecordFailureAsync(
+        PrefixSourceDescriptor source,
+        string error,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+}
+
+internal sealed class NoopPrefixHistoryService :
+    IPrefixSourceUpdateHistoryService
+{
+    public Task<IReadOnlyList<PrefixSourceUpdateHistoryEntry>>
+        GetRecentAsync(
+            int? limit = null,
+            CancellationToken cancellationToken = default) =>
+        Task.FromResult(
+            (IReadOnlyList<PrefixSourceUpdateHistoryEntry>)Array.Empty<PrefixSourceUpdateHistoryEntry>());
+
+    public Task RecordSuccessAsync(
+        PrefixSourceFetchResult result,
+        PrefixSourceChangeSummary? changeSummary = null,
+        IReadOnlyList<string>? previousPrefixes = null,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task RecordNotModifiedAsync(
+        PrefixSourceFetchResult result,
+        int currentPrefixCount = 0,
+        string? currentContentHash = null,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task RecordFailureAsync(
+        PrefixSourceDescriptor source,
+        string error,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task ClearAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+}
+
+internal sealed class NoopDnsCacheService :
+    ICustomRouteDnsCacheService
+{
+    public Task<IReadOnlyList<CustomRouteDnsCacheStatus>> GetStatusAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(
+            (IReadOnlyList<CustomRouteDnsCacheStatus>)Array.Empty<CustomRouteDnsCacheStatus>());
 }
