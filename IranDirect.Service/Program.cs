@@ -74,6 +74,41 @@ builder.Services.AddSingleton<
             serviceProvider.GetRequiredService<
                 TimeProvider>()));
 
+PrefixUpdateCheckOptions prefixUpdateCheckOptions = new();
+builder.Configuration.GetSection(
+    "PrefixUpdateCheck").Bind(prefixUpdateCheckOptions);
+PrefixUpdateCheckOptions.Validate(prefixUpdateCheckOptions);
+builder.Services.AddSingleton(prefixUpdateCheckOptions);
+
+builder.Services.AddHttpClient<
+    OfficialIranPrefixUpdateChecker>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "IranDirect/1.0");
+});
+builder.Services.AddSingleton<IPrefixUpdateChecker>(
+    serviceProvider =>
+        serviceProvider.GetRequiredService<
+            OfficialIranPrefixUpdateChecker>());
+
+PrefixUpdateMonitorOptions prefixUpdateMonitorOptions =
+    new();
+builder.Configuration.GetSection(
+    "PrefixUpdateMonitor").Bind(prefixUpdateMonitorOptions);
+PrefixUpdateMonitorOptions.Validate(
+    prefixUpdateMonitorOptions);
+builder.Services.AddSingleton(
+    prefixUpdateMonitorOptions);
+
+builder.Services.AddSingleton<PrefixUpdateMonitor>();
+builder.Services.AddSingleton<IPrefixUpdateMonitor>(
+    serviceProvider =>
+        serviceProvider.GetRequiredService<
+            PrefixUpdateMonitor>());
+builder.Services.AddHostedService<
+    PrefixUpdateMonitorHostedService>();
+
 PrefixSourceHistoryOptions historyOptions = new();
 builder.Configuration.GetSection(
     "PrefixSourceHistory").Bind(historyOptions);
