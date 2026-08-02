@@ -73,6 +73,52 @@ public static class RuntimeSnapshotCliRenderer
             yield return "";
         }
 
+        yield return "Prefix Update:";
+
+        if (snapshot.PrefixUpdate is null)
+        {
+            yield return "Unavailable.";
+            yield return "";
+        }
+        else
+        {
+            PrefixUpdateCheckResult update = snapshot.PrefixUpdate;
+            PrefixUpdateCheckRemoteMetadata? remote =
+                update.RemoteMetadata;
+
+            yield return "Status:";
+            yield return FormatUpdateStatus(update.Status);
+            yield return "";
+
+            if (remote?.LastModified is { } lastModified)
+            {
+                yield return "Remote Last Modified:";
+                yield return Format(lastModified);
+                yield return "";
+            }
+
+            if (remote?.ETag is { } etag)
+            {
+                yield return "Remote ETag:";
+                yield return etag;
+                yield return "";
+            }
+
+            if (remote?.ContentLength is { } contentLength)
+            {
+                yield return "Remote Content Length:";
+                yield return contentLength.ToString();
+                yield return "";
+            }
+
+            if (!string.IsNullOrWhiteSpace(update.Reason))
+            {
+                yield return "Reason:";
+                yield return update.Reason;
+                yield return "";
+            }
+        }
+
         yield return "Configuration:";
 
         if (snapshot.Configuration is null)
@@ -136,6 +182,17 @@ public static class RuntimeSnapshotCliRenderer
             PrefixSourceUpdateStatus.Succeeded => "Succeeded",
             PrefixSourceUpdateStatus.NotModified => "Not modified",
             PrefixSourceUpdateStatus.Failed => "Failed",
+            _ => status.ToString()
+        };
+
+    private static string FormatUpdateStatus(
+        PrefixUpdateCheckStatus status) =>
+        status switch
+        {
+            PrefixUpdateCheckStatus.Current => "Current",
+            PrefixUpdateCheckStatus.UpdateAvailable => "Update Available",
+            PrefixUpdateCheckStatus.Unknown => "Unknown",
+            PrefixUpdateCheckStatus.Failed => "Failed",
             _ => status.ToString()
         };
 

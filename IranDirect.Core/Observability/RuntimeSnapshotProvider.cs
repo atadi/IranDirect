@@ -16,6 +16,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
     private readonly RuntimePerfReportStore? _perfStore;
     private readonly IPrefixSourceMetadataService?
         _prefixSourceMetadataService;
+    private readonly IPrefixUpdateChecker?
+        _prefixUpdateChecker;
     private readonly TimeProvider _timeProvider;
 
     public RuntimeSnapshotProvider(
@@ -26,6 +28,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         RuntimePerfReportStore? perfStore = null,
         IPrefixSourceMetadataService?
             prefixSourceMetadataService = null,
+        IPrefixUpdateChecker? prefixUpdateChecker = null,
         TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(controller);
@@ -40,6 +43,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         _perfStore = perfStore;
         _prefixSourceMetadataService =
             prefixSourceMetadataService;
+        _prefixUpdateChecker = prefixUpdateChecker;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -78,6 +82,12 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
                     .GetCurrentAsync(
                         cancellationToken);
 
+        PrefixUpdateCheckResult? prefixUpdate =
+            _prefixUpdateChecker is null
+                ? null
+                : await _prefixUpdateChecker.CheckAsync(
+                    cancellationToken);
+
         return new RuntimeSnapshot
         {
             CapturedAt = capturedAt,
@@ -85,6 +95,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
             Runtime = runtime,
             Operation = runtime.Operation,
             PrefixSource = prefixSource,
+            PrefixUpdate = prefixUpdate,
             PrefixCount = runtime.PrefixCount,
             InstalledRouteCount =
                 runtime.InstalledRouteCount,

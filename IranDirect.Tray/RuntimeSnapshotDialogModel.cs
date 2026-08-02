@@ -110,7 +110,11 @@ public static class RuntimeSnapshotDialogModel
             new SnapshotSection(
                 "Prefix Source",
                 BuildPrefixSourceRows(
-                    snapshot.PrefixSource))
+                    snapshot.PrefixSource)),
+            new SnapshotSection(
+                "Prefix Update",
+                BuildPrefixUpdateRows(
+                    snapshot.PrefixUpdate))
         ];
     }
 
@@ -162,6 +166,50 @@ public static class RuntimeSnapshotDialogModel
             new SnapshotSectionRow(
                 "Hash",
                 ShortenHash(source.ContentHash))
+        ];
+    }
+
+    private static IReadOnlyList<SnapshotSectionRow>
+        BuildPrefixUpdateRows(
+            PrefixUpdateCheckResult? update)
+    {
+        if (update is null)
+        {
+            return
+            [
+                new SnapshotSectionRow("Status", NotAvailable),
+                new SnapshotSectionRow(
+                    "Remote Last Modified",
+                    NotAvailable),
+                new SnapshotSectionRow(
+                    "Remote ETag",
+                    NotAvailable),
+                new SnapshotSectionRow(
+                    "Remote Size",
+                    NotAvailable),
+                new SnapshotSectionRow("Reason", NotAvailable)
+            ];
+        }
+
+        return
+        [
+            new SnapshotSectionRow(
+                "Status",
+                FormatUpdateStatus(update.Status)),
+            new SnapshotSectionRow(
+                "Remote Last Modified",
+                FormatTimestamp(
+                    update.RemoteMetadata?.LastModified)),
+            new SnapshotSectionRow(
+                "Remote ETag",
+                update.RemoteMetadata?.ETag ?? NotAvailable),
+            new SnapshotSectionRow(
+                "Remote Size",
+                FormatBytes(
+                    update.RemoteMetadata?.ContentLength)),
+            new SnapshotSectionRow(
+                "Reason",
+                update.Reason ?? NotAvailable)
         ];
     }
 
@@ -217,6 +265,24 @@ public static class RuntimeSnapshotDialogModel
                 "Failed",
             _ => status.ToString()
         };
+
+    private static string FormatUpdateStatus(
+        PrefixUpdateCheckStatus status) =>
+        status switch
+        {
+            PrefixUpdateCheckStatus.Current => "Current",
+            PrefixUpdateCheckStatus.UpdateAvailable =>
+                "Update Available",
+            PrefixUpdateCheckStatus.Unknown => "Unknown",
+            PrefixUpdateCheckStatus.Failed => "Failed",
+            _ => status.ToString()
+        };
+
+    private static string FormatBytes(
+        long? contentLength) =>
+        contentLength is null
+            ? NotAvailable
+            : contentLength.Value.ToString();
 
     private static string FormatTimestamp(
         DateTimeOffset? timestamp) =>

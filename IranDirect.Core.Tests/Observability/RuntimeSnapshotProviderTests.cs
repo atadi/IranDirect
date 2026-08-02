@@ -319,6 +319,132 @@ public sealed class RuntimeSnapshotProviderTests
     }
 
     [Fact]
+    public async Task GetSnapshotAsync_CurrentUpdateCheck_PopulatesPrefixUpdate()
+    {
+        await using Fixture fixture = Fixture.Create();
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.Current);
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixUpdate);
+        Assert.Equal(
+            PrefixUpdateCheckStatus.Current,
+            snapshot.PrefixUpdate.Status);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_UpdateAvailable_StoredInPrefixUpdate()
+    {
+        await using Fixture fixture = Fixture.Create();
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.UpdateAvailable);
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixUpdate);
+        Assert.Equal(
+            PrefixUpdateCheckStatus.UpdateAvailable,
+            snapshot.PrefixUpdate.Status);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_UnknownUpdateCheck_StoredInPrefixUpdate()
+    {
+        await using Fixture fixture = Fixture.Create();
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.Unknown,
+            reason: "No local metadata available.");
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixUpdate);
+        Assert.Equal(
+            PrefixUpdateCheckStatus.Unknown,
+            snapshot.PrefixUpdate.Status);
+        Assert.Equal(
+            "No local metadata available.",
+            snapshot.PrefixUpdate.Reason);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_FailedUpdateCheck_StoredNotSuppressed()
+    {
+        await using Fixture fixture = Fixture.Create();
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.Failed,
+            reason: "Remote check failed: network down");
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixUpdate);
+        Assert.Equal(
+            PrefixUpdateCheckStatus.Failed,
+            snapshot.PrefixUpdate.Status);
+        Assert.Equal(
+            "Remote check failed: network down",
+            snapshot.PrefixUpdate.Reason);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_CanceledUpdateCheck_Propagates()
+    {
+        await using Fixture fixture = Fixture.Create();
+        fixture.UpdateChecker.ExceptionToThrow =
+            new OperationCanceledException();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => fixture.Provider.GetSnapshotAsync());
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_InvokesUpdateCheckerExactlyOnce()
+    {
+        await using Fixture fixture = Fixture.Create();
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.Current);
+
+        await fixture.Provider.GetSnapshotAsync();
+
+        Assert.Equal(
+            1,
+            fixture.UpdateChecker.InvocationCount);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_WithUpdateCheck_PreservesAllExistingData()
+    {
+        await using Fixture fixture = Fixture.Create();
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.UpdateAvailable);
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.Equal(
+            PrefixUpdateCheckStatus.UpdateAvailable,
+            snapshot.PrefixUpdate!.Status);
+        Assert.Equal(fixture.Clock.Now, snapshot.CapturedAt);
+        Assert.Equal(1, snapshot.SchemaVersion);
+        Assert.NotNull(snapshot.Configuration);
+        Assert.NotNull(snapshot.Runtime);
+        Assert.NotNull(snapshot.Operation);
+        Assert.Equal(OperationState.Idle, snapshot.Operation.State);
+        Assert.Equal(1, snapshot.PrefixCount);
+        Assert.Equal(0, snapshot.InstalledRouteCount);
+        Assert.Equal(0, snapshot.RouteInventoryCount);
+        Assert.NotNull(snapshot.VpnEndpointHealth);
+        Assert.Empty(snapshot.DnsCache);
+        Assert.Null(snapshot.Performance);
+        Assert.Null(snapshot.LastError);
+        Assert.Null(snapshot.LastWarning);
+    }
+
+    [Fact]
     public void Snapshot_IsImmutableRecord()
     {
         RuntimeSnapshot original = new()
@@ -352,6 +478,7 @@ public sealed class RuntimeSnapshotProviderTests
             { get; }
         public RuntimeOperationStatus OperationStatus { get; }
         public PrefixSourceMetadataService MetadataService { get; }
+        public FakePrefixUpdateChecker UpdateChecker { get; }
         public RuntimeSnapshotProvider Provider { get; }
 
         private Fixture(
@@ -364,6 +491,7 @@ public sealed class RuntimeSnapshotProviderTests
             ICustomRouteDnsCacheRepository dnsCacheRepository,
             RuntimeOperationStatus operationStatus,
             PrefixSourceMetadataService metadataService,
+            FakePrefixUpdateChecker updateChecker,
             RuntimeSnapshotProvider provider)
         {
             _directory = directory;
@@ -375,6 +503,7 @@ public sealed class RuntimeSnapshotProviderTests
             DnsCacheRepository = dnsCacheRepository;
             OperationStatus = operationStatus;
             MetadataService = metadataService;
+            UpdateChecker = updateChecker;
             Provider = provider;
         }
 
@@ -465,6 +594,8 @@ public sealed class RuntimeSnapshotProviderTests
                         new PrefixSourceMetadataValidator()),
                     clock);
 
+            FakePrefixUpdateChecker updateChecker = new();
+
             RuntimeSnapshotProvider provider = new(
                 controller,
                 configurationService,
@@ -472,6 +603,7 @@ public sealed class RuntimeSnapshotProviderTests
                 dnsCacheService,
                 perfStore,
                 metadataService,
+                updateChecker,
                 clock);
 
             return new Fixture(
@@ -484,6 +616,7 @@ public sealed class RuntimeSnapshotProviderTests
                 dnsCacheRepository,
                 operationStatus,
                 metadataService,
+                updateChecker,
                 provider);
         }
 
@@ -545,6 +678,39 @@ public sealed class RuntimeSnapshotProviderTests
             Format = "ripestat-country-resource-list-json",
             ParserVersion = "1"
         };
+
+    private static PrefixUpdateCheckResult CreateUpdateResult(
+        PrefixUpdateCheckStatus status,
+        string? reason = null) =>
+        new()
+        {
+            Status = status,
+            CheckedAt = new DateTimeOffset(
+                2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            Reason = reason
+        };
+
+    internal sealed class FakePrefixUpdateChecker :
+        IPrefixUpdateChecker
+    {
+        public int InvocationCount { get; private set; }
+        public PrefixUpdateCheckResult? Result { get; set; }
+        public Exception? ExceptionToThrow { get; set; }
+
+        public Task<PrefixUpdateCheckResult> CheckAsync(
+            CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (ExceptionToThrow is not null)
+            {
+                throw ExceptionToThrow;
+            }
+
+            return Task.FromResult(Result!);
+        }
+    }
 
     internal sealed class FakeDecisionBuilder : IRuntimeDecisionBuilder
     {

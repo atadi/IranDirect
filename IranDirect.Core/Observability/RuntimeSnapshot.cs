@@ -21,6 +21,8 @@ public sealed record RuntimeSnapshot
 
     public PrefixSourceMetadata? PrefixSource { get; init; }
 
+    public PrefixUpdateCheckResult? PrefixUpdate { get; init; }
+
     public int? PrefixCount { get; init; }
 
     public int? InstalledRouteCount { get; init; }

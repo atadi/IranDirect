@@ -28,7 +28,8 @@ public sealed class RuntimeSnapshotDialogModelTests
                 "VPN",
                 "DNS",
                 "Performance",
-                "Prefix Source"
+                "Prefix Source",
+                "Prefix Update"
             ],
             sections.Select(section => section.Title));
     }
@@ -347,6 +348,143 @@ public sealed class RuntimeSnapshotDialogModelTests
                 }));
     }
 
+    [Fact]
+    public void MapSections_PrefixUpdate_AllStatuses()
+    {
+        (PrefixUpdateCheckStatus Status, string Expected)[] cases =
+        [
+            (PrefixUpdateCheckStatus.Current, "Current"),
+            (
+                PrefixUpdateCheckStatus.UpdateAvailable,
+                "Update Available"),
+            (PrefixUpdateCheckStatus.Unknown, "Unknown"),
+            (PrefixUpdateCheckStatus.Failed, "Failed")
+        ];
+
+        foreach ((PrefixUpdateCheckStatus status, string expected)
+            in cases)
+        {
+            RuntimeSnapshot snapshot = CreateSnapshot() with
+            {
+                PrefixUpdate = CreateUpdate(status)
+            };
+
+            SnapshotSection section = RuntimeSnapshotDialogModel
+                .MapSections(snapshot)[8];
+
+            Assert.Contains(
+                new SnapshotSectionRow("Status", expected),
+                section.Rows);
+        }
+    }
+
+    [Fact]
+    public void MapSections_PrefixUpdate_NullSnapshot_ShowsNotAvailable()
+    {
+        RuntimeSnapshot snapshot =
+            CreateSnapshot() with { PrefixUpdate = null };
+
+        SnapshotSection section = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[8];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Status", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Remote Last Modified", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Remote ETag", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Remote Size", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Reason", "-"),
+            section.Rows);
+    }
+
+    [Fact]
+    public void MapSections_PrefixUpdate_FormatsRemoteFields()
+    {
+        DateTimeOffset lastModified = new(
+            2026, 8, 5, 18, 10, 0, TimeSpan.Zero);
+        string expectedLastModified =
+            lastModified.ToLocalTime().ToString(
+                "yyyy-MM-dd HH:mm:ss");
+
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.UpdateAvailable,
+                lastModified: lastModified,
+                etag: "\"abc123\"",
+                contentLength: 12345,
+                reason: "ETag differs.")
+        };
+
+        SnapshotSection section = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[8];
+
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Status",
+                "Update Available"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Remote Last Modified",
+                expectedLastModified),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Remote ETag",
+                "\"abc123\""),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Remote Size",
+                "12345"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Reason",
+                "ETag differs."),
+            section.Rows);
+    }
+
+    [Fact]
+    public void MapSections_PrefixUpdate_MissingRemoteDetails_ShowsNotAvailable()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.Failed,
+                reason: "Remote check failed: network down")
+        };
+
+        SnapshotSection section = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[8];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Status", "Failed"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Remote Last Modified", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Remote ETag", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Remote Size", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Reason",
+                "Remote check failed: network down"),
+            section.Rows);
+    }
+
     private static RuntimeSnapshot CreateSnapshot()
     {
         return new RuntimeSnapshot
@@ -407,6 +545,35 @@ public sealed class RuntimeSnapshotDialogModelTests
                 TotalMs = 42100,
                 Categories = []
             }
+        };
+    }
+
+    private static PrefixUpdateCheckResult CreateUpdate(
+        PrefixUpdateCheckStatus status,
+        DateTimeOffset? lastModified = null,
+        string? etag = null,
+        long? contentLength = null,
+        string? reason = null)
+    {
+        PrefixUpdateCheckRemoteMetadata? remote =
+            lastModified is null
+                && etag is null
+                && contentLength is null
+                    ? null
+                    : new PrefixUpdateCheckRemoteMetadata
+                    {
+                        LastModified = lastModified,
+                        ETag = etag,
+                        ContentLength = contentLength
+                    };
+
+        return new PrefixUpdateCheckResult
+        {
+            Status = status,
+            CheckedAt = new DateTimeOffset(
+                2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            RemoteMetadata = remote,
+            Reason = reason
         };
     }
 

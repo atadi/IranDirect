@@ -245,6 +245,142 @@ public sealed class RuntimeSnapshotCliRendererTests
         Assert.Contains("Hash: abc123", lines);
     }
 
+    [Fact]
+    public void Render_PrefixUpdate_Current()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.Current)
+        };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Prefix Update:", lines);
+        Assert.Contains("Status:", lines);
+        Assert.Contains("Current", lines);
+    }
+
+    [Fact]
+    public void Render_PrefixUpdate_UpdateAvailable()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.UpdateAvailable)
+        };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Status:", lines);
+        Assert.Contains("Update Available", lines);
+    }
+
+    [Fact]
+    public void Render_PrefixUpdate_Unknown()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.Unknown)
+        };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Status:", lines);
+        Assert.Contains("Unknown", lines);
+    }
+
+    [Fact]
+    public void Render_PrefixUpdate_Failed()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.Failed)
+        };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Status:", lines);
+        Assert.Contains("Failed", lines);
+    }
+
+    [Fact]
+    public void Render_MissingPrefixUpdate_ShowsUnavailable()
+    {
+        RuntimeSnapshot snapshot =
+            CreateSnapshot() with { PrefixUpdate = null };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Prefix Update:", lines);
+        Assert.Contains("Unavailable.", lines);
+    }
+
+    [Fact]
+    public void Render_PrefixUpdate_ShowsRemoteDetailsAndReason()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.UpdateAvailable,
+                lastModified: new DateTimeOffset(
+                    2026, 8, 5, 18, 10, 0, TimeSpan.Zero),
+                etag: "\"abc123\"",
+                contentLength: 12345,
+                reason: "ETag differs.")
+        };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Status:", lines);
+        Assert.Contains("Update Available", lines);
+        Assert.Contains("Remote Last Modified:", lines);
+        Assert.Contains("2026-08-05 18:10:00 UTC", lines);
+        Assert.Contains("Remote ETag:", lines);
+        Assert.Contains("\"abc123\"", lines);
+        Assert.Contains("Remote Content Length:", lines);
+        Assert.Contains("12345", lines);
+        Assert.Contains("Reason:", lines);
+        Assert.Contains("ETag differs.", lines);
+    }
+
+    [Fact]
+    public void Render_PrefixUpdate_MissingRemoteDetails_OmitsFieldLines()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdate = CreateUpdate(
+                PrefixUpdateCheckStatus.Failed,
+                reason: "Remote check failed: network down")
+        };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Status:", lines);
+        Assert.Contains("Failed", lines);
+        Assert.Contains("Reason:", lines);
+        Assert.Contains("Remote check failed: network down", lines);
+        Assert.DoesNotContain("Remote Last Modified:", lines);
+        Assert.DoesNotContain("Remote ETag:", lines);
+        Assert.DoesNotContain("Remote Content Length:", lines);
+    }
+
     private static RuntimeSnapshot CreateSnapshot()
     {
         return new RuntimeSnapshot
@@ -305,6 +441,35 @@ public sealed class RuntimeSnapshotCliRendererTests
                 TotalMs = 42100,
                 Categories = []
             }
+        };
+    }
+
+    private static PrefixUpdateCheckResult CreateUpdate(
+        PrefixUpdateCheckStatus status,
+        DateTimeOffset? lastModified = null,
+        string? etag = null,
+        long? contentLength = null,
+        string? reason = null)
+    {
+        PrefixUpdateCheckRemoteMetadata? remote =
+            lastModified is null
+                && etag is null
+                && contentLength is null
+                    ? null
+                    : new PrefixUpdateCheckRemoteMetadata
+                    {
+                        LastModified = lastModified,
+                        ETag = etag,
+                        ContentLength = contentLength
+                    };
+
+        return new PrefixUpdateCheckResult
+        {
+            Status = status,
+            CheckedAt = new DateTimeOffset(
+                2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            RemoteMetadata = remote,
+            Reason = reason
         };
     }
 
