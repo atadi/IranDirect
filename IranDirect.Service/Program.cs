@@ -2,6 +2,7 @@ using IranDirect.Core;
 using IranDirect.Core.Configuration;
 using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Diagnostics;
+using IranDirect.Core.Diagnostics.Configuration;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Observability;
@@ -223,6 +224,33 @@ builder.Services.AddSingleton<
 
 builder.Services.AddSingleton<VpnEndpointRouteManager>();
 builder.Services.AddSingleton<IranDirectController>();
+
+builder.Services.AddSingleton<
+    DesiredConfigurationDiagnosticCheck>();
+builder.Services.AddSingleton<
+    PrefixConfigurationDiagnosticCheck>();
+builder.Services.AddSingleton<
+    PrefixMetadataDiagnosticCheck>();
+builder.Services.AddSingleton<
+    PrefixHistoryDiagnosticCheck>();
+builder.Services.AddSingleton<
+    CustomRoutesDiagnosticCheck>();
+builder.Services.AddSingleton<IDiagnosticRunner>(
+    serviceProvider =>
+        new DiagnosticRunner(
+            new List<IDiagnosticCheck>
+            {
+                serviceProvider.GetRequiredService<
+                    DesiredConfigurationDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    PrefixConfigurationDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    PrefixMetadataDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    PrefixHistoryDiagnosticCheck>(),
+                serviceProvider.GetRequiredService<
+                    CustomRoutesDiagnosticCheck>()
+            }));
 
 builder.Services.AddSingleton(
     serviceProvider =>
