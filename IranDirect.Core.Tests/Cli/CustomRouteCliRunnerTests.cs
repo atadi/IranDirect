@@ -192,6 +192,132 @@ public sealed class CustomRouteCliRunnerTests
         Assert.Empty(stderr);
     }
 
+    [Fact]
+    public async Task RunAsync_Status_RendersCacheStatusRows()
+    {
+        FakeSender sender = new(
+            (command, _, _) =>
+            {
+                Assert.Equal(
+                    IranDirectCommand.CustomRoutesCacheStatus,
+                    command);
+
+                return new ServiceResponse
+                {
+                    Success = true,
+                    Message = "Retrieved 1 domain(s).",
+                    CustomRouteDnsCacheStatuses =
+                    [
+                        new CustomRouteDnsCacheStatus
+                        {
+                            Domain = "example.com",
+                            Enabled = true,
+                            State = CustomRouteDnsCacheState.Fresh,
+                            IPv4Addresses = ["8.8.8.8"]
+                        }
+                    ]
+                };
+            });
+
+        (int exitCode, string stdout, string stderr) =
+            await RunAsync(["status"], sender);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("example.com", stdout);
+        Assert.Contains("Fresh", stdout);
+        Assert.Contains("8.8.8.8", stdout);
+        Assert.Empty(stderr);
+    }
+
+    [Fact]
+    public async Task RunAsync_Invalidate_DispatchesAndPrintsMessage()
+    {
+        Guid id = Guid.NewGuid();
+        FakeSender sender = new(
+            (command, value, _) =>
+            {
+                Assert.Equal(
+                    IranDirectCommand.CustomRoutesInvalidateCache,
+                    command);
+                Assert.Equal(id.ToString(), value);
+
+                return new ServiceResponse
+                {
+                    Success = true,
+                    Message = "Custom route cache invalidated."
+                };
+            });
+
+        (int exitCode, string stdout, string stderr) =
+            await RunAsync(["invalidate", id.ToString()], sender);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(
+            "Custom route cache invalidated.",
+            stdout.Trim());
+        Assert.Empty(stderr);
+    }
+
+    [Fact]
+    public async Task RunAsync_InvalidateAll_DispatchesAndPrintsMessage()
+    {
+        FakeSender sender = new(
+            (command, value, _) =>
+            {
+                Assert.Equal(
+                    IranDirectCommand.CustomRoutesInvalidateAllCaches,
+                    command);
+                Assert.Null(value);
+
+                return new ServiceResponse
+                {
+                    Success = true,
+                    Message = "Invalidated 2 DNS cache record(s)."
+                };
+            });
+
+        (int exitCode, string stdout, string stderr) =
+            await RunAsync(["invalidate-all"], sender);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(
+            "Invalidated 2 DNS cache record(s).",
+            stdout.Trim());
+        Assert.Empty(stderr);
+    }
+
+    [Fact]
+    public async Task RunAsync_Invalidate_InvalidId_ReturnsUsageExitCode()
+    {
+        (int exitCode, string stdout, string stderr) =
+            await RunAsync(["invalidate", "not-a-guid"]);
+
+        Assert.Equal(6, exitCode);
+        Assert.Empty(stdout);
+        Assert.Contains("GUID", stderr);
+    }
+
+    [Fact]
+    public async Task RunAsync_Invalidate_NotFound_ReturnsFailureExitCode()
+    {
+        FakeSender sender = new(
+            (_, _, _) => new ServiceResponse
+            {
+                Success = false,
+                ErrorCode = "CUSTOM_ROUTE_NOT_FOUND",
+                Message = "Custom route was not found."
+            });
+
+        (int exitCode, string stdout, string stderr) =
+            await RunAsync(
+                ["invalidate", Guid.NewGuid().ToString()],
+                sender);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(stdout);
+        Assert.Contains("was not found", stderr);
+    }
+
     private static async Task<(int ExitCode, string Stdout, string Stderr)>
         RunAsync(
             string[] args,

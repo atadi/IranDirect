@@ -41,6 +41,68 @@ public sealed class CustomRouteCliParserTests
     }
 
     [Fact]
+    public void Parse_Status_ReturnsStatus()
+    {
+        CustomRouteCliParseResult result =
+            CustomRouteCliParser.Parse(["status"]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(
+            CustomRouteCliCommand.Status,
+            result.Command);
+    }
+
+    [Fact]
+    public void Parse_Invalidate_WithValidGuid_ReturnsInvalidate()
+    {
+        Guid id = Guid.NewGuid();
+
+        CustomRouteCliParseResult result =
+            CustomRouteCliParser.Parse(
+                ["invalidate", id.ToString()]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(
+            CustomRouteCliCommand.Invalidate,
+            result.Command);
+        Assert.Equal(id.ToString(), result.Value);
+    }
+
+    [Fact]
+    public void Parse_Invalidate_WithoutId_ReturnsError()
+    {
+        CustomRouteCliParseResult result =
+            CustomRouteCliParser.Parse(["invalidate"]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("GUID", result.Error);
+    }
+
+    [Fact]
+    public void Parse_Invalidate_InvalidId_ReturnsError()
+    {
+        CustomRouteCliParseResult result =
+            CustomRouteCliParser.Parse(
+                ["invalidate", "not-a-guid"]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("GUID", result.Error);
+    }
+
+    [Fact]
+    public void Parse_InvalidateAll_ReturnsInvalidateAll()
+    {
+        CustomRouteCliParseResult result =
+            CustomRouteCliParser.Parse(["invalidate-all"]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(
+            CustomRouteCliCommand.InvalidateAll,
+            result.Command);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
     public void Parse_AddDomain_WithValueAndDescription()
     {
         CustomRouteCliParseResult result =

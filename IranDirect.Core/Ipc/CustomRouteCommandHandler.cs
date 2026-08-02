@@ -6,13 +6,16 @@ public sealed class CustomRouteCommandHandler
 {
     private readonly CustomRouteService _service;
     private readonly ICustomRouteResolver _resolver;
+    private readonly CustomRouteDnsCacheService _dnsCache;
 
     public CustomRouteCommandHandler(
         CustomRouteService service,
-        ICustomRouteResolver resolver)
+        ICustomRouteResolver resolver,
+        CustomRouteDnsCacheService dnsCache)
     {
         _service = service;
         _resolver = resolver;
+        _dnsCache = dnsCache;
     }
 
     public async Task<ServiceResponse> ListAsync(
@@ -164,6 +167,97 @@ public sealed class CustomRouteCommandHandler
                       $"{result.Failures.Count} failure(s).",
             CustomRouteResolution = result
         };
+    }
+
+    public async Task<ServiceResponse> CacheStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<CustomRouteDnsCacheStatus> statuses =
+            await _dnsCache.GetStatusAsync(cancellationToken);
+
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = $"Retrieved {statuses.Count} domain(s).",
+            CustomRouteDnsCacheStatuses = statuses
+        };
+    }
+
+    public async Task<ServiceResponse> InvalidateCacheAsync(
+        string? idText,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryParseId(idText, out Guid id) ||
+            id == Guid.Empty)
+        {
+            return Failure(
+                "INVALID_CUSTOM_ROUTE_ID",
+                "A valid custom route ID (GUID) is required.");
+        }
+
+        try
+        {
+            bool removed =
+                await _dnsCache.InvalidateAsync(
+                    id,
+                    cancellationToken);
+
+            return new ServiceResponse
+            {
+                Success = true,
+                Message =
+                    removed
+                        ? "Custom route cache invalidated."
+                        : "No cached DNS record for this domain."
+            };
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return Failure(
+                "CUSTOM_ROUTE_NOT_FOUND",
+                exception.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Failure(
+                "CACHE_OPERATION_FAILED",
+                "The DNS cache operation failed.");
+        }
+    }
+
+    public async Task<ServiceResponse> InvalidateAllCachesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            int removed =
+                await _dnsCache.InvalidateAllAsync(
+                    cancellationToken);
+
+            return new ServiceResponse
+            {
+                Success = true,
+                Message =
+                    removed == 0
+                        ? "No cached DNS records to invalidate."
+                        : $"Invalidated {removed} DNS cache " +
+                          $"record(s)."
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Failure(
+                "CACHE_OPERATION_FAILED",
+                "The DNS cache operation failed.");
+        }
     }
 
     private static bool TryParseId(

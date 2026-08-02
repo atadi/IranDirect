@@ -24,6 +24,23 @@ public static class CustomRouteCliParser
                     Command = CustomRouteCliCommand.Resolve
                 },
 
+            "status" =>
+                new CustomRouteCliParseResult
+                {
+                    Command = CustomRouteCliCommand.Status
+                },
+
+            "invalidate" =>
+                ParseId(
+                    args,
+                    CustomRouteCliCommand.Invalidate),
+
+            "invalidate-all" =>
+                new CustomRouteCliParseResult
+                {
+                    Command = CustomRouteCliCommand.InvalidateAll
+                },
+
             "add-domain" =>
                 ParseAdd(
                     args,

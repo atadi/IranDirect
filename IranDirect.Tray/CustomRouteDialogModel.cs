@@ -8,13 +8,21 @@ public sealed record CustomRouteListRow(
     bool Enabled,
     CustomRouteEntryType Type,
     string Value,
-    string? Description);
+    string? Description,
+    string CacheState,
+    string Addresses,
+    string Expires);
 
 public static class CustomRouteDialogModel
 {
     public const string DomainLabel = "Domain";
     public const string IpAddressLabel = "IP Address";
     public const string CidrLabel = "CIDR";
+
+    public const string NotAvailable = "-";
+
+    public const string InvalidateAllConfirmationMessage =
+        "Invalidate all DNS cache records?";
 
     public static string GetTypeLabel(
         CustomRouteEntryType type)
@@ -87,31 +95,69 @@ public static class CustomRouteDialogModel
     }
 
     public static IReadOnlyList<CustomRouteListRow> MapRows(
-        IReadOnlyList<CustomRouteEntry> entries)
+        IReadOnlyList<CustomRouteEntry> entries,
+        IReadOnlyList<CustomRouteDnsCacheStatus> statuses)
     {
+        Dictionary<Guid, CustomRouteDnsCacheStatus> byId =
+            statuses.ToDictionary(
+                status => status.CustomRouteEntryId);
+
         return entries
             .Select(entry =>
-                new CustomRouteListRow(
+            {
+                bool isDomain =
+                    entry.Type == CustomRouteEntryType.Domain;
+
+                CustomRouteDnsCacheStatus? status =
+                    isDomain
+                        ? byId.GetValueOrDefault(entry.Id)
+                        : null;
+
+                return new CustomRouteListRow(
                     entry.Id,
                     entry.Enabled,
                     entry.Type,
                     entry.Value,
-                    entry.Description))
+                    entry.Description,
+                    isDomain
+                        ? status?.State.ToString()
+                            ?? NotAvailable
+                        : NotAvailable,
+                    isDomain
+                        ? FormatCacheAddresses(
+                            status?.IPv4Addresses)
+                        : NotAvailable,
+                    isDomain
+                        ? FormatCacheTimestamp(
+                            status?.ExpiresAt)
+                        : NotAvailable);
+            })
             .ToArray();
     }
 
-    public static string BuildResolutionSummary(
-        CustomRouteResolutionResult result)
+    public static bool CanInvalidateCache(
+        CustomRouteListRow? row) =>
+        row is not null &&
+        row.Type == CustomRouteEntryType.Domain;
+
+    public static IranDirectCommand GetInvalidateCommand(
+        bool all)
     {
-        string summary =
-            $"Resolved {result.Prefixes.Count} prefix(es).";
-
-        if (result.Failures.Count == 0)
-        {
-            return summary;
-        }
-
-        return summary +
-               $" {result.Failures.Count} failure(s).";
+        return all
+            ? IranDirectCommand.CustomRoutesInvalidateAllCaches
+            : IranDirectCommand.CustomRoutesInvalidateCache;
     }
+
+    public static string FormatCacheAddresses(
+        IReadOnlyList<string>? addresses) =>
+        addresses is null || addresses.Count == 0
+            ? NotAvailable
+            : string.Join(", ", addresses);
+
+    public static string FormatCacheTimestamp(
+        DateTimeOffset? timestamp) =>
+        timestamp is null
+            ? NotAvailable
+            : timestamp.Value.ToLocalTime()
+                .ToString("yyyy-MM-dd HH:mm");
 }

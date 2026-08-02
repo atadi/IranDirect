@@ -101,6 +101,7 @@ CustomRouteDnsCacheOptions.Validate(dnsCacheOptions);
 builder.Services.AddSingleton(dnsCacheOptions);
 
 builder.Services.AddSingleton<ICustomRouteResolver, CustomRouteResolver>();
+builder.Services.AddSingleton<CustomRouteDnsCacheService>();
 builder.Services.AddSingleton<CustomRouteCommandHandler>();
 builder.Services.AddSingleton<OpenVpnProfileParser>();
 builder.Services.AddSingleton<VpnEndpointResolver>();

@@ -20,5 +20,8 @@ public enum IranDirectCommand
     CustomRoutesEnable,
     CustomRoutesDisable,
     CustomRoutesRemove,
-    CustomRoutesResolve
+    CustomRoutesResolve,
+    CustomRoutesCacheStatus,
+    CustomRoutesInvalidateCache,
+    CustomRoutesInvalidateAllCaches
 }

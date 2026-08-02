@@ -40,4 +40,7 @@ public sealed record ServiceResponse
 
     public CustomRouteResolutionResult?
         CustomRouteResolution { get; init; }
+
+    public IReadOnlyList<CustomRouteDnsCacheStatus>
+        CustomRouteDnsCacheStatuses { get; init; } = [];
 }

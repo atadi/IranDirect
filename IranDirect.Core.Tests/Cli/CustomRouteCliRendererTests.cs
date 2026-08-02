@@ -97,4 +97,78 @@ public sealed class CustomRouteCliRendererTests
         Assert.Contains("Resolved prefixes: 0", lines);
         Assert.Contains("Failures: 0", lines);
     }
+
+    [Fact]
+    public void RenderCacheStatus_WhenEmpty_ShowsNoDomainsMessage()
+    {
+        string[] lines = CustomRouteCliRenderer
+            .RenderCacheStatus([])
+            .ToArray();
+
+        Assert.Contains("No domains configured.", lines);
+    }
+
+    [Fact]
+    public void RenderCacheStatus_IncludesAllColumns()
+    {
+        Guid id = Guid.NewGuid();
+        DateTimeOffset stamp = new(
+            2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        string[] lines = CustomRouteCliRenderer
+            .RenderCacheStatus(
+            [
+                new CustomRouteDnsCacheStatus
+                {
+                    CustomRouteEntryId = id,
+                    Domain = "example.com",
+                    Enabled = true,
+                    State = CustomRouteDnsCacheState.Fresh,
+                    IPv4Addresses = ["8.8.8.8", "9.9.9.9"],
+                    LastSucceededAt = stamp,
+                    ExpiresAt = stamp,
+                    StaleUntil = stamp
+                }
+            ])
+            .ToArray();
+
+        string header = lines[1];
+        Assert.Contains("Domain", header);
+        Assert.Contains("Enabled", header);
+        Assert.Contains("State", header);
+        Assert.Contains("Addresses", header);
+        Assert.Contains("Last Success", header);
+        Assert.Contains("Expires", header);
+        Assert.Contains("Stale Until", header);
+        Assert.Contains("Last Error", header);
+
+        string row = lines[2];
+        Assert.Contains("example.com", row);
+        Assert.Contains("yes", row);
+        Assert.Contains("Fresh", row);
+        Assert.Contains("8.8.8.8, 9.9.9.9", row);
+        Assert.Contains("2026-01-01 00:00:00", row);
+    }
+
+    [Fact]
+    public void RenderCacheStatus_MissingFields_ShowsPlaceholders()
+    {
+        string[] lines = CustomRouteCliRenderer
+            .RenderCacheStatus(
+            [
+                new CustomRouteDnsCacheStatus
+                {
+                    Domain = "example.com",
+                    Enabled = false,
+                    State = CustomRouteDnsCacheState.Missing,
+                    IPv4Addresses = []
+                }
+            ])
+            .ToArray();
+
+        string row = lines[2];
+        Assert.Contains("no", row);
+        Assert.Contains("Missing", row);
+        Assert.DoesNotContain("2026", row);
+    }
 }

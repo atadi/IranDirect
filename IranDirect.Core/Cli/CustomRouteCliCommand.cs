@@ -9,5 +9,8 @@ public enum CustomRouteCliCommand
     Enable,
     Disable,
     Remove,
-    Resolve
+    Resolve,
+    Status,
+    Invalidate,
+    InvalidateAll
 }

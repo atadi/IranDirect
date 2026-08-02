@@ -304,11 +304,324 @@ public sealed class CustomRouteCommandHandlerTests
         Assert.Equal("broken.example", failure.Value);
     }
 
+    [Fact]
+    public async Task CacheStatusAsync_ReturnsStatuses()
+    {
+        Fixture fixture = CreateFixture();
+        CustomRouteEntry entry = await fixture.Service.AddAsync(
+            CustomRouteEntryType.Domain,
+            "example.com");
+        await fixture.CacheRepository.UpsertSuccessAsync(
+            entry.Id,
+            "example.com",
+            ["8.8.8.8"],
+            TimeSpan.FromMinutes(15),
+            TimeSpan.FromHours(1));
+
+        ServiceResponse response =
+            await fixture.Handler.CacheStatusAsync();
+
+        Assert.True(response.Success);
+
+        CustomRouteDnsCacheStatus status =
+            Assert.Single(response.CustomRouteDnsCacheStatuses);
+        Assert.Equal(entry.Id, status.CustomRouteEntryId);
+        Assert.Equal("example.com", status.Domain);
+        Assert.Equal(
+            CustomRouteDnsCacheState.Fresh,
+            status.State);
+        Assert.Equal(["8.8.8.8"], status.IPv4Addresses);
+    }
+
+    [Fact]
+    public async Task CacheStatusAsync_WhenNoDomains_ReturnsEmpty()
+    {
+        Fixture fixture = CreateFixture();
+        await fixture.Service.AddAsync(
+            CustomRouteEntryType.IpAddress,
+            "8.8.8.8");
+
+        ServiceResponse response =
+            await fixture.Handler.CacheStatusAsync();
+
+        Assert.True(response.Success);
+        Assert.Empty(response.CustomRouteDnsCacheStatuses);
+    }
+
+    [Fact]
+    public async Task InvalidateCacheAsync_RemovesOnlyThatRecord()
+    {
+        Fixture fixture = CreateFixture();
+        CustomRouteEntry first = await fixture.Service.AddAsync(
+            CustomRouteEntryType.Domain,
+            "example.com");
+        CustomRouteEntry second = await fixture.Service.AddAsync(
+            CustomRouteEntryType.Domain,
+            "second.com");
+        await fixture.CacheRepository.UpsertSuccessAsync(
+            first.Id,
+            "example.com",
+            ["8.8.8.8"],
+            TimeSpan.FromMinutes(15),
+            TimeSpan.FromHours(1));
+        await fixture.CacheRepository.UpsertSuccessAsync(
+            second.Id,
+            "second.com",
+            ["9.9.9.9"],
+            TimeSpan.FromMinutes(15),
+            TimeSpan.FromHours(1));
+
+        ServiceResponse response =
+            await fixture.Handler.InvalidateCacheAsync(
+                first.Id.ToString());
+
+        Assert.True(response.Success);
+        Assert.Null(
+            await fixture.CacheRepository.GetByEntryIdAsync(
+                first.Id));
+        Assert.NotNull(
+            await fixture.CacheRepository.GetByEntryIdAsync(
+                second.Id));
+    }
+
+    [Fact]
+    public async Task InvalidateCacheAsync_WhenNoRecord_StillSucceeds()
+    {
+        Fixture fixture = CreateFixture();
+        CustomRouteEntry entry = await fixture.Service.AddAsync(
+            CustomRouteEntryType.Domain,
+            "example.com");
+
+        ServiceResponse response =
+            await fixture.Handler.InvalidateCacheAsync(
+                entry.Id.ToString());
+
+        Assert.True(response.Success);
+        Assert.Equal(
+            "No cached DNS record for this domain.",
+            response.Message);
+    }
+
+    [Fact]
+    public async Task InvalidateCacheAsync_InvalidId_ReturnsFailure()
+    {
+        Fixture fixture = CreateFixture();
+
+        ServiceResponse response =
+            await fixture.Handler.InvalidateCacheAsync(
+                "not-a-guid");
+
+        Assert.False(response.Success);
+        Assert.Equal(
+            "INVALID_CUSTOM_ROUTE_ID",
+            response.ErrorCode);
+    }
+
+    [Fact]
+    public async Task InvalidateCacheAsync_MissingEntry_ReturnsNotFound()
+    {
+        Fixture fixture = CreateFixture();
+
+        ServiceResponse response =
+            await fixture.Handler.InvalidateCacheAsync(
+                Guid.NewGuid().ToString());
+
+        Assert.False(response.Success);
+        Assert.Equal(
+            "CUSTOM_ROUTE_NOT_FOUND",
+            response.ErrorCode);
+    }
+
+    [Fact]
+    public async Task InvalidateCacheAsync_NonDomainEntry_ReturnsNotFound()
+    {
+        Fixture fixture = CreateFixture();
+        CustomRouteEntry entry = await fixture.Service.AddAsync(
+            CustomRouteEntryType.IpAddress,
+            "8.8.8.8");
+
+        ServiceResponse response =
+            await fixture.Handler.InvalidateCacheAsync(
+                entry.Id.ToString());
+
+        Assert.False(response.Success);
+        Assert.Equal(
+            "CUSTOM_ROUTE_NOT_FOUND",
+            response.ErrorCode);
+    }
+
+    [Fact]
+    public async Task InvalidateCacheAsync_PersistenceFailure_ReturnsCacheFailure()
+    {
+        (CustomRouteCommandHandler handler, CustomRouteService service) =
+            CreateHandler(new FailingCacheRepository());
+
+        CustomRouteEntry entry = await service.AddAsync(
+            CustomRouteEntryType.Domain,
+            "example.com");
+
+        ServiceResponse response =
+            await handler.InvalidateCacheAsync(
+                entry.Id.ToString());
+
+        Assert.False(response.Success);
+        Assert.Equal(
+            "CACHE_OPERATION_FAILED",
+            response.ErrorCode);
+        Assert.DoesNotContain("System.", response.Message);
+    }
+
+    [Fact]
+    public async Task InvalidateAllCachesAsync_ClearsAllRecords()
+    {
+        Fixture fixture = CreateFixture();
+        CustomRouteEntry first = await fixture.Service.AddAsync(
+            CustomRouteEntryType.Domain,
+            "example.com");
+        CustomRouteEntry second = await fixture.Service.AddAsync(
+            CustomRouteEntryType.Domain,
+            "second.com");
+        await fixture.CacheRepository.UpsertSuccessAsync(
+            first.Id,
+            "example.com",
+            ["8.8.8.8"],
+            TimeSpan.FromMinutes(15),
+            TimeSpan.FromHours(1));
+        await fixture.CacheRepository.UpsertSuccessAsync(
+            second.Id,
+            "second.com",
+            ["9.9.9.9"],
+            TimeSpan.FromMinutes(15),
+            TimeSpan.FromHours(1));
+
+        ServiceResponse response =
+            await fixture.Handler.InvalidateAllCachesAsync();
+
+        Assert.True(response.Success);
+        Assert.Equal(
+            "Invalidated 2 DNS cache record(s).",
+            response.Message);
+        Assert.Empty(
+            await fixture.CacheRepository.GetAllAsync());
+    }
+
+    [Fact]
+    public async Task InvalidateAllCachesAsync_WhenNoRecords_StillSucceeds()
+    {
+        Fixture fixture = CreateFixture();
+
+        ServiceResponse response =
+            await fixture.Handler.InvalidateAllCachesAsync();
+
+        Assert.True(response.Success);
+        Assert.Equal(
+            "No cached DNS records to invalidate.",
+            response.Message);
+    }
+
+    [Fact]
+    public async Task InvalidateAllCachesAsync_PersistenceFailure_ReturnsCacheFailure()
+    {
+        (CustomRouteCommandHandler handler, _) =
+            CreateHandler(new FailingCacheRepository());
+
+        ServiceResponse response =
+            await handler.InvalidateAllCachesAsync();
+
+        Assert.False(response.Success);
+        Assert.Equal(
+            "CACHE_OPERATION_FAILED",
+            response.ErrorCode);
+    }
+
+    private static (
+        CustomRouteCommandHandler Handler,
+        CustomRouteService Service) CreateHandler(
+            ICustomRouteDnsCacheRepository cacheRepository)
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "IranDirect.Tests",
+            Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(directory);
+
+        CustomRouteRepository repository = new(
+            new CustomRouteStore(
+                Path.Combine(
+                    directory,
+                    "custom-routes.json")));
+
+        CustomRouteService service = new(
+            repository,
+            new CustomRouteEntryValidator());
+
+        CustomRouteDnsCacheService dnsCache = new(
+            service,
+            cacheRepository,
+            TimeProvider.System);
+
+        CustomRouteResolver resolver = new(
+            repository,
+            cacheRepository,
+            new CustomRouteDnsCacheOptions(),
+            TimeProvider.System,
+            (host, token) =>
+                Task.FromResult<IReadOnlyList<IPAddress>>([]));
+
+        CustomRouteCommandHandler handler =
+            new(service, resolver, dnsCache);
+
+        return (handler, service);
+    }
+
+    private sealed class FailingCacheRepository :
+        ICustomRouteDnsCacheRepository
+    {
+        public Task<IReadOnlyList<CustomRouteDnsCacheEntry>>
+            GetAllAsync(CancellationToken cancellationToken = default) =>
+            throw new IOException("disk full");
+
+        public Task<CustomRouteDnsCacheEntry?> GetByEntryIdAsync(
+            Guid customRouteEntryId,
+            CancellationToken cancellationToken = default) =>
+            throw new IOException("disk full");
+
+        public Task UpsertSuccessAsync(
+            Guid customRouteEntryId,
+            string? domain,
+            IEnumerable<string>? ipv4Addresses,
+            TimeSpan cacheDuration,
+            TimeSpan maxStaleDuration,
+            CancellationToken cancellationToken = default) =>
+            throw new IOException("disk full");
+
+        public Task UpsertFailureAsync(
+            Guid customRouteEntryId,
+            string? domain,
+            string? error,
+            CancellationToken cancellationToken = default) =>
+            throw new IOException("disk full");
+
+        public Task<bool> RemoveAsync(
+            Guid customRouteEntryId,
+            CancellationToken cancellationToken = default) =>
+            throw new IOException("disk full");
+
+        public Task<int> RemoveMissingEntriesAsync(
+            IReadOnlyCollection<Guid> existingEntryIds,
+            CancellationToken cancellationToken = default) =>
+            throw new IOException("disk full");
+    }
+
     private sealed class Fixture
     {
         public required CustomRouteRepository Repository { get; init; }
 
         public required CustomRouteService Service { get; init; }
+
+        public required CustomRouteDnsCacheRepository CacheRepository
+            { get; init; }
 
         public CustomRouteCommandHandler Handler { get; set; } = null!;
 
@@ -337,30 +650,41 @@ public sealed class CustomRouteCommandHandlerTests
             repository,
             new CustomRouteEntryValidator());
 
-        Fixture fixture = new()
-        {
-            Repository = repository,
-            Service = service,
-            Dns = (_, _) =>
-                Task.FromResult<IReadOnlyList<IPAddress>>([])
-        };
-
         CustomRouteDnsCacheStore cacheStore = new(
             Path.Combine(
                 directory,
                 "custom-route-dns-cache.json"));
 
+        CustomRouteDnsCacheRepository cacheRepository = new(
+            cacheStore,
+            TimeProvider.System);
+
+        Fixture fixture = new()
+        {
+            Repository = repository,
+            Service = service,
+            CacheRepository = cacheRepository,
+            Dns = (_, _) =>
+                Task.FromResult<IReadOnlyList<IPAddress>>([])
+        };
+
         CustomRouteResolver resolver = new(
             repository,
-            new CustomRouteDnsCacheRepository(
-                cacheStore,
-                TimeProvider.System),
+            cacheRepository,
             new CustomRouteDnsCacheOptions(),
             TimeProvider.System,
             (host, token) => fixture.Dns(host, token));
 
+        CustomRouteDnsCacheService dnsCache = new(
+            service,
+            cacheRepository,
+            TimeProvider.System);
+
         fixture.Handler =
-            new CustomRouteCommandHandler(service, resolver);
+            new CustomRouteCommandHandler(
+                service,
+                resolver,
+                dnsCache);
 
         return fixture;
     }

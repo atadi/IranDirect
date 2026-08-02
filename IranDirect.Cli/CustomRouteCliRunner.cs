@@ -31,7 +31,8 @@ public static class CustomRouteCliRunner
                 "[list|add-domain <domain> [description]|" +
                 "add-ip <ipv4> [description]|" +
                 "add-cidr <cidr> [description]|" +
-                "enable <id>|disable <id>|remove <id>|resolve]");
+                "enable <id>|disable <id>|remove <id>|resolve|" +
+                "status|invalidate <id>|invalidate-all]");
             return ExitUsage;
         }
 
@@ -70,6 +71,16 @@ public static class CustomRouteCliRunner
                     foreach (string line in
                              CustomRouteCliRenderer.RenderResolve(
                                  response.CustomRouteResolution!))
+                    {
+                        stdout.WriteLine(line);
+                    }
+
+                    break;
+
+                case CustomRouteCliCommand.Status:
+                    foreach (string line in
+                             CustomRouteCliRenderer.RenderCacheStatus(
+                                 response.CustomRouteDnsCacheStatuses))
                     {
                         stdout.WriteLine(line);
                     }
@@ -123,6 +134,12 @@ public static class CustomRouteCliRunner
                 IranDirectCommand.CustomRoutesRemove,
             CustomRouteCliCommand.Resolve =>
                 IranDirectCommand.CustomRoutesResolve,
+            CustomRouteCliCommand.Status =>
+                IranDirectCommand.CustomRoutesCacheStatus,
+            CustomRouteCliCommand.Invalidate =>
+                IranDirectCommand.CustomRoutesInvalidateCache,
+            CustomRouteCliCommand.InvalidateAll =>
+                IranDirectCommand.CustomRoutesInvalidateAllCaches,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(command))
         };

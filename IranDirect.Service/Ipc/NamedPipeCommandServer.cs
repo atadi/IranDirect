@@ -265,6 +265,18 @@ public sealed class NamedPipeCommandServer
             IranDirectCommand.CustomRoutesResolve =>
                 _customRoutes.ResolveAsync(cancellationToken),
 
+            IranDirectCommand.CustomRoutesCacheStatus =>
+                _customRoutes.CacheStatusAsync(cancellationToken),
+
+            IranDirectCommand.CustomRoutesInvalidateCache =>
+                _customRoutes.InvalidateCacheAsync(
+                    request.Value,
+                    cancellationToken),
+
+            IranDirectCommand.CustomRoutesInvalidateAllCaches =>
+                _customRoutes.InvalidateAllCachesAsync(
+                    cancellationToken),
+
             _ => Task.FromResult(
                 Failure(
                     "UNSUPPORTED_COMMAND",

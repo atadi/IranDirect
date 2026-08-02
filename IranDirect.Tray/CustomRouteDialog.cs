@@ -1,4 +1,3 @@
-using System.Text;
 using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Ipc;
 
@@ -12,11 +11,13 @@ public sealed class CustomRouteDialog : Form
     private readonly Button _addButton;
     private readonly Button _toggleButton;
     private readonly Button _removeButton;
-    private readonly Button _resolveButton;
+    private readonly Button _invalidateButton;
+    private readonly Button _invalidateAllButton;
     private readonly Button _closeButton;
     private readonly Label _statusLabel;
 
     private IReadOnlyList<CustomRouteEntry> _entries = [];
+    private IReadOnlyList<CustomRouteDnsCacheStatus> _statuses = [];
     private bool _busy;
 
     public CustomRouteDialog(
@@ -25,7 +26,7 @@ public sealed class CustomRouteDialog : Form
         _sender = sender ?? new IranDirectServiceClient();
 
         Text = "Custom Routes";
-        ClientSize = new Size(640, 420);
+        ClientSize = new Size(880, 420);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -35,7 +36,7 @@ public sealed class CustomRouteDialog : Form
         _grid = new DataGridView
         {
             Location = new Point(12, 12),
-            Size = new Size(616, 300),
+            Size = new Size(856, 300),
             ReadOnly = true,
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
@@ -52,34 +53,55 @@ public sealed class CustomRouteDialog : Form
             new()
             {
                 HeaderText = "Enabled",
-                FillWeight = 12
+                FillWeight = 6
             };
 
         DataGridViewTextBoxColumn typeColumn = new()
         {
             HeaderText = "Type",
-            FillWeight = 14
+            FillWeight = 11
         };
 
         DataGridViewTextBoxColumn valueColumn = new()
         {
             HeaderText = "Value",
-            FillWeight = 40
+            FillWeight = 26
+        };
+
+        DataGridViewTextBoxColumn cacheStateColumn = new()
+        {
+            HeaderText = "Cache State",
+            FillWeight = 11
+        };
+
+        DataGridViewTextBoxColumn addressesColumn = new()
+        {
+            HeaderText = "Addresses",
+            FillWeight = 20
+        };
+
+        DataGridViewTextBoxColumn expiresColumn = new()
+        {
+            HeaderText = "Expires",
+            FillWeight = 11
         };
 
         DataGridViewTextBoxColumn descriptionColumn = new()
         {
             HeaderText = "Description",
-            FillWeight = 34
+            FillWeight = 15
         };
 
         _grid.Columns.Add(enabledColumn);
         _grid.Columns.Add(typeColumn);
         _grid.Columns.Add(valueColumn);
+        _grid.Columns.Add(cacheStateColumn);
+        _grid.Columns.Add(addressesColumn);
+        _grid.Columns.Add(expiresColumn);
         _grid.Columns.Add(descriptionColumn);
 
         _grid.SelectionChanged += (_, _) =>
-            UpdateToggleButton();
+            UpdateButtons();
 
         _addButton = new Button
         {
@@ -102,17 +124,24 @@ public sealed class CustomRouteDialog : Form
             Size = new Size(90, 28)
         };
 
-        _resolveButton = new Button
+        _invalidateButton = new Button
         {
-            Text = "Resolve Now",
+            Text = "Invalidate Cache",
             Location = new Point(300, 328),
+            Size = new Size(90, 28)
+        };
+
+        _invalidateAllButton = new Button
+        {
+            Text = "Invalidate All",
+            Location = new Point(396, 328),
             Size = new Size(90, 28)
         };
 
         _closeButton = new Button
         {
             Text = "Close",
-            Location = new Point(538, 328),
+            Location = new Point(492, 328),
             Size = new Size(90, 28)
         };
 
@@ -132,8 +161,11 @@ public sealed class CustomRouteDialog : Form
         _removeButton.Click += async (_, _) =>
             await RemoveSelectedAsync();
 
-        _resolveButton.Click += async (_, _) =>
-            await ResolveAsync();
+        _invalidateButton.Click += async (_, _) =>
+            await InvalidateSelectedCacheAsync();
+
+        _invalidateAllButton.Click += async (_, _) =>
+            await InvalidateAllCachesAsync();
 
         _closeButton.Click += (_, _) =>
         {
@@ -145,7 +177,8 @@ public sealed class CustomRouteDialog : Form
         Controls.Add(_addButton);
         Controls.Add(_toggleButton);
         Controls.Add(_removeButton);
-        Controls.Add(_resolveButton);
+        Controls.Add(_invalidateButton);
+        Controls.Add(_invalidateAllButton);
         Controls.Add(_closeButton);
         Controls.Add(_statusLabel);
 
@@ -159,18 +192,31 @@ public sealed class CustomRouteDialog : Form
 
         try
         {
-            ServiceResponse response =
+            ServiceResponse listResponse =
                 await _sender.SendAsync(
                     IranDirectCommand.CustomRoutesList);
 
-            if (!response.Success)
+            if (!listResponse.Success)
             {
-                ShowError(response.Message);
+                ShowError(listResponse.Message);
                 _statusLabel.Text = "Failed to load routes.";
                 return;
             }
 
-            _entries = response.CustomRoutes;
+            ServiceResponse statusResponse =
+                await _sender.SendAsync(
+                    IranDirectCommand.CustomRoutesCacheStatus);
+
+            if (!statusResponse.Success)
+            {
+                ShowError(statusResponse.Message);
+                _statusLabel.Text = "Failed to load routes.";
+                return;
+            }
+
+            _entries = listResponse.CustomRoutes;
+            _statuses =
+                statusResponse.CustomRouteDnsCacheStatuses;
             BindGrid();
             _statusLabel.Text =
                 $"{_entries.Count} custom route(s).";
@@ -189,7 +235,9 @@ public sealed class CustomRouteDialog : Form
     private void BindGrid()
     {
         IReadOnlyList<CustomRouteListRow> rows =
-            CustomRouteDialogModel.MapRows(_entries);
+            CustomRouteDialogModel.MapRows(
+                _entries,
+                _statuses);
 
         _grid.Rows.Clear();
 
@@ -199,11 +247,14 @@ public sealed class CustomRouteDialog : Form
                 row.Enabled,
                 CustomRouteDialogModel.GetTypeLabel(row.Type),
                 row.Value,
+                row.CacheState,
+                row.Addresses,
+                row.Expires,
                 row.Description ?? "");
         }
 
         _grid.ClearSelection();
-        UpdateToggleButton();
+        UpdateButtons();
     }
 
     private CustomRouteListRow? SelectedRow()
@@ -216,10 +267,11 @@ public sealed class CustomRouteDialog : Form
         }
 
         return CustomRouteDialogModel.MapRows(
-            _entries)[_grid.CurrentRow.Index];
+            _entries,
+            _statuses)[_grid.CurrentRow.Index];
     }
 
-    private void UpdateToggleButton()
+    private void UpdateButtons()
     {
         CustomRouteListRow? row = SelectedRow();
         _toggleButton.Text = row?.Enabled == true
@@ -229,6 +281,9 @@ public sealed class CustomRouteDialog : Form
             !_busy && row is not null;
         _removeButton.Enabled =
             !_busy && row is not null;
+        _invalidateButton.Enabled =
+            !_busy &&
+            CustomRouteDialogModel.CanInvalidateCache(row);
     }
 
     private async Task AddAsync()
@@ -290,45 +345,67 @@ public sealed class CustomRouteDialog : Form
             row.Id.ToString());
     }
 
-    private async Task ResolveAsync()
+    private async Task InvalidateSelectedCacheAsync()
+    {
+        CustomRouteListRow? row = SelectedRow();
+
+        if (!CustomRouteDialogModel.CanInvalidateCache(row))
+        {
+            return;
+        }
+
+        await InvalidateAsync(
+            CustomRouteDialogModel.GetInvalidateCommand(
+                all: false),
+            row!.Id.ToString());
+    }
+
+    private async Task InvalidateAllCachesAsync()
+    {
+        DialogResult confirm = MessageBox.Show(
+            this,
+            CustomRouteDialogModel.InvalidateAllConfirmationMessage,
+            "Custom Routes",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+
+        if (confirm != DialogResult.Yes)
+        {
+            return;
+        }
+
+        await InvalidateAsync(
+            CustomRouteDialogModel.GetInvalidateCommand(
+                all: true),
+            value: null);
+    }
+
+    private async Task InvalidateAsync(
+        IranDirectCommand command,
+        string? value)
     {
         SetBusy(true);
-        _statusLabel.Text = "Resolving...";
+        _statusLabel.Text = "Invalidating...";
 
         try
         {
             ServiceResponse response =
-                await _sender.SendAsync(
-                    IranDirectCommand.CustomRoutesResolve);
+                await _sender.SendAsync(command, value);
 
-            if (!response.Success ||
-                response.CustomRouteResolution is null)
+            if (!response.Success)
             {
                 ShowError(response.Message);
-                _statusLabel.Text = "Resolution failed.";
+                _statusLabel.Text = "Invalidation failed.";
                 return;
             }
 
-            CustomRouteResolutionResult result =
-                response.CustomRouteResolution;
-
-            _statusLabel.Text =
-                CustomRouteDialogModel.BuildResolutionSummary(
-                    result);
-
-            MessageBox.Show(
-                this,
-                BuildResolutionText(result),
-                "Custom Routes — Resolution",
-                MessageBoxButtons.OK,
-                result.Failures.Count == 0
-                    ? MessageBoxIcon.Information
-                    : MessageBoxIcon.Warning);
+            _statusLabel.Text = response.Message;
+            await RefreshAsync();
         }
         catch (Exception exception)
         {
             ShowError(exception.Message);
-            _statusLabel.Text = "Resolution failed.";
+            _statusLabel.Text = "Invalidation failed.";
         }
         finally
         {
@@ -374,41 +451,6 @@ public sealed class CustomRouteDialog : Form
         }
     }
 
-    private static string BuildResolutionText(
-        CustomRouteResolutionResult result)
-    {
-        StringBuilder text = new();
-
-        text.Append(
-            $"Resolved prefixes: {result.Prefixes.Count}\n");
-
-        foreach (string prefix in result.Prefixes)
-        {
-            text.AppendLine(prefix);
-        }
-
-        text.AppendLine();
-
-        if (result.Failures.Count == 0)
-        {
-            text.Append("Failures: none");
-            return text.ToString();
-        }
-
-        text.Append($"Failures: {result.Failures.Count}\n");
-
-        foreach (CustomRouteResolutionFailure failure
-                 in result.Failures)
-        {
-            text.AppendLine(
-                $"- [{CustomRouteDialogModel.GetTypeLabel(
-                    failure.Type)}] {failure.Value}: " +
-                failure.Reason);
-        }
-
-        return text.ToString();
-    }
-
     private void ShowError(string message)
     {
         MessageBox.Show(
@@ -424,9 +466,9 @@ public sealed class CustomRouteDialog : Form
         _busy = busy;
 
         _addButton.Enabled = !busy;
-        _resolveButton.Enabled = !busy;
+        _invalidateAllButton.Enabled = !busy;
         _grid.Enabled = !busy;
 
-        UpdateToggleButton();
+        UpdateButtons();
     }
 }
