@@ -1,33 +1,24 @@
 using IranDirect.Core.Planning;
-using IranDirect.Core.Runtime;
 
 namespace IranDirect.Core.Ipc;
 
 public sealed class ExecutionPreviewCommandHandler
 {
-    private readonly IRuntimeDecisionBuilder _decisionBuilder;
-    private readonly IExecutionPreviewBuilder _previewBuilder;
+    private readonly IRuntimePreviewPlanner _planner;
 
     public ExecutionPreviewCommandHandler(
-        IRuntimeDecisionBuilder decisionBuilder,
-        IExecutionPreviewBuilder previewBuilder)
+        IRuntimePreviewPlanner planner)
     {
-        ArgumentNullException.ThrowIfNull(decisionBuilder);
-        ArgumentNullException.ThrowIfNull(previewBuilder);
+        ArgumentNullException.ThrowIfNull(planner);
 
-        _decisionBuilder = decisionBuilder;
-        _previewBuilder = previewBuilder;
+        _planner = planner;
     }
 
     public async Task<ServiceResponse> GetAsync(
         CancellationToken cancellationToken = default)
     {
-        RuntimeDecision decision =
-            await _decisionBuilder.BuildAsync(
-                cancellationToken);
-
         ExecutionPreview preview =
-            _previewBuilder.Build(decision);
+            await _planner.BuildPreviewAsync(cancellationToken);
 
         return new ServiceResponse
         {

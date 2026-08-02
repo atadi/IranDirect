@@ -365,10 +365,12 @@ builder.Services.AddSingleton<
     PrefixUpdateCheckCommandHandler>();
 builder.Services.AddSingleton<DiagnosticCommandHandler>();
 builder.Services.AddSingleton<
-    ExecutionPreviewCommandHandler>();
-builder.Services.AddSingleton<
     IExecutionPreviewBuilder,
     ExecutionPreviewBuilder>();
+builder.Services.AddSingleton<
+    IRuntimePreviewPlanner, RuntimePreviewPlanner>();
+builder.Services.AddSingleton<
+    ExecutionPreviewCommandHandler>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
 

@@ -11,18 +11,12 @@ public sealed class ExecutionPreviewCommandHandlerTests
     [Fact]
     public async Task GetAsync_ReturnsSuccessWithPreview()
     {
-        RuntimeDecision decision =
-            CreateDecisionWithOneStep();
-
         ExecutionPreview expectedPreview = CreatePreview();
 
-        FakeDecisionBuilder decisionBuilder =
-            new(decision);
-        FakePreviewBuilder previewBuilder =
-            new(expectedPreview);
+        FakePlanner planner = new(expectedPreview);
 
         ExecutionPreviewCommandHandler handler =
-            new(decisionBuilder, previewBuilder);
+            new(planner);
 
         ServiceResponse response =
             await handler.GetAsync();
@@ -34,72 +28,28 @@ public sealed class ExecutionPreviewCommandHandlerTests
     }
 
     [Fact]
-    public async Task GetAsync_BuildsDecisionExactlyOnce()
+    public async Task GetAsync_CallsPlannerExactlyOnce()
     {
-        FakeDecisionBuilder decisionBuilder =
-            new(CreateDecisionWithOneStep());
-        FakePreviewBuilder previewBuilder =
-            new(CreatePreview());
+        FakePlanner planner = new(CreatePreview());
 
         ExecutionPreviewCommandHandler handler =
-            new(decisionBuilder, previewBuilder);
+            new(planner);
 
         await handler.GetAsync();
 
-        Assert.Equal(1, decisionBuilder.BuildCallCount);
-    }
-
-    [Fact]
-    public async Task GetAsync_BuildsPreviewExactlyOnce()
-    {
-        FakeDecisionBuilder decisionBuilder =
-            new(CreateDecisionWithOneStep());
-        FakePreviewBuilder previewBuilder =
-            new(CreatePreview());
-
-        ExecutionPreviewCommandHandler handler =
-            new(decisionBuilder, previewBuilder);
-
-        await handler.GetAsync();
-
-        Assert.Equal(1, previewBuilder.BuildCallCount);
-    }
-
-    [Fact]
-    public async Task GetAsync_PassesDecisionToPreviewBuilder()
-    {
-        RuntimeDecision decision =
-            CreateDecisionWithOneStep();
-
-        FakeDecisionBuilder decisionBuilder =
-            new(decision);
-        FakePreviewBuilder previewBuilder =
-            new(CreatePreview());
-
-        ExecutionPreviewCommandHandler handler =
-            new(decisionBuilder, previewBuilder);
-
-        await handler.GetAsync();
-
-        Assert.Same(decision, previewBuilder.ReceivedDecision);
+        Assert.Equal(1, planner.BuildPreviewCallCount);
     }
 
     [Fact]
     public async Task GetAsync_EmptyPlan_ShowsNoChangesMessage()
     {
-        RuntimeDecision decision =
-            CreateEmptyDecision();
-
         ExecutionPreview emptyPreview = CreatePreview(
             hasChanges: false);
 
-        FakeDecisionBuilder decisionBuilder =
-            new(decision);
-        FakePreviewBuilder previewBuilder =
-            new(emptyPreview);
+        FakePlanner planner = new(emptyPreview);
 
         ExecutionPreviewCommandHandler handler =
-            new(decisionBuilder, previewBuilder);
+            new(planner);
 
         ServiceResponse response =
             await handler.GetAsync();
@@ -112,19 +62,13 @@ public sealed class ExecutionPreviewCommandHandlerTests
     [Fact]
     public async Task GetAsync_WithChanges_ShowsComputedMessage()
     {
-        RuntimeDecision decision =
-            CreateDecisionWithOneStep();
-
         ExecutionPreview preview =
             CreatePreview(hasChanges: true);
 
-        FakeDecisionBuilder decisionBuilder =
-            new(decision);
-        FakePreviewBuilder previewBuilder =
-            new(preview);
+        FakePlanner planner = new(preview);
 
         ExecutionPreviewCommandHandler handler =
-            new(decisionBuilder, previewBuilder);
+            new(planner);
 
         ServiceResponse response =
             await handler.GetAsync();
@@ -140,35 +84,115 @@ public sealed class ExecutionPreviewCommandHandlerTests
         using CancellationTokenSource cts = new();
         cts.Cancel();
 
-        FakeDecisionBuilder decisionBuilder = new(
-            CreateDecisionWithOneStep());
-        FakePreviewBuilder previewBuilder =
-            new(CreatePreview());
+        FakePlanner planner = new(CreatePreview());
 
         ExecutionPreviewCommandHandler handler =
-            new(decisionBuilder, previewBuilder);
+            new(planner);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => handler.GetAsync(cts.Token));
     }
 
     [Fact]
-    public void Constructor_NullDecisionBuilder_Throws()
+    public async Task GetAsync_PlannerException_Propagates()
     {
-        Assert.Throws<ArgumentNullException>(
-            () => new ExecutionPreviewCommandHandler(
-                null!,
-                new FakePreviewBuilder(CreatePreview())));
+        FakePlanner planner = new(CreatePreview(), throws: true);
+
+        ExecutionPreviewCommandHandler handler =
+            new(planner);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => handler.GetAsync());
     }
 
     [Fact]
-    public void Constructor_NullPreviewBuilder_Throws()
+    public void Constructor_NullPlanner_Throws()
     {
         Assert.Throws<ArgumentNullException>(
-            () => new ExecutionPreviewCommandHandler(
-                new FakeDecisionBuilder(
-                    CreateDecisionWithOneStep()),
-                null!));
+            () => new ExecutionPreviewCommandHandler(null!));
+    }
+
+    private static ExecutionPreview CreatePreview(
+        bool hasChanges = false)
+    {
+        return new ExecutionPreview
+        {
+            CapturedAt = DateTimeOffset.UtcNow,
+            Summary = new ExecutionPreviewSummary
+            {
+                CreateCount =
+                    hasChanges ? 1 : 0,
+                DeleteCount = 0,
+                VerifyCount = 0,
+                InventoryUpdates =
+                    hasChanges ? 1 : 0,
+                CustomRouteUpdates = 0,
+                VpnEndpointUpdates = 0
+            },
+            Steps =
+                hasChanges
+                    ?
+                    [
+                        new ExecutionPreviewStep
+                        {
+                            Category =
+                                ExecutionPreviewCategory
+                                    .Route,
+                            Operation =
+                                ExecutionPreviewOperation
+                                    .Create,
+                            Target = "10.0.0.0/24",
+                            Reason = "Missing route"
+                        }
+                    ]
+                    : []
+        };
+    }
+
+    private sealed class FakePlanner : IRuntimePreviewPlanner
+    {
+        private readonly ExecutionPreview _preview;
+        private readonly bool _throws;
+
+        public FakePlanner(
+            ExecutionPreview preview,
+            bool throws = false)
+        {
+            _preview = preview;
+            _throws = throws;
+        }
+
+        public int BuildPreviewCallCount { get; private set; }
+
+        public Task<RuntimeDecision> BuildDecisionAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (_throws)
+            {
+                throw new InvalidOperationException(
+                    "Planner failed.");
+            }
+
+            return Task.FromResult(
+                CreateDecisionWithOneStep());
+        }
+
+        public Task<ExecutionPreview> BuildPreviewAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (_throws)
+            {
+                throw new InvalidOperationException(
+                    "Planner failed.");
+            }
+
+            BuildPreviewCallCount++;
+            return Task.FromResult(_preview);
+        }
     }
 
     private static RuntimeDecision CreateDecisionWithOneStep()
@@ -227,111 +251,5 @@ public sealed class ExecutionPreviewCommandHandlerTests
             reconciliation,
             executionPlan,
             DateTimeOffset.UtcNow);
-    }
-
-    private static RuntimeDecision CreateEmptyDecision()
-    {
-        RuntimeChangeSet changeSet = new();
-
-        RuntimeReconciliationResult reconciliation =
-            RuntimeReconciliationResult.NoChanges(
-                "No changes required.");
-
-        RuntimeExecutionPlan executionPlan =
-            new() { Steps = [] };
-
-        return RuntimeDecision.Create(
-            new RuntimePlanSnapshot
-            {
-                Configuration = new(),
-                Observed = new(),
-                Desired = new(),
-                PlannedAt = DateTimeOffset.UtcNow
-            },
-            reconciliation,
-            executionPlan,
-            DateTimeOffset.UtcNow);
-    }
-
-    private static ExecutionPreview CreatePreview(
-        bool hasChanges = false)
-    {
-        return new ExecutionPreview
-        {
-            CapturedAt = DateTimeOffset.UtcNow,
-            Summary = new ExecutionPreviewSummary
-            {
-                CreateCount =
-                    hasChanges ? 1 : 0,
-                DeleteCount = 0,
-                VerifyCount = 0,
-                InventoryUpdates =
-                    hasChanges ? 1 : 0,
-                CustomRouteUpdates = 0,
-                VpnEndpointUpdates = 0
-            },
-            Steps =
-                hasChanges
-                    ?
-                    [
-                        new ExecutionPreviewStep
-                        {
-                            Category =
-                                ExecutionPreviewCategory
-                                    .Route,
-                            Operation =
-                                ExecutionPreviewOperation
-                                    .Create,
-                            Target = "10.0.0.0/24",
-                            Reason = "Missing route"
-                        }
-                    ]
-                    : []
-        };
-    }
-
-    private sealed class FakeDecisionBuilder :
-        IRuntimeDecisionBuilder
-    {
-        private readonly RuntimeDecision _decision;
-
-        public FakeDecisionBuilder(RuntimeDecision decision)
-        {
-            _decision = decision;
-        }
-
-        public int BuildCallCount { get; private set; }
-
-        public Task<RuntimeDecision> BuildAsync(
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            BuildCallCount++;
-            return Task.FromResult(_decision);
-        }
-    }
-
-    private sealed class FakePreviewBuilder :
-        IExecutionPreviewBuilder
-    {
-        private readonly ExecutionPreview _preview;
-
-        public FakePreviewBuilder(ExecutionPreview preview)
-        {
-            _preview = preview;
-        }
-
-        public int BuildCallCount { get; private set; }
-
-        public RuntimeDecision? ReceivedDecision
-            { get; private set; }
-
-        public ExecutionPreview Build(
-            RuntimeDecision decision)
-        {
-            BuildCallCount++;
-            ReceivedDecision = decision;
-            return _preview;
-        }
     }
 }
