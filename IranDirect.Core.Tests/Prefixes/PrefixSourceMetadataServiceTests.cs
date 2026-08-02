@@ -39,7 +39,7 @@ public sealed class PrefixSourceMetadataServiceTests
         Assert.Equal(BaseTime, metadata.LastAttemptedAt);
         Assert.Equal(BaseTime, metadata.LastSucceededAt);
         Assert.Equal(2, metadata.PrefixCount);
-        Assert.Equal(64, metadata.ContentHash.Length);
+        Assert.Equal(64, metadata.ContentHash!.Length);
         Assert.Equal("\"etag1\"", metadata.ETag);
         Assert.Equal(512, metadata.ContentLength);
         Assert.Equal(
@@ -89,6 +89,7 @@ public sealed class PrefixSourceMetadataServiceTests
         PrefixSourceMetadata? metadata =
             await service.GetCurrentAsync();
 
+        Assert.NotNull(metadata);
         Assert.Equal(
             BaseTime.AddHours(2),
             metadata.LastAttemptedAt);
@@ -123,7 +124,7 @@ public sealed class PrefixSourceMetadataServiceTests
         Assert.Equal(2, metadata.PrefixCount);
         Assert.Equal(
             64,
-            metadata.ContentHash.Length);
+            metadata.ContentHash!.Length);
         Assert.Equal(
             BaseTime,
             metadata.LastSucceededAt);
@@ -223,7 +224,7 @@ public sealed class PrefixSourceMetadataServiceTests
             await service.GetCurrentAsync();
 
         Assert.NotNull(metadata);
-        Assert.Equal(500, metadata.LastError.Length);
+        Assert.Equal(500, metadata.LastError!.Length);
     }
 
     [Fact]

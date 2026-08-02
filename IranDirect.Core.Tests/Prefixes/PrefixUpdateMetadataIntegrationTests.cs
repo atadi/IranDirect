@@ -153,8 +153,14 @@ public sealed class PrefixUpdateMetadataIntegrationTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<PrefixSourceMetadata?>(null);
 
+        public Task<PrefixSourceChangeSummary?>
+            GetLatestChangeSummaryAsync(
+                CancellationToken cancellationToken = default) =>
+            Task.FromResult<PrefixSourceChangeSummary?>(null);
+
         public Task RecordSuccessAsync(
             PrefixSourceFetchResult result,
+            IReadOnlyList<string>? previousPrefixes = null,
             CancellationToken cancellationToken = default)
         {
             RecordSuccessCalls.Add(1);

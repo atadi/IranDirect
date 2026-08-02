@@ -27,8 +27,19 @@ public sealed class PrefixSourceMetadataService :
         return document.Current;
     }
 
+    public async Task<PrefixSourceChangeSummary?>
+        GetLatestChangeSummaryAsync(
+            CancellationToken cancellationToken = default)
+    {
+        PrefixSourceMetadata? metadata =
+            await GetCurrentAsync(cancellationToken);
+
+        return metadata?.ChangeSummary;
+    }
+
     public async Task RecordSuccessAsync(
         PrefixSourceFetchResult result,
+        IReadOnlyList<string>? previousPrefixes = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -36,6 +47,17 @@ public sealed class PrefixSourceMetadataService :
         PrefixSourceDescriptor.Validate(result.Source);
 
         DateTimeOffset now = _timeProvider.GetUtcNow();
+
+        PrefixSourceMetadataDocument document =
+            await _repository.LoadAsync(
+                cancellationToken);
+
+        PrefixSourceChangeSummary? changeSummary =
+            BuildChangeSummary(
+                document.Current,
+                result,
+                previousPrefixes,
+                now);
 
         PrefixSourceMetadata metadata = new()
         {
@@ -53,11 +75,12 @@ public sealed class PrefixSourceMetadataService :
             PrefixCount = result.Prefixes.Count,
             DownloadDuration = result.Duration,
             LastStatus = PrefixSourceUpdateStatus.Succeeded,
-            LastError = null
+            LastError = null,
+            ChangeSummary = changeSummary
         };
 
-        await SaveCurrentAsync(
-            metadata,
+        await _repository.SaveAsync(
+            document with { Current = metadata },
             cancellationToken);
     }
 
@@ -127,21 +150,81 @@ public sealed class PrefixSourceMetadataService :
             cancellationToken);
     }
 
-    private async Task SaveCurrentAsync(
-        PrefixSourceMetadata metadata,
-        CancellationToken cancellationToken)
-    {
-        PrefixSourceMetadataDocument document =
-            await _repository.LoadAsync(
-                cancellationToken);
-
-        await _repository.SaveAsync(
-            document with { Current = metadata },
-            cancellationToken);
-    }
-
     private static PrefixSourceMetadata CreateEmpty() =>
         new();
+
+    private static PrefixSourceChangeSummary? BuildChangeSummary(
+        PrefixSourceMetadata? previous,
+        PrefixSourceFetchResult result,
+        IReadOnlyList<string>? previousPrefixes,
+        DateTimeOffset comparedAt)
+    {
+        string? previousHash = previous?.ContentHash;
+        string? currentHash = result.ContentHash;
+        int currentCount = result.Prefixes.Count;
+
+        if (previous is null)
+        {
+            return new PrefixSourceChangeSummary
+            {
+                PreviousContentHash = previousHash,
+                CurrentContentHash = currentHash,
+                AddedCount = currentCount,
+                RemovedCount = 0,
+                UnchangedCount = 0,
+                HasChanges = true,
+                ComparedAt = comparedAt
+            };
+        }
+
+        if (previousHash is not null
+            && currentHash is not null
+            && string.Equals(
+                previousHash,
+                currentHash,
+                StringComparison.Ordinal))
+        {
+            return new PrefixSourceChangeSummary
+            {
+                PreviousContentHash = previousHash,
+                CurrentContentHash = currentHash,
+                AddedCount = 0,
+                RemovedCount = 0,
+                UnchangedCount = currentCount,
+                HasChanges = false,
+                ComparedAt = comparedAt
+            };
+        }
+
+        PrefixDatasetDiff diff = PrefixDatasetComparer.Compare(
+            previousPrefixes ?? [],
+            result.Prefixes);
+
+        return new PrefixSourceChangeSummary
+        {
+            PreviousContentHash = previousHash,
+            CurrentContentHash = currentHash,
+            AddedCount = diff.AddedCount,
+            RemovedCount = diff.RemovedCount,
+            UnchangedCount = diff.UnchangedCount,
+            HasChanges = diff.HasChanges,
+            ComparedAt = comparedAt
+        };
+    }
+
+    public static string? FormatChangeSummary(
+        PrefixSourceChangeSummary? summary)
+    {
+        if (summary is null)
+        {
+            return null;
+        }
+
+        return summary.HasChanges
+            ? $"+{summary.AddedCount} -{summary.RemovedCount} " +
+              $"unchanged {summary.UnchangedCount}"
+            : $"No changes ({summary.UnchangedCount} prefixes).";
+    }
 
     private static PrefixSourceMetadata WithSource(
         PrefixSourceDescriptor source,

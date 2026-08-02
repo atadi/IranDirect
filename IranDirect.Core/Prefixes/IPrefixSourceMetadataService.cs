@@ -5,8 +5,12 @@ public interface IPrefixSourceMetadataService
     Task<PrefixSourceMetadata?> GetCurrentAsync(
         CancellationToken cancellationToken = default);
 
+    Task<PrefixSourceChangeSummary?> GetLatestChangeSummaryAsync(
+        CancellationToken cancellationToken = default);
+
     Task RecordSuccessAsync(
         PrefixSourceFetchResult result,
+        IReadOnlyList<string>? previousPrefixes = null,
         CancellationToken cancellationToken = default);
 
     Task RecordNotModifiedAsync(

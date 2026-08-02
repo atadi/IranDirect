@@ -67,6 +67,11 @@ public sealed class PrefixSourceMetadataValidator
                 $"Prefix source metadata LastError must not exceed " +
                 $"{MaxErrorLength} characters.");
         }
+
+        if (metadata.ChangeSummary is { } summary)
+        {
+            ValidateChangeSummary(summary);
+        }
     }
 
     public void ValidateAndThrow(
@@ -77,6 +82,41 @@ public sealed class PrefixSourceMetadataValidator
         if (document.Current is { } current)
         {
             ValidateAndThrow(current);
+        }
+    }
+
+    private static void ValidateChangeSummary(
+        PrefixSourceChangeSummary summary)
+    {
+        if (summary.AddedCount < 0
+            || summary.RemovedCount < 0
+            || summary.UnchangedCount < 0)
+        {
+            throw new InvalidOperationException(
+                "Prefix source change summary counts must not be negative.");
+        }
+
+        if (summary.PreviousContentHash is not null
+            && !Sha256Hex.IsMatch(summary.PreviousContentHash))
+        {
+            throw new InvalidOperationException(
+                "Prefix source change summary PreviousContentHash must be a " +
+                "64-character lowercase SHA-256 hexadecimal value.");
+        }
+
+        if (summary.CurrentContentHash is not null
+            && !Sha256Hex.IsMatch(summary.CurrentContentHash))
+        {
+            throw new InvalidOperationException(
+                "Prefix source change summary CurrentContentHash must be a " +
+                "64-character lowercase SHA-256 hexadecimal value.");
+        }
+
+        if (summary.ComparedAt == default)
+        {
+            throw new InvalidOperationException(
+                "Prefix source change summary ComparedAt must not be the " +
+                "default value.");
         }
     }
 }

@@ -17,4 +17,5 @@ public sealed record PrefixSourceMetadata
     public TimeSpan? DownloadDuration { get; init; }
     public PrefixSourceUpdateStatus LastStatus { get; init; }
     public string? LastError { get; init; }
+    public PrefixSourceChangeSummary? ChangeSummary { get; init; }
 }

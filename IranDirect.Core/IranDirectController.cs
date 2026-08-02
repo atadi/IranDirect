@@ -98,12 +98,20 @@ public sealed class IranDirectController
             throw;
         }
 
-        await _prefixRepository.SaveAsync(
-            fetch.Prefixes,
-            cancellationToken);
+        IReadOnlyList<string> previousPrefixes =
+            await _prefixRepository.LoadAsync(
+                cancellationToken);
+
+        if (!fetch.NotModified)
+        {
+            await _prefixRepository.SaveAsync(
+                fetch.Prefixes,
+                cancellationToken);
+        }
 
         await TryRecordMetadataSuccessAsync(
             fetch,
+            previousPrefixes,
             cancellationToken);
 
         IranDirectState state =
@@ -125,6 +133,7 @@ public sealed class IranDirectController
 
     private async Task TryRecordMetadataSuccessAsync(
         PrefixSourceFetchResult fetch,
+        IReadOnlyList<string> previousPrefixes,
         CancellationToken cancellationToken)
     {
         if (_prefixSourceMetadataService is null)
@@ -146,6 +155,7 @@ public sealed class IranDirectController
                 await _prefixSourceMetadataService
                     .RecordSuccessAsync(
                         fetch,
+                        previousPrefixes,
                         cancellationToken);
             }
         }
