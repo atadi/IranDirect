@@ -201,6 +201,7 @@ builder.Services.AddSingleton<RuntimeCycleCoordinator>();
 builder.Services.AddSingleton<OperationCoordinator>();
 builder.Services.AddSingleton<
     IRuntimeSnapshotProvider, RuntimeSnapshotProvider>();
+builder.Services.AddSingleton<RuntimeSnapshotCommandHandler>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
 

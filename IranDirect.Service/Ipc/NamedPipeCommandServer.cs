@@ -23,6 +23,7 @@ public sealed class NamedPipeCommandServer
     private readonly DesiredConfigurationService _configurationService;
     private readonly RuntimeCoordinator _runtimeCoordinator;
     private readonly CustomRouteCommandHandler _customRoutes;
+    private readonly RuntimeSnapshotCommandHandler _runtimeSnapshot;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -33,6 +34,7 @@ public sealed class NamedPipeCommandServer
         DesiredConfigurationService configurationService,
         RuntimeCoordinator runtimeCoordinator,
         CustomRouteCommandHandler customRoutes,
+        RuntimeSnapshotCommandHandler runtimeSnapshot,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -42,6 +44,7 @@ public sealed class NamedPipeCommandServer
         _configurationService = configurationService;
         _runtimeCoordinator = runtimeCoordinator;
         _customRoutes = customRoutes;
+        _runtimeSnapshot = runtimeSnapshot;
         _logger = logger;
     }
 
@@ -276,6 +279,9 @@ public sealed class NamedPipeCommandServer
             IranDirectCommand.CustomRoutesInvalidateAllCaches =>
                 _customRoutes.InvalidateAllCachesAsync(
                     cancellationToken),
+
+            IranDirectCommand.RuntimeSnapshot =>
+                _runtimeSnapshot.GetAsync(cancellationToken),
 
             _ => Task.FromResult(
                 Failure(

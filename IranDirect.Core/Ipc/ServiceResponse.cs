@@ -5,6 +5,7 @@ using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Vpn;
+using IranDirect.Core.Observability;
 
 namespace IranDirect.Core.Ipc;
 
@@ -43,4 +44,6 @@ public sealed record ServiceResponse
 
     public IReadOnlyList<CustomRouteDnsCacheStatus>
         CustomRouteDnsCacheStatuses { get; init; } = [];
+
+    public RuntimeSnapshot? Snapshot { get; init; }
 }

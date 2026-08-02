@@ -1,4 +1,5 @@
 using IranDirect.Core;
+using IranDirect.Core.Cli;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
@@ -34,13 +35,18 @@ string commandText = args.Length == 0
             new IranDirectServiceClient());
     }
 
+    if (commandText == "snapshot")
+    {
+        return await ShowSnapshotAsync();
+    }
+
 if (!TryParseCommand(
         commandText,
         out IranDirectCommand command))
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|custom-routes|profile]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|custom-routes|profile]");
 
     return 6;
 }
@@ -375,6 +381,51 @@ static async Task<int> ShowLatestProfileAsync(
     WriteReport(report);
 
     return 0;
+}
+
+static async Task<int> ShowSnapshotAsync()
+{
+    IranDirectServiceClient client = new();
+
+    try
+    {
+        ServiceResponse response =
+            await client.SendAsync(
+                IranDirectCommand.RuntimeSnapshot);
+
+        if (!response.Success || response.Snapshot is null)
+        {
+            Console.Error.WriteLine(response.Message);
+            return 1;
+        }
+
+        foreach (string line in
+                 RuntimeSnapshotCliRenderer.Render(
+                     response.Snapshot))
+        {
+            Console.WriteLine(line);
+        }
+
+        return 0;
+    }
+    catch (TimeoutException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 3;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.Error.WriteLine(
+            "The operation was canceled.");
+        return 4;
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine(
+            $"IranDirect command failed: " +
+            $"{exception.Message}");
+        return 1;
+    }
 }
 
 static void WriteReport(RuntimeCyclePerfReport report)
