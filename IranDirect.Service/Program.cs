@@ -83,6 +83,23 @@ builder.Services.AddSingleton<ICustomRouteRepository>(
                 CustomRouteStore>()));
 builder.Services.AddSingleton<CustomRouteEntryValidator>();
 builder.Services.AddSingleton<CustomRouteService>();
+
+CustomRouteDnsCacheStore customRouteDnsCacheStore = new(
+    Path.Combine(
+        dataDirectory,
+        "custom-route-dns-cache.json"));
+builder.Services.AddSingleton(customRouteDnsCacheStore);
+builder.Services.AddSingleton<ICustomRouteDnsCacheRepository>(
+    serviceProvider =>
+        new CustomRouteDnsCacheRepository(
+            customRouteDnsCacheStore,
+            serviceProvider.GetRequiredService<TimeProvider>()));
+
+CustomRouteDnsCacheOptions dnsCacheOptions = new();
+builder.Configuration.GetSection("CustomRoutes").Bind(dnsCacheOptions);
+CustomRouteDnsCacheOptions.Validate(dnsCacheOptions);
+builder.Services.AddSingleton(dnsCacheOptions);
+
 builder.Services.AddSingleton<ICustomRouteResolver, CustomRouteResolver>();
 builder.Services.AddSingleton<CustomRouteCommandHandler>();
 builder.Services.AddSingleton<OpenVpnProfileParser>();

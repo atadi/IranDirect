@@ -345,8 +345,18 @@ public sealed class CustomRouteCommandHandlerTests
                 Task.FromResult<IReadOnlyList<IPAddress>>([])
         };
 
+        CustomRouteDnsCacheStore cacheStore = new(
+            Path.Combine(
+                directory,
+                "custom-route-dns-cache.json"));
+
         CustomRouteResolver resolver = new(
             repository,
+            new CustomRouteDnsCacheRepository(
+                cacheStore,
+                TimeProvider.System),
+            new CustomRouteDnsCacheOptions(),
+            TimeProvider.System,
             (host, token) => fixture.Dns(host, token));
 
         fixture.Handler =

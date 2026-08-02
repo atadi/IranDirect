@@ -195,7 +195,21 @@ public sealed class CustomRouteMergeTests
                 }).GetAwaiter().GetResult();
         }
 
-        return new CustomRouteResolver(repository, lookup);
+        CustomRouteDnsCacheStore cacheStore = new(
+            Path.Combine(
+                Path.GetTempPath(),
+                "IranDirect.Tests",
+                Guid.NewGuid().ToString("N"),
+                "custom-route-dns-cache.json"));
+
+        return new CustomRouteResolver(
+            repository,
+            new CustomRouteDnsCacheRepository(
+                cacheStore,
+                TimeProvider.System),
+            new CustomRouteDnsCacheOptions(),
+            TimeProvider.System,
+            lookup);
     }
 
     private static CustomRouteRepository CreateRepository()
