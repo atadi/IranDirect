@@ -1,6 +1,8 @@
 using IranDirect.Core;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.ServiceLifecycle;
+using IranDirect.Core.Updates;
+using IranDirect.Core.Prefixes;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Principal;
@@ -39,6 +41,11 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _logsItem;
 
     private readonly System.Windows.Forms.Timer _timer;
+
+    private readonly IPrefixUpdateNotificationTracker
+        _prefixUpdateNotificationTracker;
+    private readonly IPrefixUpdateNotificationSink
+        _prefixUpdateNotificationSink;
 
     private bool _busy;
 
@@ -201,6 +208,11 @@ public sealed class TrayApplicationContext :
                 await RefreshStatusAsync(
                     showMessage: true);
 
+        _prefixUpdateNotificationTracker =
+            new PrefixUpdateNotificationTracker();
+        _prefixUpdateNotificationSink =
+            NullPrefixUpdateNotificationSink.Instance;
+
         _timer = new System.Windows.Forms.Timer
         {
             Interval = TransitionalPollIntervalMs
@@ -231,14 +243,32 @@ public sealed class TrayApplicationContext :
         ApplyServiceStatus(snapshot);
         AdjustPolling(snapshot);
 
-        if (snapshot.Running)
-        {
+if (snapshot.Running)
+    {
+        ServiceResponse? response =
             await RefreshStatusAsync(showMessage: false);
-        }
-        else
+
+        if (response?.PrefixUpdateMonitor is { } monitor)
         {
-            SetRuntimeUnavailable(snapshot);
+            _prefixUpdateNotificationTracker.ProcessSnapshot(
+                monitor,
+                serviceAvailable: true,
+                manualCheckSinceLastReset: false);
+
+            if (_prefixUpdateNotificationTracker.ShouldNotify)
+            {
+                _prefixUpdateNotificationSink.NotifyBalloon(
+                    "IranDirect",
+                    "A newer Iran prefix dataset is available.");
+
+                _prefixUpdateNotificationTracker.MarkNotified();
+            }
         }
+    }
+    else
+    {
+        SetRuntimeUnavailable(snapshot);
+    }
     }
 
     private void ApplyServiceStatus(
@@ -305,9 +335,10 @@ public sealed class TrayApplicationContext :
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
-        finally
+finally
         {
             SetBusy(false);
+
             await PollAsync();
         }
     }
@@ -407,9 +438,11 @@ public sealed class TrayApplicationContext :
 
         SetBusy(true);
 
+        ServiceResponse? response = null;
+
         try
         {
-            ServiceResponse response =
+            response =
                 await _client.SendAsync(
                     IranDirectCommand.PrefixUpdateCheckNow);
 
@@ -456,16 +489,24 @@ public sealed class TrayApplicationContext :
         {
             SetBusy(false);
 
+            if (response?.PrefixUpdateMonitor is { } monitor)
+            {
+                _prefixUpdateNotificationTracker.ProcessSnapshot(
+                    monitor,
+                    serviceAvailable: true,
+                    manualCheckSinceLastReset: true);
+            }
+
             await PollAsync();
         }
     }
 
-    private async Task RefreshStatusAsync(
+    private async Task<ServiceResponse?> RefreshStatusAsync(
         bool showMessage)
     {
         if (_busy)
         {
-            return;
+            return null;
         }
 
         try
@@ -477,7 +518,7 @@ public sealed class TrayApplicationContext :
                 response.Status is null)
             {
                 SetUnavailable(response.Message);
-                return;
+                return null;
             }
 
             ApplyStatus(response.Status);
@@ -490,10 +531,13 @@ public sealed class TrayApplicationContext :
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
+
+            return response;
         }
         catch
         {
             SetUnavailable("Service unavailable");
+            return null;
         }
     }
 
