@@ -114,7 +114,8 @@ public static class RuntimeSnapshotDialogModel
             new SnapshotSection(
                 "Prefix Update",
                 BuildPrefixUpdateRows(
-                    snapshot.PrefixUpdate))
+                    snapshot.PrefixUpdate,
+                    snapshot.PrefixUpdateMonitor))
         ];
     }
 
@@ -171,47 +172,72 @@ public static class RuntimeSnapshotDialogModel
 
     private static IReadOnlyList<SnapshotSectionRow>
         BuildPrefixUpdateRows(
-            PrefixUpdateCheckResult? update)
+            PrefixUpdateCheckResult? update,
+            PrefixUpdateMonitorSnapshot? monitor)
     {
-        if (update is null)
-        {
-            return
-            [
-                new SnapshotSectionRow("Status", NotAvailable),
-                new SnapshotSectionRow(
-                    "Remote Last Modified",
-                    NotAvailable),
-                new SnapshotSectionRow(
-                    "Remote ETag",
-                    NotAvailable),
-                new SnapshotSectionRow(
-                    "Remote Size",
-                    NotAvailable),
-                new SnapshotSectionRow("Reason", NotAvailable)
-            ];
-        }
-
-        return
+        List<SnapshotSectionRow> rows =
         [
             new SnapshotSectionRow(
-                "Status",
-                FormatUpdateStatus(update.Status)),
+                "Monitor Running",
+                FormatMonitorBool(monitor?.Running)),
             new SnapshotSectionRow(
-                "Remote Last Modified",
+                "Checking",
+                FormatMonitorBool(monitor?.Checking)),
+            new SnapshotSectionRow(
+                "Last Checked",
+                FormatTimestamp(monitor?.LastCheckedAt)),
+            new SnapshotSectionRow(
+                "Last Successful Check",
                 FormatTimestamp(
-                    update.RemoteMetadata?.LastModified)),
+                    monitor?.LastSuccessfulCheckAt)),
             new SnapshotSectionRow(
-                "Remote ETag",
-                update.RemoteMetadata?.ETag ?? NotAvailable),
-            new SnapshotSectionRow(
-                "Remote Size",
-                FormatBytes(
-                    update.RemoteMetadata?.ContentLength)),
-            new SnapshotSectionRow(
-                "Reason",
-                update.Reason ?? NotAvailable)
+                "Consecutive Failures",
+                monitor?.ConsecutiveFailures.ToString()
+                ?? NotAvailable)
         ];
+
+        if (update is null)
+        {
+            rows.Add(new SnapshotSectionRow(
+                "Status", NotAvailable));
+            rows.Add(new SnapshotSectionRow(
+                "Remote Last Modified", NotAvailable));
+            rows.Add(new SnapshotSectionRow(
+                "Remote ETag", NotAvailable));
+            rows.Add(new SnapshotSectionRow(
+                "Remote Size", NotAvailable));
+            rows.Add(new SnapshotSectionRow(
+                "Reason", NotAvailable));
+
+            return rows;
+        }
+
+        rows.Add(new SnapshotSectionRow(
+            "Status",
+            FormatUpdateStatus(update.Status)));
+        rows.Add(new SnapshotSectionRow(
+            "Remote Last Modified",
+            FormatTimestamp(
+                update.RemoteMetadata?.LastModified)));
+        rows.Add(new SnapshotSectionRow(
+            "Remote ETag",
+            update.RemoteMetadata?.ETag ?? NotAvailable));
+        rows.Add(new SnapshotSectionRow(
+            "Remote Size",
+            FormatBytes(
+                update.RemoteMetadata?.ContentLength)));
+        rows.Add(new SnapshotSectionRow(
+            "Reason",
+            update.Reason ?? NotAvailable));
+
+        return rows;
     }
+
+    private static string FormatMonitorBool(
+        bool? value) =>
+        value is null
+            ? NotAvailable
+            : value.Value ? "Yes" : "No";
 
     public static string FormatPerformance(
         RuntimeCyclePerfReport? report) =>

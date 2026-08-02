@@ -497,6 +497,56 @@ public sealed class RuntimeSnapshotCliRendererTests
         };
     }
 
+    [Fact]
+    public void Render_WithMonitor_IncludesMonitorFields()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdateMonitor = new PrefixUpdateMonitorSnapshot
+            {
+                CurrentResult = CreateUpdate(
+                    PrefixUpdateCheckStatus.Current),
+                LastCheckedAt = new DateTimeOffset(
+                    2026, 8, 3, 14, 10, 0, TimeSpan.Zero),
+                LastSuccessfulCheckAt = new DateTimeOffset(
+                    2026, 8, 3, 14, 10, 0, TimeSpan.Zero),
+                ConsecutiveFailures = 2,
+                Running = true,
+                Checking = false
+            }
+        };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Prefix Update Monitor:", lines);
+        Assert.Contains("Monitor Running: True", lines);
+        Assert.Contains("Checking: False", lines);
+        Assert.Contains(
+            "Last Checked: 2026-08-03 14:10:00 UTC",
+            lines);
+        Assert.Contains(
+            "Last Successful Check: 2026-08-03 14:10:00 UTC",
+            lines);
+        Assert.Contains("Consecutive Failures: 2", lines);
+    }
+
+    [Fact]
+    public void Render_NullMonitor_ShowsUnavailable()
+    {
+        RuntimeSnapshot snapshot =
+            CreateSnapshot() with { PrefixUpdateMonitor = null };
+
+        string[] lines = RuntimeSnapshotCliRenderer
+            .Render(snapshot)
+            .ToArray();
+
+        Assert.Contains("Prefix Update Monitor:", lines);
+        Assert.Contains("Unavailable.", lines);
+        Assert.DoesNotContain("Monitor Running: True", lines);
+    }
+
     private static PrefixSourceChangeSummary CreateChangeSummary()
     {
         return new PrefixSourceChangeSummary

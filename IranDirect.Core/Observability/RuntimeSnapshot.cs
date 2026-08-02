@@ -23,6 +23,9 @@ public sealed record RuntimeSnapshot
 
     public PrefixUpdateCheckResult? PrefixUpdate { get; init; }
 
+    public PrefixUpdateMonitorSnapshot? PrefixUpdateMonitor
+        { get; init; }
+
     public int? PrefixCount { get; init; }
 
     public int? InstalledRouteCount { get; init; }

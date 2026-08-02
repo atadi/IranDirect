@@ -445,6 +445,110 @@ public sealed class RuntimeSnapshotProviderTests
     }
 
     [Fact]
+    public async Task GetSnapshotAsync_WithMonitor_IncludesMonitorState()
+    {
+        await using Fixture fixture =
+            Fixture.Create(includeMonitor: true);
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.Current);
+        await fixture.Monitor!.StartAsync();
+
+        try
+        {
+            await fixture.Monitor.ForceCheckAsync();
+
+            RuntimeSnapshot snapshot =
+                await fixture.Provider.GetSnapshotAsync();
+
+            Assert.NotNull(snapshot.PrefixUpdateMonitor);
+            Assert.True(snapshot.PrefixUpdateMonitor.Running);
+            Assert.False(snapshot.PrefixUpdateMonitor.Checking);
+            Assert.Equal(
+                0,
+                snapshot.PrefixUpdateMonitor.ConsecutiveFailures);
+            Assert.NotNull(
+                snapshot.PrefixUpdateMonitor.LastCheckedAt);
+            Assert.NotNull(
+                snapshot.PrefixUpdateMonitor
+                    .LastSuccessfulCheckAt);
+        }
+        finally
+        {
+            await fixture.Monitor!.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task
+        GetSnapshotAsync_WithMonitor_DerivesPrefixUpdateFromCurrentResult()
+    {
+        await using Fixture fixture =
+            Fixture.Create(includeMonitor: true);
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.UpdateAvailable);
+
+        await fixture.Monitor!.ForceCheckAsync();
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixUpdate);
+        Assert.Equal(
+            PrefixUpdateCheckStatus.UpdateAvailable,
+            snapshot.PrefixUpdate.Status);
+        Assert.Equal(
+            snapshot.PrefixUpdateMonitor!.CurrentResult,
+            snapshot.PrefixUpdate);
+    }
+
+    [Fact]
+    public async Task
+        GetSnapshotAsync_WithMonitor_ReflectsConsecutiveFailures()
+    {
+        await using Fixture fixture =
+            Fixture.Create(includeMonitor: true);
+        fixture.UpdateChecker.Result = CreateUpdateResult(
+            PrefixUpdateCheckStatus.Failed,
+            reason: "Remote check failed: network down");
+
+        await fixture.Monitor!.ForceCheckAsync();
+        await fixture.Monitor.ForceCheckAsync();
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.NotNull(snapshot.PrefixUpdateMonitor);
+        Assert.Equal(
+            2,
+            snapshot.PrefixUpdateMonitor.ConsecutiveFailures);
+        Assert.Equal(
+            PrefixUpdateCheckStatus.Failed,
+            snapshot.PrefixUpdate!.Status);
+        Assert.Null(
+            snapshot.PrefixUpdateMonitor.LastSuccessfulCheckAt);
+    }
+
+    [Fact]
+    public async Task
+        GetSnapshotAsync_WithMonitor_DoesNotInvokeChecker()
+    {
+        await using Fixture fixture =
+            Fixture.Create(includeMonitor: true);
+
+        RuntimeSnapshot snapshot =
+            await fixture.Provider.GetSnapshotAsync();
+
+        Assert.Equal(
+            0,
+            fixture.UpdateChecker.InvocationCount);
+        Assert.NotNull(snapshot.PrefixUpdateMonitor);
+        Assert.False(snapshot.PrefixUpdateMonitor.Running);
+        Assert.Null(
+            snapshot.PrefixUpdateMonitor.CurrentResult);
+        Assert.Null(snapshot.PrefixUpdate);
+    }
+
+    [Fact]
     public void Snapshot_IsImmutableRecord()
     {
         RuntimeSnapshot original = new()
@@ -479,6 +583,7 @@ public sealed class RuntimeSnapshotProviderTests
         public RuntimeOperationStatus OperationStatus { get; }
         public PrefixSourceMetadataService MetadataService { get; }
         public FakePrefixUpdateChecker UpdateChecker { get; }
+        public PrefixUpdateMonitor? Monitor { get; }
         public RuntimeSnapshotProvider Provider { get; }
 
         private Fixture(
@@ -492,6 +597,7 @@ public sealed class RuntimeSnapshotProviderTests
             RuntimeOperationStatus operationStatus,
             PrefixSourceMetadataService metadataService,
             FakePrefixUpdateChecker updateChecker,
+            PrefixUpdateMonitor? monitor,
             RuntimeSnapshotProvider provider)
         {
             _directory = directory;
@@ -504,11 +610,13 @@ public sealed class RuntimeSnapshotProviderTests
             OperationStatus = operationStatus;
             MetadataService = metadataService;
             UpdateChecker = updateChecker;
+            Monitor = monitor;
             Provider = provider;
         }
 
         public static Fixture Create(
-            RuntimePerfReportStore? perfStore = null)
+            RuntimePerfReportStore? perfStore = null,
+            bool includeMonitor = false)
         {
             string directory = Path.Combine(
                 Path.GetTempPath(),
@@ -596,6 +704,12 @@ public sealed class RuntimeSnapshotProviderTests
 
             FakePrefixUpdateChecker updateChecker = new();
 
+            PrefixUpdateMonitor? monitor = includeMonitor
+                ? new PrefixUpdateMonitor(
+                    updateChecker,
+                    new PrefixUpdateMonitorOptions())
+                : null;
+
             RuntimeSnapshotProvider provider = new(
                 controller,
                 configurationService,
@@ -604,7 +718,8 @@ public sealed class RuntimeSnapshotProviderTests
                 perfStore,
                 metadataService,
                 updateChecker,
-                clock);
+                clock,
+                monitor);
 
             return new Fixture(
                 directory,
@@ -617,6 +732,7 @@ public sealed class RuntimeSnapshotProviderTests
                 operationStatus,
                 metadataService,
                 updateChecker,
+                monitor,
                 provider);
         }
 

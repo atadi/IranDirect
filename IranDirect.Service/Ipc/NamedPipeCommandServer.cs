@@ -24,6 +24,8 @@ public sealed class NamedPipeCommandServer
     private readonly RuntimeCoordinator _runtimeCoordinator;
     private readonly CustomRouteCommandHandler _customRoutes;
     private readonly RuntimeSnapshotCommandHandler _runtimeSnapshot;
+    private readonly PrefixUpdateCheckCommandHandler
+        _prefixUpdateCheck;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -35,6 +37,7 @@ public sealed class NamedPipeCommandServer
         RuntimeCoordinator runtimeCoordinator,
         CustomRouteCommandHandler customRoutes,
         RuntimeSnapshotCommandHandler runtimeSnapshot,
+        PrefixUpdateCheckCommandHandler prefixUpdateCheck,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -45,6 +48,7 @@ public sealed class NamedPipeCommandServer
         _runtimeCoordinator = runtimeCoordinator;
         _customRoutes = customRoutes;
         _runtimeSnapshot = runtimeSnapshot;
+        _prefixUpdateCheck = prefixUpdateCheck;
         _logger = logger;
     }
 
@@ -282,6 +286,10 @@ public sealed class NamedPipeCommandServer
 
             IranDirectCommand.RuntimeSnapshot =>
                 _runtimeSnapshot.GetAsync(cancellationToken),
+
+            IranDirectCommand.PrefixUpdateCheckNow =>
+                _prefixUpdateCheck.CheckNowAsync(
+                    cancellationToken),
 
             _ => Task.FromResult(
                 Failure(

@@ -18,6 +18,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         _prefixSourceMetadataService;
     private readonly IPrefixUpdateChecker?
         _prefixUpdateChecker;
+    private readonly IPrefixUpdateMonitor?
+        _prefixUpdateMonitor;
     private readonly TimeProvider _timeProvider;
 
     public RuntimeSnapshotProvider(
@@ -29,7 +31,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         IPrefixSourceMetadataService?
             prefixSourceMetadataService = null,
         IPrefixUpdateChecker? prefixUpdateChecker = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IPrefixUpdateMonitor? prefixUpdateMonitor = null)
     {
         ArgumentNullException.ThrowIfNull(controller);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -44,6 +47,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         _prefixSourceMetadataService =
             prefixSourceMetadataService;
         _prefixUpdateChecker = prefixUpdateChecker;
+        _prefixUpdateMonitor = prefixUpdateMonitor;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -82,11 +86,19 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
                     .GetCurrentAsync(
                         cancellationToken);
 
+        // When the monitor is registered, snapshot reads are
+        // served from its in-memory state only: no remote probe
+        // is performed during snapshot generation.
+        PrefixUpdateMonitorSnapshot? prefixUpdateMonitor =
+            _prefixUpdateMonitor?.GetSnapshot();
+
         PrefixUpdateCheckResult? prefixUpdate =
-            _prefixUpdateChecker is null
-                ? null
-                : await _prefixUpdateChecker.CheckAsync(
-                    cancellationToken);
+            prefixUpdateMonitor is not null
+                ? prefixUpdateMonitor.CurrentResult
+                : _prefixUpdateChecker is null
+                    ? null
+                    : await _prefixUpdateChecker.CheckAsync(
+                        cancellationToken);
 
         return new RuntimeSnapshot
         {
@@ -96,6 +108,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
             Operation = runtime.Operation,
             PrefixSource = prefixSource,
             PrefixUpdate = prefixUpdate,
+            PrefixUpdateMonitor = prefixUpdateMonitor,
             PrefixCount = runtime.PrefixCount,
             InstalledRouteCount =
                 runtime.InstalledRouteCount,

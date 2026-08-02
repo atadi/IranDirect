@@ -24,5 +24,6 @@ public enum IranDirectCommand
     CustomRoutesCacheStatus,
     CustomRoutesInvalidateCache,
     CustomRoutesInvalidateAllCaches,
-    RuntimeSnapshot
+    RuntimeSnapshot,
+    PrefixUpdateCheckNow
 }

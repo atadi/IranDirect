@@ -119,6 +119,34 @@ public static class RuntimeSnapshotCliRenderer
             }
         }
 
+        yield return "Prefix Update Monitor:";
+
+        if (snapshot.PrefixUpdateMonitor is null)
+        {
+            yield return "Unavailable.";
+            yield return "";
+        }
+        else
+        {
+            PrefixUpdateMonitorSnapshot monitor =
+                snapshot.PrefixUpdateMonitor;
+
+            yield return
+                $"Monitor Running: {monitor.Running}";
+            yield return
+                $"Checking: {monitor.Checking}";
+            yield return
+                $"Last Checked: " +
+                $"{FormatTimestamp(monitor.LastCheckedAt)}";
+            yield return
+                $"Last Successful Check: " +
+                $"{FormatTimestamp(monitor.LastSuccessfulCheckAt)}";
+            yield return
+                $"Consecutive Failures: " +
+                $"{monitor.ConsecutiveFailures}";
+            yield return "";
+        }
+
         yield return "Configuration:";
 
         if (snapshot.Configuration is null)

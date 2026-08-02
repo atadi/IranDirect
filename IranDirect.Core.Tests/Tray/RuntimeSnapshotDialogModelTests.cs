@@ -485,6 +485,79 @@ public sealed class RuntimeSnapshotDialogModelTests
             section.Rows);
     }
 
+    [Fact]
+    public void MapSections_WithMonitor_MapsMonitorRows()
+    {
+        RuntimeSnapshot snapshot = CreateSnapshot() with
+        {
+            PrefixUpdateMonitor = new PrefixUpdateMonitorSnapshot
+            {
+                CurrentResult = CreateUpdate(
+                    PrefixUpdateCheckStatus.Current),
+                LastCheckedAt = new DateTimeOffset(
+                    2026, 8, 3, 14, 10, 0, TimeSpan.Zero),
+                LastSuccessfulCheckAt = new DateTimeOffset(
+                    2026, 8, 3, 14, 10, 0, TimeSpan.Zero),
+                ConsecutiveFailures = 3,
+                Running = true,
+                Checking = false
+            }
+        };
+
+        SnapshotSection section = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[8];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Monitor Running", "Yes"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Checking", "No"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Last Checked",
+                new DateTimeOffset(
+                    2026, 8, 3, 14, 10, 0, TimeSpan.Zero)
+                    .ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow(
+                "Last Successful Check",
+                new DateTimeOffset(
+                    2026, 8, 3, 14, 10, 0, TimeSpan.Zero)
+                    .ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Consecutive Failures", "3"),
+            section.Rows);
+    }
+
+    [Fact]
+    public void MapSections_NullMonitor_MonitorRowsShowNotAvailable()
+    {
+        RuntimeSnapshot snapshot =
+            CreateSnapshot() with { PrefixUpdateMonitor = null };
+
+        SnapshotSection section = RuntimeSnapshotDialogModel
+            .MapSections(snapshot)[8];
+
+        Assert.Contains(
+            new SnapshotSectionRow("Monitor Running", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Checking", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Last Checked", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Last Successful Check", "-"),
+            section.Rows);
+        Assert.Contains(
+            new SnapshotSectionRow("Consecutive Failures", "-"),
+            section.Rows);
+    }
+
     private static RuntimeSnapshot CreateSnapshot()
     {
         return new RuntimeSnapshot

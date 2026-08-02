@@ -35,6 +35,13 @@ string commandText = args.Length == 0
             new IranDirectServiceClient());
     }
 
+    if (commandText == "prefix-update")
+    {
+        return await PrefixUpdateCliRunner.RunAsync(
+            args.Skip(1).ToArray(),
+            new IranDirectServiceClient());
+    }
+
     if (commandText == "snapshot")
     {
         return await ShowSnapshotAsync();
@@ -46,7 +53,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|custom-routes|profile]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|profile]");
 
     return 6;
 }

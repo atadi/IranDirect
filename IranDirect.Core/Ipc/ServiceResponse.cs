@@ -6,6 +6,7 @@ using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Vpn;
 using IranDirect.Core.Observability;
+using IranDirect.Core.Prefixes;
 
 namespace IranDirect.Core.Ipc;
 
@@ -46,4 +47,7 @@ public sealed record ServiceResponse
         CustomRouteDnsCacheStatuses { get; init; } = [];
 
     public RuntimeSnapshot? Snapshot { get; init; }
+
+    public PrefixUpdateMonitorSnapshot? PrefixUpdateMonitor
+        { get; init; }
 }

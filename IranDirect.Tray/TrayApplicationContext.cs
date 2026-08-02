@@ -31,6 +31,7 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _enableItem;
     private readonly ToolStripMenuItem _disableItem;
     private readonly ToolStripMenuItem _updateItem;
+    private readonly ToolStripMenuItem _prefixUpdateCheckItem;
     private readonly ToolStripMenuItem _repairItem;
     private readonly ToolStripMenuItem _configItem;
     private readonly ToolStripMenuItem _customRoutesItem;
@@ -84,6 +85,8 @@ public sealed class TrayApplicationContext :
         _disableItem = new ToolStripMenuItem("Disable");
         _updateItem = new ToolStripMenuItem(
             "Update prefixes");
+        _prefixUpdateCheckItem = new ToolStripMenuItem(
+            PrefixUpdateMenuPolicy.MenuItemText);
         _repairItem = new ToolStripMenuItem(
             "Repair routes");
         _configItem = new ToolStripMenuItem(
@@ -140,6 +143,10 @@ public sealed class TrayApplicationContext :
                 await ExecuteCommandAsync(
                     IranDirectCommand.UpdatePrefixes);
 
+        _prefixUpdateCheckItem.Click +=
+            async (_, _) =>
+                await CheckPrefixUpdatesAsync();
+
         _repairItem.Click +=
             async (_, _) =>
                 await ExecuteCommandAsync(IranDirectCommand.Repair);
@@ -171,6 +178,7 @@ public sealed class TrayApplicationContext :
         menu.Items.Add(_enableItem);
         menu.Items.Add(_disableItem);
         menu.Items.Add(_updateItem);
+        menu.Items.Add(_prefixUpdateCheckItem);
         menu.Items.Add(_repairItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_configItem);
@@ -390,6 +398,68 @@ public sealed class TrayApplicationContext :
         }
     }
 
+    private async Task CheckPrefixUpdatesAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        SetBusy(true);
+
+        try
+        {
+            ServiceResponse response =
+                await _client.SendAsync(
+                    IranDirectCommand.PrefixUpdateCheckNow);
+
+            if (!response.Success)
+            {
+                MessageBox.Show(
+                    response.Message,
+                    "IranDirect prefix update check",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            else if (response.PrefixUpdateMonitor is not { }
+                monitor)
+            {
+                MessageBox.Show(
+                    "The service did not return prefix " +
+                    "update monitor state.",
+                    "IranDirect prefix update check",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show(
+                    PrefixUpdateCheckResultFormatter
+                        .BuildResultText(monitor),
+                    "IranDirect prefix update check",
+                    MessageBoxButtons.OK,
+                    PrefixUpdateCheckResultFormatter
+                        .IsFailure(monitor)
+                        ? MessageBoxIcon.Warning
+                        : MessageBoxIcon.Information);
+            }
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                exception.Message,
+                "IranDirect service unavailable",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+
+            await PollAsync();
+        }
+    }
+
     private async Task RefreshStatusAsync(
         bool showMessage)
     {
@@ -446,6 +516,10 @@ public sealed class TrayApplicationContext :
             status.Enabled && !_busy;
 
         _updateItem.Enabled = !_busy;
+        _prefixUpdateCheckItem.Enabled =
+            PrefixUpdateMenuPolicy.IsAvailable(
+                serviceRunning: true,
+                _busy);
         _repairItem.Enabled =
             status.Enabled && !_busy;
         _configItem.Enabled = !_busy;
@@ -480,6 +554,7 @@ public sealed class TrayApplicationContext :
         _enableItem.Enabled = false;
         _disableItem.Enabled = false;
         _updateItem.Enabled = false;
+        _prefixUpdateCheckItem.Enabled = false;
         _repairItem.Enabled = false;
         _configItem.Enabled = false;
         _customRoutesItem.Enabled = false;
@@ -506,6 +581,7 @@ public sealed class TrayApplicationContext :
         _enableItem.Enabled = false;
         _disableItem.Enabled = false;
         _updateItem.Enabled = false;
+        _prefixUpdateCheckItem.Enabled = false;
         _repairItem.Enabled = false;
         _configItem.Enabled = false;
         _customRoutesItem.Enabled = false;
