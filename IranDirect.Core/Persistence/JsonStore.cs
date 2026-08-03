@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Persistence;
 
@@ -10,6 +11,7 @@ public class JsonStore<T>
 
     private readonly string _path;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly IFaultInjectionPolicy _faultPolicy;
 
     // Serializes all file access for this store instance. The atomic
     // write (tmp + File.Move overwrite) cannot replace the live file
@@ -19,7 +21,8 @@ public class JsonStore<T>
 
     public JsonStore(
         string path,
-        JsonSerializerOptions? jsonOptions = null)
+        JsonSerializerOptions? jsonOptions = null,
+        IFaultInjectionPolicy? faultPolicy = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -30,6 +33,7 @@ public class JsonStore<T>
             {
                 WriteIndented = true
             };
+        _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
     public virtual async Task<T> LoadAsync(
@@ -113,6 +117,18 @@ public class JsonStore<T>
     private async Task<T> LoadOnceAsync(
         CancellationToken cancellationToken)
     {
+        if (ShouldFailAt(FaultInjectionPoint.JsonLoad))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.JsonLoad);
+        }
+
+        if (ShouldFailAt(FaultInjectionPoint.FileRead))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.FileRead);
+        }
+
         if (!File.Exists(_path))
         {
             return new T();
@@ -166,6 +182,12 @@ public class JsonStore<T>
         T value,
         CancellationToken cancellationToken)
     {
+        if (ShouldFailAt(FaultInjectionPoint.JsonSave))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.JsonSave);
+        }
+
         string? directory =
             Path.GetDirectoryName(_path);
 
@@ -188,10 +210,22 @@ public class JsonStore<T>
         {
             try
             {
+                if (ShouldFailAt(FaultInjectionPoint.FileWrite))
+                {
+                    throw new FaultInjectionException(
+                        FaultInjectionPoint.FileWrite);
+                }
+
                 await File.WriteAllTextAsync(
                     temporaryPath,
                     json,
                     cancellationToken);
+
+                if (ShouldFailAt(FaultInjectionPoint.FileMove))
+                {
+                    throw new FaultInjectionException(
+                        FaultInjectionPoint.FileMove);
+                }
 
                 File.Move(
                     temporaryPath,
@@ -206,11 +240,30 @@ public class JsonStore<T>
             {
                 await BackoffAsync(attempt, cancellationToken);
             }
+            catch (FaultInjectionException)
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+
+                throw;
+            }
         }
     }
 
     private static bool IsRetryableAccess(Exception ex) =>
         ex is IOException or UnauthorizedAccessException;
+
+    private bool ShouldFailAt(FaultInjectionPoint point)
+    {
+        if (FaultInjectionScope.IsActive)
+        {
+            return FaultInjectionScope.ShouldFail(point);
+        }
+
+        return _faultPolicy.ShouldFail(point);
+    }
 
     private static async Task BackoffAsync(
         int attempt,

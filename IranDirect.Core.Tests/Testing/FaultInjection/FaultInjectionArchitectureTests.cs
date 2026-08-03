@@ -7,20 +7,33 @@ public sealed class FaultInjectionArchitectureTests
     private const string FrameworkNamespace =
         "IranDirect.Core.Testing.FaultInjection";
 
+    private const string JsonStorePath =
+        "IranDirect.Core\\Persistence\\JsonStore.cs";
+
     [Fact]
-    public void ProductionReferences_AreConfinedToFaultInjectionFolder()
+    public void ProductionReferences_AreConfinedToAllowedFiles()
     {
         string[] productionFiles = FindProductionReferences();
 
-        Assert.Empty(productionFiles);
+        Assert.All(
+            productionFiles,
+            path => Assert.EndsWith(
+                JsonStorePath,
+                path,
+                StringComparison.Ordinal));
     }
 
     [Fact]
-    public void NoRuntimeSubsystem_ConsumesTheFramework()
+    public void JsonStore_IsTheOnlyRuntimeConsumer()
     {
         string[] consumers = FindRuntimeConsumers();
 
-        Assert.Empty(consumers);
+        Assert.All(
+            consumers,
+            path => Assert.EndsWith(
+                JsonStorePath,
+                path,
+                StringComparison.Ordinal));
     }
 
     private static string[] FindProductionReferences()
