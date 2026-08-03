@@ -1,5 +1,42 @@
 # Performance baselines
 
+## Runtime executor stress harness
+
+The runtime executor stress harness in
+`IranDirect.Core.Tests/Performance/Execution/` (infrastructure in
+`IranDirect.Testing/Performance/Execution/`) drives `RuntimeExecutor` with
+large synthetic plans and a controlled fake handler. It is fully
+deterministic: every scenario is orchestrated with identity-keyed gates and
+concurrency probes, never with timing sleeps, and it exercises the existing
+step-handler contract only (no production code is modified).
+
+- Scale matrix: 1K, 2K, 5K, and 10K plans run in the regular suite; 25K and
+  50K plans are tagged `Category=Stress`.
+- Workload kinds: prefix-route creates, prefix-route deletes, endpoint-route
+  creates, endpoint-route deletes, and mixed execution groups (planner order:
+  AddEndpointRoute → RemovePrefixRoute → AddPrefixRoute → RemoveEndpointRoute).
+- Scenarios: all-success, single failure early/middle/late, multiple
+  failures, cancellation before start, cancellation during a group, mixed
+  latency (external gates), and benign-race compensation via the group
+  verification phase.
+- Invariants verified: final results in plan order, stable final progress,
+  concurrency never above `MaxDegreeOfParallelism` (8), endpoint groups
+  strictly sequential, prefix groups bounded-parallel, no held gates or
+  incomplete tasks, and executor reuse after failure/cancellation.
+
+```powershell
+# everything, including stress
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj
+
+# stress cases only (25K/50K)
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Category=Stress"
+
+# regular suite, skipping stress
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Category!=Stress"
+```
+
+
+
 This folder documents the deterministic performance baseline suite for the
 IranDirect core algorithms.
 
