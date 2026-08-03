@@ -269,7 +269,7 @@ bytes and allocation count. Trust only full-mode numbers.
   — `RuntimeChangeSetPlanner.Plan` allocation reduction (pre-change
   `f78d2e7`), reference-oracle equivalence strategy, before/after
   benchmark table, and remaining noise.
-- [Phase 24.3 planner post-optimization validation](baselines/phase-24.3-planner-validation.md)
-  — quieter-environment re-run of the optimized planner (commit `e263d05`),
-  dual-run stability, and acceptance against the pre-change baseline; the
-  optimized planner is confirmed as the new reference baseline.
+- [Phase 25.1 prefix dataset comparer optimization](baselines/phase-25.1-prefix-comparer-optimization.md)
+  — `PrefixDatasetComparer.Compare` allocation reduction (pre-change
+  `f3af1f2`), reference-oracle equivalence strategy, before/after benchmark
+  table (Mixed 50K alloc −35%), and run-to-run stability.

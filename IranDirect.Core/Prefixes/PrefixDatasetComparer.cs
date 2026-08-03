@@ -9,24 +9,37 @@ public static class PrefixDatasetComparer
         ArgumentNullException.ThrowIfNull(oldDataset);
         ArgumentNullException.ThrowIfNull(newDataset);
 
-        HashSet<string> oldSet = new(
-            Normalize(oldDataset),
-            StringComparer.OrdinalIgnoreCase);
-        HashSet<string> newSet = new(
-            Normalize(newDataset),
-            StringComparer.OrdinalIgnoreCase);
+        BuildSet(oldDataset, out HashSet<string> oldSet);
+        BuildSet(newDataset, out HashSet<string> newSet);
 
-        IReadOnlyList<string> added = newSet
-            .Except(oldSet, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(prefix => prefix, StringComparer.Ordinal)
-            .ToArray();
+        var added = new List<string>(oldSet.Count);
+        var removed = new List<string>(oldSet.Count);
+        int unchanged = 0;
 
-        IReadOnlyList<string> removed = oldSet
-            .Except(newSet, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(prefix => prefix, StringComparer.Ordinal)
-            .ToArray();
+        foreach (string prefix in newSet)
+        {
+            if (!oldSet.Contains(prefix))
+            {
+                added.Add(prefix);
+            }
+        }
 
-        int unchanged = oldSet.Count(newSet.Contains);
+        foreach (string prefix in oldSet)
+        {
+            if (!newSet.Contains(prefix))
+            {
+                removed.Add(prefix);
+            }
+            else
+            {
+                unchanged++;
+            }
+        }
+
+        added.Sort(StringComparer.Ordinal);
+        removed.Sort(StringComparer.Ordinal);
+
+        bool hasChanges = added.Count > 0 || removed.Count > 0;
 
         return new PrefixDatasetDiff
         {
@@ -35,13 +48,23 @@ public static class PrefixDatasetComparer
             UnchangedCount = unchanged,
             AddedCount = added.Count,
             RemovedCount = removed.Count,
-            HasChanges = added.Count > 0 || removed.Count > 0
+            HasChanges = hasChanges
         };
     }
 
-    private static IEnumerable<string> Normalize(
-        IEnumerable<string> prefixes) =>
-        prefixes
-            .Select(prefix => prefix.Trim())
-            .Where(prefix => prefix.Length > 0);
+    private static void BuildSet(
+        IEnumerable<string> prefixes,
+        out HashSet<string> set)
+    {
+        set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string prefix in prefixes)
+        {
+            string normalized = prefix.Trim();
+            if (normalized.Length > 0)
+            {
+                set.Add(normalized);
+            }
+        }
+    }
 }
