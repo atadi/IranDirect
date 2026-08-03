@@ -258,3 +258,10 @@ bytes and allocation count. Trust only full-mode numbers.
   index rather than the prefix string, so scenarios with equal count/seed
   share gateway personality. The planner distinguishes routes by full
   identity, so this does not skew the measured paths.
+
+## Recorded baselines
+
+- [Phase 24.1 full performance baseline](baselines/phase-24.1-baseline.md)
+  — complete five-family Full-mode run (commit `628d64a`) with scaling,
+  allocation, cross-benchmark ranking, repeat-run stability, and the
+  selected first optimization target (`RuntimeChangeSetPlanner.Plan`).
