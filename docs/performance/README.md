@@ -269,6 +269,10 @@ bytes and allocation count. Trust only full-mode numbers.
   — `RuntimeChangeSetPlanner.Plan` allocation reduction (pre-change
   `f78d2e7`), reference-oracle equivalence strategy, before/after
   benchmark table, and remaining noise.
+- [Phase 25.2 prefix comparer post-optimization validation](baselines/phase-25.2-prefix-comparer-validation.md)
+  — two repeat runs of the optimized comparer (commit `614ee61`) vs the
+  pre-change baseline (`f3af1f2`), run-to-run stability, scaling analysis,
+  and adoption of `614ee61` as the new comparer baseline.
 - [Phase 25.1 prefix dataset comparer optimization](baselines/phase-25.1-prefix-comparer-optimization.md)
   — `PrefixDatasetComparer.Compare` allocation reduction (pre-change
   `f3af1f2`), reference-oracle equivalence strategy, before/after benchmark
