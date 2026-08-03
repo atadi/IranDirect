@@ -82,6 +82,107 @@ dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Categ
 
 
 
+## Lifecycle simulation harness
+
+The lifecycle simulation harness in
+`IranDirect.Core.Tests/Performance/Lifecycle/` (infrastructure in
+`IranDirect.Testing/Performance/Lifecycle/`) simulates normal service
+activity over many repeated cycles to validate lifecycle stability and
+cumulative behavior. It drives the real orchestration components
+(`IranDirectController`, `RuntimeCycleCoordinator`, `RuntimeExecutor`,
+`RuntimeSnapshotProvider`, `DiagnosticRunner`, `RuntimePreviewPlanner`,
+`PrefixUpdateMonitor`, `CustomRouteResolver`, `SupportBundleExporter`,
+`RuntimePerfReportStore`) against controlled fakes.
+
+### Simulation architecture
+
+A `ServiceSimulationPlan` is an ordered list of `IServiceSimulationStep`
+values (`RunCycleStep`, `SnapshotStep`, `DiagnosticsStep`, `PreviewStep`,
+`MonitorForceCheckStep`, `ResolveCustomRoutesStep`,
+`ExportSupportBundleStep`, `AdvanceTimeStep`, `FaultScopeStep`,
+`CompositeStep`, `RepeatStep`, ...). `ServiceSimulationRunner` executes a
+plan against a `SimulatedRuntimeEnvironment`, accumulating a
+`ServiceSimulationMetrics` counter set, a list of `ResourceSample`
+values, and `ResourceTrendAnalyzer` trend lines.
+`ServiceSimulationVerifier` then asserts the stability invariants.
+
+### Fake dependencies
+
+No real Windows route table, network, DNS, HTTP, named pipe, or user
+profile file is touched:
+
+- `SimulatedRouteTable` / `FakeWindowsRouteApi` — in-memory route table
+  (note: one `Add`/`Delete` call is recorded per route, not per batch).
+- `ScriptedDnsResolver` — deterministic address sets and scripted
+  failures, injected as the resolver's lookup function.
+- `ScriptedPrefixUpdateChecker` / `CountingPrefixUpdateChecker` —
+  replayable `Current` / `UpdateAvailable` / `Unknown` / `Failed`
+  outcomes with concurrency counting.
+- `TemporaryLifecycleWorkspace` — per-environment temp directory for
+  state, perf reports, and support bundles; deleted on dispose.
+- `CountingExecutionHandlerDecorator` plus the `ExecutionHold` gate —
+  deterministic in-flight-call counting and cancellation points.
+
+### Fake time
+
+`SimulationTimeProvider` is the only clock. `AdvanceTimeStep` and
+`Time.Advance(...)` move it explicitly and fire any due timers; there
+are no `Task.Delay` calls, real clock waits, or unseeded random data.
+Because advancing time also fires the monitor's *scheduled* check
+interval, total monitor check counts can legitimately exceed the number
+of forced checks — the harness asserts non-overlap rather than an exact
+equality in the long sequences.
+
+### Cycle counts
+
+Regular suite: 100 combined operational cycles, 250 no-op repair cycles,
+100 snapshot captures, 120 monitor transitions, 40 DNS transition
+rounds, 25 support-bundle exports.
+
+Stress tier: 5,000 no-op repair cycles, 1,000 combined operational
+cycles, 1,000 snapshot/diagnostic/preview cycles, 500 support-bundle
+exports, and a 500-round monitor + DNS transition sequence.
+
+### Resource samples
+
+`ResourceSample` records the cycle number, managed memory, GC collection
+counts, thread and handle counts where supported, active handler calls,
+workspace/temp/bundle file counts, and route/inventory counts. Samples
+are captured at baseline, at fixed intervals (`SampleEvery`), and at
+completion.
+
+**There are deliberately no strict memory, handle, or thread
+thresholds.** Those values are reported as informational trends only.
+The assertions that do run are structural: active handler calls return
+to zero, no orphan `*.tmp` files remain, every JSON parses, every ZIP
+opens, the DNS cache holds at most one record per domain, and the route
+inventory does not grow across equivalent cycles.
+
+### Commands
+
+```powershell
+# regular lifecycle tests
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "FullyQualifiedName~Performance.Lifecycle"
+
+# lifecycle stress only (isolated from executor/persistence stress)
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Category=Stress&Area=Lifecycle"
+
+# all non-stress tests
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Category!=Stress"
+```
+
+Lifecycle stress tests carry both `Category=Stress` and
+`Area=Lifecycle`, because `Category=Stress` alone also selects the
+executor and persistence stress suites.
+
+### Approximate runtime
+
+On the reference development machine the full lifecycle filter (41
+tests) completes in roughly 45 seconds, of which the five stress cases
+account for about 43 seconds. These figures are machine-specific
+observations, not universal targets or performance gates.
+
+
 This folder documents the deterministic performance baseline suite for the
 IranDirect core algorithms.
 
