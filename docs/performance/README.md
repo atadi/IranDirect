@@ -35,6 +35,51 @@ dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Categ
 dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Category!=Stress"
 ```
 
+## Persistence endurance harness
+
+The persistence endurance harness in
+`IranDirect.Core.Tests/Performance/Persistence/` (infrastructure in
+`IranDirect.Testing/Performance/Persistence/`) drives the JSON-backed
+persistence components through deterministic read/write, concurrency,
+failure-recovery, cancellation, retention, and cleanup scenarios. It uses
+each store's public API only (`JsonStore<T>`, `RouteInventoryStore`,
+`VpnEndpointInventoryStore`, `StateRepository`, `CustomRouteStore`,
+`CustomRouteDnsCacheStore`, `PrefixSourceMetadataStore`,
+`DesiredConfigurationStore`, `PrefixSourceUpdateHistoryRepository`,
+`RuntimePerfReportStore`) and never touches production persistence code.
+
+- Scenarios: 1K sequential cycles in the regular suite and 10K+ cycles in
+  the `Category=Stress` tier; controlled concurrent readers/writers
+  (single store instance, no lost updates); cross-instance readers against
+  one writer (no sharing violations escape the existing retry); injected
+  fault cycles through `JsonLoad`, `JsonSave`, `FileRead`, `FileWrite`, and
+  `FileMove` with destination preservation, temp cleanup, and recovery;
+  stale-temp behavior; pre-cancelled and while-waiting cancellation with
+  gate release; corrupt-file `JsonException` contract then repair by a
+  subsequent save; prefix history retention (newest-first, no unbounded
+  growth); perf-report latest-by-trigger ordering, `ListAsync` order, and
+  legacy `cycle-<stamp>-<trigger>.json` filename compatibility; and
+  cross-store isolation.
+- Determinism: fixed seed (`20260803`) and record schedules, a single
+  task-completion-source gate for concurrency, no timing sleeps, and no
+  wall-clock thresholds. The only wall-clock values captured (elapsed time,
+  process handle count) are informational metrics, never assertions.
+- Resource-safety checks after every scenario: no orphaned `*.tmp` files,
+  the final file is complete JSON openable with `FileShare.None` (no held
+  handles), and each store remains responsive after faults and
+  cancellation.
+
+```powershell
+# everything, including stress
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj
+
+# stress cases only (10K+ cycles, concurrent rounds, all-store matrix)
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Category=Stress"
+
+# regular suite, skipping stress
+dotnet test .\IranDirect.Core.Tests\IranDirect.Core.Tests.csproj --filter "Category!=Stress"
+```
+
 
 
 This folder documents the deterministic performance baseline suite for the
