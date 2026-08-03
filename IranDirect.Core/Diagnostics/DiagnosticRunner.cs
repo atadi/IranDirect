@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
+using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Diagnostics;
 
@@ -8,16 +9,27 @@ public sealed class DiagnosticRunner :
     IDiagnosticRunner
 {
     private readonly IReadOnlyList<IDiagnosticCheck> _checks;
+    private readonly IFaultInjectionPolicy _faultPolicy;
 
     public DiagnosticRunner(
-        IReadOnlyList<IDiagnosticCheck> checks)
+        IReadOnlyList<IDiagnosticCheck> checks,
+        IFaultInjectionPolicy? faultPolicy = null)
     {
         _checks = checks;
+        _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
     public async Task<DiagnosticReport> RunAllAsync(
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (ShouldFailAt(FaultInjectionPoint.DiagnosticsRun))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.DiagnosticsRun);
+        }
+
         List<DiagnosticResult> results = new();
 
         foreach (IDiagnosticCheck check in _checks)
@@ -52,4 +64,7 @@ public sealed class DiagnosticRunner :
             CapturedAt: DateTimeOffset.UtcNow,
             Results: new ReadOnlyCollection<DiagnosticResult>(results));
     }
+
+    private bool ShouldFailAt(FaultInjectionPoint point) =>
+        FaultInjectionResolver.ShouldFail(_faultPolicy, point);
 }

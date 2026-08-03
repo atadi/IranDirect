@@ -11,6 +11,7 @@ using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.State;
+using IranDirect.Core.Testing.FaultInjection;
 using IranDirect.Core.Vpn;
 
 public sealed class RuntimeSnapshotProviderTests
@@ -568,7 +569,7 @@ public sealed class RuntimeSnapshotProviderTests
         Assert.Null(updated.Configuration);
     }
 
-    private sealed class Fixture : IAsyncDisposable
+    internal sealed class Fixture : IAsyncDisposable
     {
         private readonly string _directory;
 
@@ -616,7 +617,9 @@ public sealed class RuntimeSnapshotProviderTests
 
         public static Fixture Create(
             RuntimePerfReportStore? perfStore = null,
-            bool includeMonitor = false)
+            bool includeMonitor = false,
+            IFaultInjectionPolicy? faultPolicy = null,
+            IRouteInventoryPersistence? routeInventory = null)
         {
             string directory = Path.Combine(
                 Path.GetTempPath(),
@@ -713,13 +716,14 @@ public sealed class RuntimeSnapshotProviderTests
             RuntimeSnapshotProvider provider = new(
                 controller,
                 configurationService,
-                routeInventoryStore,
+                routeInventory ?? routeInventoryStore,
                 dnsCacheService,
                 perfStore,
                 metadataService,
                 updateChecker,
                 clock,
-                monitor);
+                monitor,
+                faultPolicy);
 
             return new Fixture(
                 directory,
@@ -896,7 +900,7 @@ public sealed class RuntimeSnapshotProviderTests
         }
     }
 
-    private sealed class FakeTimeProvider : TimeProvider
+    internal sealed class FakeTimeProvider : TimeProvider
     {
         private DateTimeOffset _now;
 

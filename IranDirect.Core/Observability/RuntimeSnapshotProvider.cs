@@ -5,6 +5,7 @@ using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime.Profiling;
+using IranDirect.Core.Testing.FaultInjection;
 using IranDirect.Core.Vpn;
 
 public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
@@ -21,6 +22,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
     private readonly IPrefixUpdateMonitor?
         _prefixUpdateMonitor;
     private readonly TimeProvider _timeProvider;
+    private readonly IFaultInjectionPolicy _faultPolicy;
 
     public RuntimeSnapshotProvider(
         IranDirectController controller,
@@ -32,7 +34,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
             prefixSourceMetadataService = null,
         IPrefixUpdateChecker? prefixUpdateChecker = null,
         TimeProvider? timeProvider = null,
-        IPrefixUpdateMonitor? prefixUpdateMonitor = null)
+        IPrefixUpdateMonitor? prefixUpdateMonitor = null,
+        IFaultInjectionPolicy? faultPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(controller);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -49,11 +52,20 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         _prefixUpdateChecker = prefixUpdateChecker;
         _prefixUpdateMonitor = prefixUpdateMonitor;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
     public async Task<RuntimeSnapshot> GetSnapshotAsync(
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (ShouldFailAt(FaultInjectionPoint.SnapshotCapture))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.SnapshotCapture);
+        }
+
         DateTimeOffset capturedAt =
             _timeProvider.GetUtcNow();
 
@@ -127,4 +139,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
             LastError = runtime.LastError
         };
     }
+
+    private bool ShouldFailAt(FaultInjectionPoint point) =>
+        FaultInjectionResolver.ShouldFail(_faultPolicy, point);
 }

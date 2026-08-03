@@ -15,7 +15,9 @@ public sealed class FaultInjectionArchitectureTests
         "IranDirect.Core\\CustomRoutes\\CustomRouteResolver.cs",
         "IranDirect.Core\\Routing\\WindowsRouteManager.cs",
         "IranDirect.Core\\Routing\\WindowsRouteApi.cs",
-        "IranDirect.Core\\Ipc\\IranDirectServiceClient.cs"
+        "IranDirect.Core\\Ipc\\IranDirectServiceClient.cs",
+        "IranDirect.Core\\Observability\\RuntimeSnapshotProvider.cs",
+        "IranDirect.Core\\Diagnostics\\DiagnosticRunner.cs"
     ];
 
     [Fact]
