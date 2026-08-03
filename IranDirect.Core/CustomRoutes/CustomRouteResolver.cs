@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.CustomRoutes;
 
@@ -14,13 +15,15 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
     private readonly CustomRouteDnsCacheOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly Func<string, CancellationToken, Task<IReadOnlyList<IPAddress>>> _dnsLookup;
+    private readonly IFaultInjectionPolicy _faultPolicy;
 
     public CustomRouteResolver(
         ICustomRouteRepository repository,
         ICustomRouteDnsCacheRepository dnsCacheRepository,
         CustomRouteDnsCacheOptions options,
         TimeProvider timeProvider,
-        Func<string, CancellationToken, Task<IReadOnlyList<IPAddress>>>? dnsLookup = null)
+        Func<string, CancellationToken, Task<IReadOnlyList<IPAddress>>>? dnsLookup = null,
+        IFaultInjectionPolicy? faultPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(dnsCacheRepository);
@@ -34,6 +37,7 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
         _options = options;
         _timeProvider = timeProvider;
         _dnsLookup = dnsLookup ?? DefaultDnsLookupAsync;
+        _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
     public async Task<CustomRouteResolutionResult> ResolveAsync(
@@ -241,6 +245,12 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
 
         try
         {
+            if (ShouldFailAt(FaultInjectionPoint.DnsLookup))
+            {
+                throw new FaultInjectionException(
+                    FaultInjectionPoint.DnsLookup);
+            }
+
             dnsAddresses =
                 await _dnsLookup(
                     entry.Value,
@@ -546,6 +556,9 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
             Status = status,
             Reason = reason
         };
+
+    private bool ShouldFailAt(FaultInjectionPoint point) =>
+        FaultInjectionResolver.ShouldFail(_faultPolicy, point);
 
     private static async Task<IReadOnlyList<IPAddress>> DefaultDnsLookupAsync(
         string host,

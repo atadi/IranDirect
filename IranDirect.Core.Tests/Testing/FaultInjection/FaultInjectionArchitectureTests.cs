@@ -11,7 +11,8 @@ public sealed class FaultInjectionArchitectureTests
     [
         "IranDirect.Core\\Persistence\\JsonStore.cs",
         "IranDirect.Core\\Prefixes\\OfficialIranPrefixSource.cs",
-        "IranDirect.Core\\Prefixes\\OfficialIranPrefixUpdateChecker.cs"
+        "IranDirect.Core\\Prefixes\\OfficialIranPrefixUpdateChecker.cs",
+        "IranDirect.Core\\CustomRoutes\\CustomRouteResolver.cs"
     ];
 
     [Fact]
