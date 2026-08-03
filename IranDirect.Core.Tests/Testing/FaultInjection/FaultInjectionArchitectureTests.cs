@@ -14,7 +14,8 @@ public sealed class FaultInjectionArchitectureTests
         "IranDirect.Core\\Prefixes\\OfficialIranPrefixUpdateChecker.cs",
         "IranDirect.Core\\CustomRoutes\\CustomRouteResolver.cs",
         "IranDirect.Core\\Routing\\WindowsRouteManager.cs",
-        "IranDirect.Core\\Routing\\WindowsRouteApi.cs"
+        "IranDirect.Core\\Routing\\WindowsRouteApi.cs",
+        "IranDirect.Core\\Ipc\\IranDirectServiceClient.cs"
     ];
 
     [Fact]

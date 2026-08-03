@@ -1,6 +1,5 @@
-using System.IO.Pipes;
-using System.Text;
 using System.Text.Json;
+using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Ipc;
 
@@ -10,55 +9,23 @@ public sealed class IranDirectServiceClient :
     private static readonly TimeSpan DefaultConnectTimeout =
         TimeSpan.FromSeconds(5);
 
+    private readonly INamedPipeClientFactory _factory;
+    private readonly IFaultInjectionPolicy _faultPolicy;
+
+    public IranDirectServiceClient(
+        INamedPipeClientFactory? factory = null,
+        IFaultInjectionPolicy? faultPolicy = null)
+    {
+        _factory = factory ?? new NamedPipeClientFactory();
+        _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
+    }
+
     public async Task<ServiceResponse> SendAsync(
         IranDirectCommand command,
         string? value = null,
         string? description = null,
         CancellationToken cancellationToken = default)
     {
-        await using NamedPipeClientStream pipe =
-            new(
-                ".",
-                IranDirectPipeNames.Control,
-                PipeDirection.InOut,
-                PipeOptions.Asynchronous);
-
-        using CancellationTokenSource timeoutSource =
-            CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken);
-
-        timeoutSource.CancelAfter(DefaultConnectTimeout);
-
-        try
-        {
-            await pipe.ConnectAsync(timeoutSource.Token);
-        }
-        catch (OperationCanceledException)
-            when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                "IranDirect Service is unavailable or did not " +
-                "accept the connection within 5 seconds.");
-        }
-
-        using StreamReader reader =
-            new(
-                pipe,
-                Encoding.UTF8,
-                detectEncodingFromByteOrderMarks: false,
-                bufferSize: 4096,
-                leaveOpen: true);
-
-        using StreamWriter writer =
-            new(
-                pipe,
-                new UTF8Encoding(false),
-                bufferSize: 4096,
-                leaveOpen: true)
-            {
-                AutoFlush = true
-            };
-
         ServiceRequest request = new()
         {
             Command = command,
@@ -71,26 +38,59 @@ public sealed class IranDirectServiceClient :
                 request,
                 IranDirectJson.Options);
 
-        await writer.WriteLineAsync(
-            requestJson.AsMemory(),
-            cancellationToken);
+        if (ShouldFailAt(FaultInjectionPoint.NamedPipeSend))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.NamedPipeSend);
+        }
 
-        string? responseJson =
-            await reader.ReadLineAsync(
+        using CancellationTokenSource timeoutSource =
+            CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken);
 
-        ServiceResponse? response =
-            JsonSerializer.Deserialize<ServiceResponse>(
-                responseJson ?? "",
-                IranDirectJson.Options);
+        timeoutSource.CancelAfter(DefaultConnectTimeout);
 
-        return response
-            ?? new ServiceResponse
-            {
-                Success = false,
-                ErrorCode = "INVALID_RESPONSE",
-                Message =
-                    "The service returned an invalid response."
-            };
+        INamedPipeClientConnection connection;
+
+        try
+        {
+            connection =
+                await _factory.ConnectAsync(timeoutSource.Token);
+        }
+        catch (OperationCanceledException)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                "IranDirect Service is unavailable or did not " +
+                "accept the connection within 5 seconds.");
+        }
+
+        await using (connection)
+        {
+            await connection.WriteRequestLineAsync(
+                requestJson,
+                cancellationToken);
+
+            string? responseJson =
+                await connection.ReadResponseLineAsync(
+                    cancellationToken);
+
+            ServiceResponse? response =
+                JsonSerializer.Deserialize<ServiceResponse>(
+                    responseJson ?? "",
+                    IranDirectJson.Options);
+
+            return response
+                ?? new ServiceResponse
+                {
+                    Success = false,
+                    ErrorCode = "INVALID_RESPONSE",
+                    Message =
+                        "The service returned an invalid response."
+                };
+        }
     }
+
+    private bool ShouldFailAt(FaultInjectionPoint point) =>
+        FaultInjectionResolver.ShouldFail(_faultPolicy, point);
 }
