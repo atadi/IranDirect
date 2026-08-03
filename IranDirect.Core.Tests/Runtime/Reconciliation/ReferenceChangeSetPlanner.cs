@@ -1,6 +1,20 @@
-namespace IranDirect.Core.Runtime.Reconciliation;
+using IranDirect.Core.Runtime;
+using IranDirect.Core.Runtime.Reconciliation;
 
-public sealed class RuntimeChangeSetPlanner
+namespace IranDirect.Core.Tests.Runtime.Reconciliation;
+
+/// <summary>
+/// Test-only reproduction of the pre-optimization
+/// <see cref="RuntimeChangeSetPlanner"/> behavior. It mirrors the
+/// original <c>Plan</c> implementation exactly (three
+/// <c>GroupBy(...).ToDictionary(...)</c> identity maps plus the final
+/// <c>OrderBy(Kind).ThenBy(Identity)</c> ordering) so equivalence
+/// tests can compare the optimized planner against an independent,
+/// behavior-faithful oracle. This type must never ship in production
+/// code — it exists only to pin observable semantics during the
+/// allocation optimization.
+/// </summary>
+public sealed class ReferenceChangeSetPlanner
 {
     public RuntimeChangeSet Plan(
         RuntimePlanSnapshot snapshot,
@@ -14,51 +28,58 @@ public sealed class RuntimeChangeSetPlanner
             return new RuntimeChangeSet();
         }
 
-        // One observed-route lookup, first-occurrence wins (matching the
-        // prior GroupBy(...).First() semantics). This single map serves
-        // both the add passes (membership test) and the removal passes
-        // (value lookup), instead of being rebuilt per category.
         Dictionary<string, ObservedRoute> observedRoutes =
-            BuildFirstOccurrenceLookup(
-                snapshot.Observed.Routes,
-                route => route.Identity);
+            snapshot.Observed.Routes
+                .GroupBy(
+                    route => route.Identity,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First(),
+                    StringComparer.OrdinalIgnoreCase);
 
-        // Desired membership sets (case-insensitive). The removal passes
-        // only test membership, and the add passes only need
-        // first-occurrence dedup plus the observed-membership test, so a
-        // string HashSet is enough — we avoid materializing a full
-        // dictionary of desired route objects for every category.
-        HashSet<string> desiredEndpointIds =
-            ToIdentitySet(
-                snapshot.Desired.EndpointRoutes,
-                route => route.Identity);
-        HashSet<string> desiredPrefixIds =
-            ToIdentitySet(
-                snapshot.Desired.PrefixRoutes,
-                route => route.Identity);
+        Dictionary<string, DesiredEndpointRoute>
+            desiredEndpointRoutes =
+            snapshot.Desired.EndpointRoutes
+                .GroupBy(
+                    route => route.Identity,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, DesiredPrefixRoute>
+            desiredPrefixRoutes =
+            snapshot.Desired.PrefixRoutes
+                .GroupBy(
+                    route => route.Identity,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First(),
+                    StringComparer.OrdinalIgnoreCase);
 
         List<RuntimeChange> changes = [];
 
         AddMissingEndpointRoutes(
-            snapshot.Desired.EndpointRoutes,
+            desiredEndpointRoutes,
             observedRoutes,
-            desiredEndpointIds,
             changes);
 
         RemoveUndesiredOwnedEndpointRoutes(
-            desiredEndpointIds,
+            desiredEndpointRoutes,
             observedRoutes,
             ownership,
             changes);
 
         AddMissingPrefixRoutes(
-            snapshot.Desired.PrefixRoutes,
+            desiredPrefixRoutes,
             observedRoutes,
-            desiredPrefixIds,
             changes);
 
         RemoveUndesiredOwnedPrefixRoutes(
-            desiredPrefixIds,
+            desiredPrefixRoutes,
             observedRoutes,
             ownership,
             changes);
@@ -74,56 +95,15 @@ public sealed class RuntimeChangeSetPlanner
         };
     }
 
-    private static Dictionary<string, T> BuildFirstOccurrenceLookup<T>(
-        IReadOnlyList<T> items,
-        Func<T, string> keySelector)
-    {
-        var lookup = new Dictionary<string, T>(
-            items.Count,
-            StringComparer.OrdinalIgnoreCase);
-
-        foreach (T item in items)
-        {
-            string key = keySelector(item);
-            if (!lookup.ContainsKey(key))
-            {
-                lookup.Add(key, item);
-            }
-        }
-
-        return lookup;
-    }
-
-    private static HashSet<string> ToIdentitySet<T>(
-        IReadOnlyList<T> items,
-        Func<T, string> keySelector)
-    {
-        var set = new HashSet<string>(
-            items.Count,
-            StringComparer.OrdinalIgnoreCase);
-
-        foreach (T item in items)
-        {
-            set.Add(keySelector(item));
-        }
-
-        return set;
-    }
-
     private static void AddMissingEndpointRoutes(
-        IReadOnlyList<DesiredEndpointRoute> desired,
+        IReadOnlyDictionary<string, DesiredEndpointRoute> desired,
         IReadOnlyDictionary<string, ObservedRoute> observed,
-        HashSet<string> desiredIds,
         ICollection<RuntimeChange> changes)
     {
-        var added = new HashSet<string>(
-            StringComparer.OrdinalIgnoreCase);
-
-        foreach (DesiredEndpointRoute route in desired)
+        foreach ((string identity, DesiredEndpointRoute route)
+                 in desired)
         {
-            string identity = route.Identity;
-            if (observed.ContainsKey(identity) ||
-                !added.Add(identity))
+            if (observed.ContainsKey(identity))
             {
                 continue;
             }
@@ -131,14 +111,11 @@ public sealed class RuntimeChangeSetPlanner
             changes.Add(
                 new RuntimeChange
                 {
-                    Kind =
-                        RuntimeChangeKind.AddEndpointRoute,
+                    Kind = RuntimeChangeKind.AddEndpointRoute,
                     Identity = identity,
-                    DestinationPrefix =
-                        route.DestinationPrefix,
+                    DestinationPrefix = route.DestinationPrefix,
                     Gateway = route.Gateway,
-                    InterfaceIndex =
-                        route.InterfaceIndex,
+                    InterfaceIndex = route.InterfaceIndex,
                     Metric = route.Metric,
                     Description =
                         $"Protect VPN endpoint " +
@@ -149,7 +126,7 @@ public sealed class RuntimeChangeSetPlanner
     }
 
     private static void RemoveUndesiredOwnedEndpointRoutes(
-        HashSet<string> desiredIds,
+        IReadOnlyDictionary<string, DesiredEndpointRoute> desired,
         IReadOnlyDictionary<string, ObservedRoute> observed,
         RuntimeRouteOwnership ownership,
         ICollection<RuntimeChange> changes)
@@ -157,7 +134,7 @@ public sealed class RuntimeChangeSetPlanner
         foreach (string identity
                  in ownership.EndpointRouteIdentities)
         {
-            if (desiredIds.Contains(identity) ||
+            if (desired.ContainsKey(identity) ||
                 !observed.TryGetValue(
                     identity,
                     out ObservedRoute? route))
@@ -175,19 +152,14 @@ public sealed class RuntimeChangeSetPlanner
     }
 
     private static void AddMissingPrefixRoutes(
-        IReadOnlyList<DesiredPrefixRoute> desired,
+        IReadOnlyDictionary<string, DesiredPrefixRoute> desired,
         IReadOnlyDictionary<string, ObservedRoute> observed,
-        HashSet<string> desiredIds,
         ICollection<RuntimeChange> changes)
     {
-        var added = new HashSet<string>(
-            StringComparer.OrdinalIgnoreCase);
-
-        foreach (DesiredPrefixRoute route in desired)
+        foreach ((string identity, DesiredPrefixRoute route)
+                 in desired)
         {
-            string identity = route.Identity;
-            if (observed.ContainsKey(identity) ||
-                !added.Add(identity))
+            if (observed.ContainsKey(identity))
             {
                 continue;
             }
@@ -195,14 +167,11 @@ public sealed class RuntimeChangeSetPlanner
             changes.Add(
                 new RuntimeChange
                 {
-                    Kind =
-                        RuntimeChangeKind.AddPrefixRoute,
+                    Kind = RuntimeChangeKind.AddPrefixRoute,
                     Identity = identity,
-                    DestinationPrefix =
-                        route.DestinationPrefix,
+                    DestinationPrefix = route.DestinationPrefix,
                     Gateway = route.Gateway,
-                    InterfaceIndex =
-                        route.InterfaceIndex,
+                    InterfaceIndex = route.InterfaceIndex,
                     Metric = route.Metric,
                     Description =
                         $"Add direct prefix route " +
@@ -213,7 +182,7 @@ public sealed class RuntimeChangeSetPlanner
     }
 
     private static void RemoveUndesiredOwnedPrefixRoutes(
-        HashSet<string> desiredIds,
+        IReadOnlyDictionary<string, DesiredPrefixRoute> desired,
         IReadOnlyDictionary<string, ObservedRoute> observed,
         RuntimeRouteOwnership ownership,
         ICollection<RuntimeChange> changes)
@@ -221,7 +190,7 @@ public sealed class RuntimeChangeSetPlanner
         foreach (string identity
                  in ownership.PrefixRouteIdentities)
         {
-            if (desiredIds.Contains(identity) ||
+            if (desired.ContainsKey(identity) ||
                 !observed.TryGetValue(
                     identity,
                     out ObservedRoute? route))
@@ -246,11 +215,9 @@ public sealed class RuntimeChangeSetPlanner
         {
             Kind = kind,
             Identity = route.Identity,
-            DestinationPrefix =
-                route.DestinationPrefix,
+            DestinationPrefix = route.DestinationPrefix,
             Gateway = route.NextHop,
-            InterfaceIndex =
-                route.InterfaceIndex,
+            InterfaceIndex = route.InterfaceIndex,
             Metric = route.Metric,
             Description = description
         };

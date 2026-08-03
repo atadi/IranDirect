@@ -265,3 +265,7 @@ bytes and allocation count. Trust only full-mode numbers.
   — complete five-family Full-mode run (commit `628d64a`) with scaling,
   allocation, cross-benchmark ranking, repeat-run stability, and the
   selected first optimization target (`RuntimeChangeSetPlanner.Plan`).
+- [Phase 24.2 planner allocation optimization](baselines/phase-24.2-planner-optimization.md)
+  — `RuntimeChangeSetPlanner.Plan` allocation reduction (pre-change
+  `f78d2e7`), reference-oracle equivalence strategy, before/after
+  benchmark table, and remaining noise.
