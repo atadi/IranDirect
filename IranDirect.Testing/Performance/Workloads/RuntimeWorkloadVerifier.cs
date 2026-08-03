@@ -1,6 +1,6 @@
-namespace IranDirect.Core.Tests.Performance.Workloads;
+namespace IranDirect.Testing.Performance.Workloads;
 
-internal static class RuntimeWorkloadVerifier
+public static class RuntimeWorkloadVerifier
 {
     public static (int Added, int Removed, int Unchanged) RecomputeCounts(
         RuntimeWorkload workload)

@@ -1,4 +1,5 @@
 using System.Net;
+using IranDirect.Testing.Performance.Workloads;
 
 namespace IranDirect.Core.Tests.Performance.Workloads;
 

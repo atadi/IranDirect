@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using IranDirect.Core.Runtime;
+using IranDirect.Testing.Performance.Workloads;
 
 namespace IranDirect.Core.Tests.Performance.Workloads;
 

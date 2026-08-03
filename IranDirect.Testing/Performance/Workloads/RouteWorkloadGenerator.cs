@@ -2,7 +2,7 @@ using IranDirect.Core.Routing;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Vpn;
 
-namespace IranDirect.Core.Tests.Performance.Workloads;
+namespace IranDirect.Testing.Performance.Workloads;
 
 public sealed class RouteWorkloadGenerator
 {

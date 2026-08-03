@@ -1,4 +1,4 @@
-namespace IranDirect.Core.Tests.Performance.Workloads;
+namespace IranDirect.Testing.Performance.Workloads;
 
 internal static class DeterministicRandom
 {

@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\IranDirect.Core\IranDirect.Core.csproj" />
+    <ProjectReference Include="..\IranDirect.Testing\IranDirect.Testing.csproj" />
     <ProjectReference Include="..\IranDirect.Cli\IranDirect.Cli.csproj" />
     <ProjectReference Include="..\IranDirect.Tray\IranDirect.Tray.csproj" />
   </ItemGroup>
