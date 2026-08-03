@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Prefixes;
 
@@ -24,13 +25,16 @@ public sealed class OfficialIranPrefixSource :
 
     private readonly HttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
+    private readonly IFaultInjectionPolicy _faultPolicy;
 
     public OfficialIranPrefixSource(
         HttpClient httpClient,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IFaultInjectionPolicy? faultPolicy = null)
     {
         _httpClient = httpClient;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
     public async Task<PrefixSourceFetchResult> FetchAsync(
@@ -38,6 +42,14 @@ public sealed class OfficialIranPrefixSource :
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (FaultInjectionResolver.ShouldFail(
+                _faultPolicy,
+                FaultInjectionPoint.HttpRequest))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.HttpRequest);
+        }
 
         DateTimeOffset startedAt = _timeProvider.GetUtcNow();
 

@@ -1,4 +1,5 @@
 using System.Net;
+using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Prefixes;
 
@@ -11,17 +12,20 @@ public sealed class OfficialIranPrefixUpdateChecker :
     private readonly IPrefixSourceMetadataService _metadataService;
     private readonly PrefixUpdateCheckOptions _options;
     private readonly TimeProvider _timeProvider;
+    private readonly IFaultInjectionPolicy _faultPolicy;
 
     public OfficialIranPrefixUpdateChecker(
         HttpClient httpClient,
         IPrefixSourceMetadataService metadataService,
         PrefixUpdateCheckOptions options,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IFaultInjectionPolicy? faultPolicy = null)
     {
         _httpClient = httpClient;
         _metadataService = metadataService;
         _options = options;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
     public async Task<PrefixUpdateCheckResult> CheckAsync(
@@ -105,6 +109,14 @@ public sealed class OfficialIranPrefixUpdateChecker :
     private async Task<PrefixUpdateCheckRemoteMetadata>
         ProbeRemoteAsync(CancellationToken cancellationToken)
     {
+        if (FaultInjectionResolver.ShouldFail(
+                _faultPolicy,
+                FaultInjectionPoint.HttpRequest))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.HttpRequest);
+        }
+
         using HttpRequestMessage headRequest = new(
             HttpMethod.Head,
             OfficialIranPrefixSource.Descriptor.Uri);
@@ -131,6 +143,14 @@ public sealed class OfficialIranPrefixUpdateChecker :
         FetchRemoteMetadataAsync(
             CancellationToken cancellationToken)
     {
+        if (FaultInjectionResolver.ShouldFail(
+                _faultPolicy,
+                FaultInjectionPoint.HttpRequest))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.HttpRequest);
+        }
+
         using HttpResponseMessage response =
             await _httpClient.GetAsync(
                 OfficialIranPrefixSource.Descriptor.Uri,

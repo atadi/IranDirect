@@ -255,15 +255,8 @@ public class JsonStore<T>
     private static bool IsRetryableAccess(Exception ex) =>
         ex is IOException or UnauthorizedAccessException;
 
-    private bool ShouldFailAt(FaultInjectionPoint point)
-    {
-        if (FaultInjectionScope.IsActive)
-        {
-            return FaultInjectionScope.ShouldFail(point);
-        }
-
-        return _faultPolicy.ShouldFail(point);
-    }
+    private bool ShouldFailAt(FaultInjectionPoint point) =>
+        FaultInjectionResolver.ShouldFail(_faultPolicy, point);
 
     private static async Task BackoffAsync(
         int attempt,

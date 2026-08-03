@@ -7,8 +7,12 @@ public sealed class FaultInjectionArchitectureTests
     private const string FrameworkNamespace =
         "IranDirect.Core.Testing.FaultInjection";
 
-    private const string JsonStorePath =
-        "IranDirect.Core\\Persistence\\JsonStore.cs";
+    private static readonly string[] AllowedConsumerSuffixes =
+    [
+        "IranDirect.Core\\Persistence\\JsonStore.cs",
+        "IranDirect.Core\\Prefixes\\OfficialIranPrefixSource.cs",
+        "IranDirect.Core\\Prefixes\\OfficialIranPrefixUpdateChecker.cs"
+    ];
 
     [Fact]
     public void ProductionReferences_AreConfinedToAllowedFiles()
@@ -17,23 +21,25 @@ public sealed class FaultInjectionArchitectureTests
 
         Assert.All(
             productionFiles,
-            path => Assert.EndsWith(
-                JsonStorePath,
-                path,
-                StringComparison.Ordinal));
+            path => Assert.Contains(
+                AllowedConsumerSuffixes,
+                suffix => path.EndsWith(
+                    suffix,
+                    StringComparison.Ordinal)));
     }
 
     [Fact]
-    public void JsonStore_IsTheOnlyRuntimeConsumer()
+    public void OnlySanctionedConsumers_ReferenceTheFramework()
     {
         string[] consumers = FindRuntimeConsumers();
 
         Assert.All(
             consumers,
-            path => Assert.EndsWith(
-                JsonStorePath,
-                path,
-                StringComparison.Ordinal));
+            path => Assert.Contains(
+                AllowedConsumerSuffixes,
+                suffix => path.EndsWith(
+                    suffix,
+                    StringComparison.Ordinal)));
     }
 
     private static string[] FindProductionReferences()
