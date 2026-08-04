@@ -277,6 +277,10 @@ bytes and allocation count. Trust only full-mode numbers.
    — two repeat benchmark runs confirming Phase 26.1 optimization stability;
    cached reads at sub-nanosecond with consistent run-to-run results.
 - [Phase 27.1 diagnostic formatting and category grouping optimization](baselines/phase-27.1-diagnostic-formatting-optimization.md)
+- [Phase 27.2 diagnostic category cache validation](baselines/phase-27.2-diagnostic-category-validation.md)
+   — repeat benchmarks confirming cached category access is O(1)/zero-alloc,
+   construction is O(n) with no Gen2 at 5K, formatter output and serialization
+   unchanged; adopts 474eb6a as the new diagnostics category baseline.
    — `DiagnosticReport` caches grouped `Categories` once at construction and
    `DiagnosticReportFormatter` drops Compact LINQ/Join; repeated category
    grouping becomes O(1) and zero-alloc (5K `Categories`×10: ~1.46 MB → 0 B;
