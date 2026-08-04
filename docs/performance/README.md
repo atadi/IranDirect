@@ -298,6 +298,9 @@ bytes and allocation count. Trust only full-mode numbers.
    — repeat benchmarks confirming the optimization is stable and exact-output
    compatible; `Build()` allocation −21% at 50K with no regression, category
    reads O(1)/zero-alloc, adopts d87c75a as the new baseline.
+- [Phase 30.1 performance re-ranking](baselines/phase-30.1-performance-reranking.md)
+   — full-suite re-run after all optimizations; new ranked bottleneck list;
+   RuntimeChangeSetPlanner remains dominant and is selected as the next target.
    — `DiagnosticReport` caches grouped `Categories` once at construction and
    `DiagnosticReportFormatter` drops Compact LINQ/Join; repeated category
    grouping becomes O(1) and zero-alloc (5K `Categories`×10: ~1.46 MB → 0 B;
