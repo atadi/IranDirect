@@ -210,7 +210,7 @@ public sealed class DiagnosticReportEquivalenceTests
         source[0] = Make(
             "a", DiagnosticStatus.Failed, DiagnosticSeverity.Error);
 
-        Assert.Equal(1, report.Results.Count);
+        Assert.Single(report.Results);
         Assert.Equal(1, report.PassedCount);
         Assert.Equal(0, report.FailedCount);
         Assert.True(report.Healthy);
@@ -235,7 +235,7 @@ public sealed class DiagnosticReportEquivalenceTests
     }
 
     [Fact]
-    public void Summary_StableAcrossConcurrentReads()
+    public async Task Summary_StableAcrossConcurrentReads()
     {
         DiagnosticResult[] data = BuildDeterministic(5_000);
         var report = new DiagnosticReport(DateTimeOffset.UtcNow, data);
@@ -254,7 +254,7 @@ public sealed class DiagnosticReportEquivalenceTests
                 });
         }
 
-        Task.WaitAll(tasks);
+        await Task.WhenAll(tasks);
     }
 
     // ---- Serialization compatibility (Step 9) ----
@@ -295,12 +295,16 @@ public sealed class DiagnosticReportEquivalenceTests
 
         int summaryCount = 0;
         using JsonDocument doc = JsonDocument.Parse(json);
-        foreach (JsonProperty _ in doc.RootElement.EnumerateObject())
+        foreach (JsonProperty property in doc.RootElement.EnumerateObject())
         {
-            // counted by name below
+            if (property.NameEquals("Summary"))
+            {
+                summaryCount++;
+            }
         }
 
         // There must be exactly one "Summary" property and no private cache.
+        Assert.Equal(1, summaryCount);
         Assert.Equal(
             1,
             CountProperty(json, "Summary"));
