@@ -294,6 +294,10 @@ bytes and allocation count. Trust only full-mode numbers.
    `ExecutionPreview.Categories` cached on first access; `Build()` allocation
    −21% at 50K and repeated category reads ~73–90% lower, exact mapping/order
    preserved.
+- [Phase 29.2 execution preview post-optimization validation](baselines/phase-29.2-execution-preview-validation.md)
+   — repeat benchmarks confirming the optimization is stable and exact-output
+   compatible; `Build()` allocation −21% at 50K with no regression, category
+   reads O(1)/zero-alloc, adopts d87c75a as the new baseline.
    — `DiagnosticReport` caches grouped `Categories` once at construction and
    `DiagnosticReportFormatter` drops Compact LINQ/Join; repeated category
    grouping becomes O(1) and zero-alloc (5K `Categories`×10: ~1.46 MB → 0 B;
