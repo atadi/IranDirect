@@ -120,4 +120,82 @@ public class DiagnosticReportBenchmarks
 
         return sink;
     }
+
+    // ---- Focused repeated-access isolation (Phase 27.1) ----
+
+    [Benchmark]
+    public IReadOnlyDictionary<
+        DiagnosticCategory,
+        IReadOnlyList<DiagnosticResult>> CategoriesTenTimes()
+    {
+        IReadOnlyDictionary<DiagnosticCategory,
+            IReadOnlyList<DiagnosticResult>> sink =
+            _report.Categories;
+        for (int i = 0; i < 10; i++)
+        {
+            sink = _report.Categories;
+        }
+
+        return sink;
+    }
+
+    [Benchmark]
+    public int DetailedFormattingTenTimes()
+    {
+        int sink = 0;
+        for (int i = 0; i < 10; i++)
+        {
+            string s = DiagnosticReportFormatter.Format(
+                _report, DiagnosticFormat.Detailed);
+            sink += s.Length;
+        }
+
+        return sink;
+    }
+
+    [Benchmark]
+    public int CompactFormattingTenTimes()
+    {
+        int sink = 0;
+        for (int i = 0; i < 10; i++)
+        {
+            string s = DiagnosticReportFormatter.Format(
+                _report, DiagnosticFormat.Compact);
+            sink += s.Length;
+        }
+
+        return sink;
+    }
+}
+
+/// <summary>
+/// Measures the cost of constructing a <see cref="DiagnosticReport"/>, which
+/// now performs: defensive copy of Results, one-time summary computation, and
+/// one-time category grouping. Input generation stays in GlobalSetup; the
+/// measured method only executes the constructor.
+/// </summary>
+[MemoryDiagnoser]
+public class DiagnosticReportConstructionBenchmarks
+{
+    private List<DiagnosticResult> _input = null!;
+
+    [ParamsSource(nameof(ResultCountValues))]
+    public int ResultCount;
+
+    public static IEnumerable<int> ResultCountValues() =>
+        Sizes.DiagnosticResultCounts;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        // Same deterministic generation as DiagnosticReportFactory but without
+        // constructing the report here (input only).
+        _input = DiagnosticReportFactory.Create(ResultCount).Results.ToList();
+    }
+
+    [Benchmark]
+    public DiagnosticReport ReportConstruction() =>
+        new DiagnosticReport(
+            CapturedAt: FixedTime.Value,
+            Results: _input);
 }

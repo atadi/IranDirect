@@ -13,6 +13,8 @@ public sealed record DiagnosticReport
 {
     private readonly DiagnosticResult[] _results;
     private readonly DiagnosticSummary _summary;
+    private readonly IReadOnlyDictionary<DiagnosticCategory,
+        IReadOnlyList<DiagnosticResult>> _categories;
 
     public DiagnosticReport(
         DateTimeOffset CapturedAt,
@@ -29,6 +31,8 @@ public sealed record DiagnosticReport
         this.CapturedAt = CapturedAt;
         this.Results = _results;
         _summary = ComputeSummary(_results);
+        _categories =
+            DiagnosticCategoryMap.Default.GroupResults(_results);
     }
 
     public DateTimeOffset CapturedAt { get; }
@@ -47,7 +51,7 @@ public sealed record DiagnosticReport
 
     public IReadOnlyDictionary<DiagnosticCategory,
         IReadOnlyList<DiagnosticResult>> Categories =>
-        DiagnosticCategoryMap.Default.GroupResults(_results);
+        _categories;
 
     public DiagnosticSummary Summary => _summary;
 

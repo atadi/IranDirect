@@ -276,6 +276,11 @@ bytes and allocation count. Trust only full-mode numbers.
 - [Phase 26.2 diagnostic summary repeat benchmark validation](baselines/phase-26.2-diagnostic-summary-validation.md)
    — two repeat benchmark runs confirming Phase 26.1 optimization stability;
    cached reads at sub-nanosecond with consistent run-to-run results.
+- [Phase 27.1 diagnostic formatting and category grouping optimization](baselines/phase-27.1-diagnostic-formatting-optimization.md)
+   — `DiagnosticReport` caches grouped `Categories` once at construction and
+   `DiagnosticReportFormatter` drops Compact LINQ/Join; repeated category
+   grouping becomes O(1) and zero-alloc (5K `Categories`×10: ~1.46 MB → 0 B;
+   ~958 µs → 3 ns); Compact allocation −18%; output/CLI/Tray unchanged.
 - [Phase 25.2 prefix comparer post-optimization validation](baselines/phase-25.2-prefix-comparer-validation.md)
   — two repeat runs of the optimized comparer (commit `614ee61`) vs the
   pre-change baseline (`f3af1f2`), run-to-run stability, scaling analysis,

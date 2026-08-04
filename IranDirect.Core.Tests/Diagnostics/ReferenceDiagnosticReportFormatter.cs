@@ -1,9 +1,16 @@
-using System.Linq;
 using System.Text;
+using IranDirect.Core.Diagnostics;
 
-namespace IranDirect.Core.Diagnostics;
+namespace IranDirect.Core.Tests.Diagnostics;
 
-public static class DiagnosticReportFormatter
+/// <summary>
+/// Test-only reference reproduction of the pre-change
+/// <see cref="DiagnosticReportFormatter"/> output. Mirrors the original
+/// implementation exactly (no StringBuilder capacity hint; Compact uses LINQ
+/// Where/Select + string.Join). Does not call the optimized formatter path.
+/// Used to assert byte-identical output after the optimization.
+/// </summary>
+public static class ReferenceDiagnosticReportFormatter
 {
     public static string Format(
         DiagnosticReport report,
@@ -11,57 +18,38 @@ public static class DiagnosticReportFormatter
     {
         return format switch
         {
-            DiagnosticFormat.Summary =>
-                FormatSummary(report),
-            DiagnosticFormat.Detailed =>
-                FormatDetailed(report),
-            DiagnosticFormat.Compact =>
-                FormatCompact(report),
+            DiagnosticFormat.Summary => FormatSummary(report),
+            DiagnosticFormat.Detailed => FormatDetailed(report),
+            DiagnosticFormat.Compact => FormatCompact(report),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(format))
         };
     }
 
-    private static string FormatSummary(
-        DiagnosticReport report)
+    private static string FormatSummary(DiagnosticReport report)
     {
         var sb = new StringBuilder();
-
         sb.Append("Health: ");
         sb.AppendLine(report.Healthy ? "OK" : "UNHEALTHY");
-
         sb.Append("Checks: ");
         sb.AppendLine(report.Results.Count.ToString());
-
         sb.Append("Passed: ");
         sb.AppendLine(report.PassedCount.ToString());
-
         sb.Append("Warnings: ");
         sb.AppendLine(report.WarningCount.ToString());
-
         sb.Append("Failed: ");
         sb.AppendLine(report.FailedCount.ToString());
-
         sb.Append("Highest severity: ");
-        sb.AppendLine(
-            report.HighestSeverity.ToString());
-
+        sb.AppendLine(report.HighestSeverity.ToString());
         return sb.ToString();
     }
 
-    private static string FormatDetailed(
-        DiagnosticReport report)
+    private static string FormatDetailed(DiagnosticReport report)
     {
-        // Capacity hint: fixed header (~140 chars) plus an estimate per
-        // result. Conservative over-allocation is harmless and only sizes
-        // the initial buffer; output text is unchanged.
-        var sb = new StringBuilder(
-            140 + report.Results.Count * 96);
-
+        var sb = new StringBuilder();
         sb.AppendLine("=== Diagnostic Report ===");
         sb.Append("Captured: ");
-        sb.AppendLine(
-            report.CapturedAt.ToString("o"));
+        sb.AppendLine(report.CapturedAt.ToString("o"));
         sb.Append("Health: ");
         sb.AppendLine(report.Healthy ? "OK" : "UNHEALTHY");
         sb.Append("Summary: ");
@@ -72,8 +60,7 @@ public static class DiagnosticReportFormatter
         sb.Append(report.FailedCount);
         sb.AppendLine(" failed");
         sb.Append("Highest severity: ");
-        sb.AppendLine(
-            report.HighestSeverity.ToString());
+        sb.AppendLine(report.HighestSeverity.ToString());
         sb.AppendLine();
 
         IReadOnlyDictionary<DiagnosticCategory,
@@ -85,8 +72,7 @@ public static class DiagnosticReportFormatter
         {
             if (!categories.TryGetValue(
                     category,
-                    out IReadOnlyList<DiagnosticResult>?
-                        results) ||
+                    out IReadOnlyList<DiagnosticResult>? results) ||
                 results.Count == 0)
             {
                 continue;
@@ -117,8 +103,7 @@ public static class DiagnosticReportFormatter
                 if (result.SuggestedAction is not null)
                 {
                     sb.Append("       -> ");
-                    sb.AppendLine(
-                        result.SuggestedAction);
+                    sb.AppendLine(result.SuggestedAction);
                 }
             }
 
@@ -128,11 +113,9 @@ public static class DiagnosticReportFormatter
         return sb.ToString();
     }
 
-    private static string FormatCompact(
-        DiagnosticReport report)
+    private static string FormatCompact(DiagnosticReport report)
     {
         var sb = new StringBuilder();
-
         sb.Append(report.Healthy ? "OK" : "FAIL");
         sb.Append(" | ");
         sb.Append(report.PassedCount);
