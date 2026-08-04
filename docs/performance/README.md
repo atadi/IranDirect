@@ -305,6 +305,12 @@ bytes and allocation count. Trust only full-mode numbers.
    `DiagnosticReportFormatter` drops Compact LINQ/Join; repeated category
    grouping becomes O(1) and zero-alloc (5K `Categories`×10: ~1.46 MB → 0 B;
    ~958 µs → 3 ns); Compact allocation −18%; output/CLI/Tray unchanged.
+- [Phase 30.2 planner second-pass allocation optimization](baselines/phase-30.2-planner-second-pass-optimization.md)
+   — folds the desired-identity pre-pass into the add passes so each computed
+   `Identity` is materialized once and the redundant per-category dedup sets
+   disappear, and replaces the global `OrderBy(Kind).ThenBy(Identity)` with
+   per-kind partition sorts; Mixed 50K allocation −24%, DuplicateInput −36%,
+   Gen2 down everywhere, exact ordering and semantics preserved.
 - [Phase 25.2 prefix comparer post-optimization validation](baselines/phase-25.2-prefix-comparer-validation.md)
   — two repeat runs of the optimized comparer (commit `614ee61`) vs the
   pre-change baseline (`f3af1f2`), run-to-run stability, scaling analysis,

@@ -23,19 +23,23 @@ public sealed class RuntimeChangeSetPlanner
                 snapshot.Observed.Routes,
                 route => route.Identity);
 
-        // Desired membership sets (case-insensitive). The removal passes
-        // only test membership, and the add passes only need
-        // first-occurrence dedup plus the observed-membership test, so a
-        // string HashSet is enough — we avoid materializing a full
-        // dictionary of desired route objects for every category.
+        // Desired membership sets (case-insensitive) are now filled by
+        // the add passes themselves. Identity is a computed interpolated
+        // property, so materializing it in a separate pre-pass and again
+        // during classification allocated every identity string twice and
+        // required a second per-category "already added" set with exactly
+        // the same first-occurrence semantics. A single traversal that
+        // uses the set's own Add result as the duplicate test produces
+        // the identical membership set and the identical change order
+        // while allocating each identity once.
         HashSet<string> desiredEndpointIds =
-            ToIdentitySet(
-                snapshot.Desired.EndpointRoutes,
-                route => route.Identity);
+            new(
+                snapshot.Desired.EndpointRoutes.Count,
+                StringComparer.OrdinalIgnoreCase);
         HashSet<string> desiredPrefixIds =
-            ToIdentitySet(
-                snapshot.Desired.PrefixRoutes,
-                route => route.Identity);
+            new(
+                snapshot.Desired.PrefixRoutes.Count,
+                StringComparer.OrdinalIgnoreCase);
 
         List<RuntimeChange> changes = [];
 
@@ -45,17 +49,23 @@ public sealed class RuntimeChangeSetPlanner
             desiredEndpointIds,
             changes);
 
+        int addEndpointEnd = changes.Count;
+
         RemoveUndesiredOwnedEndpointRoutes(
             desiredEndpointIds,
             observedRoutes,
             ownership,
             changes);
 
+        int removeEndpointEnd = changes.Count;
+
         AddMissingPrefixRoutes(
             snapshot.Desired.PrefixRoutes,
             observedRoutes,
             desiredPrefixIds,
             changes);
+
+        int addPrefixEnd = changes.Count;
 
         RemoveUndesiredOwnedPrefixRoutes(
             desiredPrefixIds,
@@ -65,13 +75,67 @@ public sealed class RuntimeChangeSetPlanner
 
         return new RuntimeChangeSet
         {
-            Changes = changes
-                .OrderBy(change => change.Kind)
-                .ThenBy(
-                    change => change.Identity,
-                    StringComparer.OrdinalIgnoreCase)
-                .ToArray()
+            Changes = SortAuthoritative(
+                changes,
+                addEndpointEnd,
+                removeEndpointEnd,
+                addPrefixEnd)
         };
+    }
+
+    /// <summary>
+    /// Reproduces <c>OrderBy(Kind).ThenBy(Identity, OrdinalIgnoreCase)</c>
+    /// without the LINQ sort pipeline. The four passes above append in
+    /// ascending <see cref="RuntimeChangeKind"/> order
+    /// (AddEndpointRoute, RemoveEndpointRoute, AddPrefixRoute,
+    /// RemovePrefixRoute), so the buffer is already partitioned by kind
+    /// and only needs an identity sort inside each partition. Identities
+    /// are unique within a partition — the add passes dedupe by identity
+    /// and the removal passes iterate an identity set — so the ordering
+    /// is a total order and does not depend on sort stability.
+    /// </summary>
+    private static RuntimeChange[] SortAuthoritative(
+        List<RuntimeChange> changes,
+        int addEndpointEnd,
+        int removeEndpointEnd,
+        int addPrefixEnd)
+    {
+        RuntimeChange[] ordered = [.. changes];
+
+        SortByIdentity(ordered, 0, addEndpointEnd);
+        SortByIdentity(ordered, addEndpointEnd, removeEndpointEnd);
+        SortByIdentity(ordered, removeEndpointEnd, addPrefixEnd);
+        SortByIdentity(ordered, addPrefixEnd, ordered.Length);
+
+        return ordered;
+    }
+
+    private static void SortByIdentity(
+        RuntimeChange[] ordered,
+        int start,
+        int end)
+    {
+        int length = end - start;
+        if (length < 2)
+        {
+            return;
+        }
+
+        Array.Sort(
+            ordered,
+            start,
+            length,
+            IdentityComparer.Instance);
+    }
+
+    private sealed class IdentityComparer : IComparer<RuntimeChange>
+    {
+        internal static readonly IdentityComparer Instance = new();
+
+        public int Compare(RuntimeChange? x, RuntimeChange? y) =>
+            StringComparer.OrdinalIgnoreCase.Compare(
+                x!.Identity,
+                y!.Identity);
     }
 
     private static Dictionary<string, T> BuildFirstOccurrenceLookup<T>(
@@ -94,36 +158,22 @@ public sealed class RuntimeChangeSetPlanner
         return lookup;
     }
 
-    private static HashSet<string> ToIdentitySet<T>(
-        IReadOnlyList<T> items,
-        Func<T, string> keySelector)
-    {
-        var set = new HashSet<string>(
-            items.Count,
-            StringComparer.OrdinalIgnoreCase);
-
-        foreach (T item in items)
-        {
-            set.Add(keySelector(item));
-        }
-
-        return set;
-    }
-
     private static void AddMissingEndpointRoutes(
         IReadOnlyList<DesiredEndpointRoute> desired,
         IReadOnlyDictionary<string, ObservedRoute> observed,
         HashSet<string> desiredIds,
         ICollection<RuntimeChange> changes)
     {
-        var added = new HashSet<string>(
-            StringComparer.OrdinalIgnoreCase);
-
         foreach (DesiredEndpointRoute route in desired)
         {
             string identity = route.Identity;
-            if (observed.ContainsKey(identity) ||
-                !added.Add(identity))
+
+            // First-occurrence semantics: only the first desired route
+            // for an identity can produce a change, and every desired
+            // identity still lands in the membership set for the
+            // subsequent removal pass.
+            if (!desiredIds.Add(identity) ||
+                observed.ContainsKey(identity))
             {
                 continue;
             }
@@ -180,14 +230,12 @@ public sealed class RuntimeChangeSetPlanner
         HashSet<string> desiredIds,
         ICollection<RuntimeChange> changes)
     {
-        var added = new HashSet<string>(
-            StringComparer.OrdinalIgnoreCase);
-
         foreach (DesiredPrefixRoute route in desired)
         {
             string identity = route.Identity;
-            if (observed.ContainsKey(identity) ||
-                !added.Add(identity))
+
+            if (!desiredIds.Add(identity) ||
+                observed.ContainsKey(identity))
             {
                 continue;
             }
