@@ -1,13 +1,23 @@
+using IranDirect.Core.Planning;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
 
-namespace IranDirect.Core.Planning;
+namespace IranDirect.Core.Tests.Planning;
 
-public sealed class ExecutionPreviewBuilder : IExecutionPreviewBuilder
+/// <summary>
+/// Test-only reference reproduction of the pre-change
+/// <see cref="ExecutionPreviewBuilder.Build"/> implementation. It maps each
+/// source step and then computes the summary in a separate pass, exactly as the
+/// original code did, so optimized output can be compared for exact equivalence.
+/// Do not use this in production code.
+/// </summary>
+public sealed class ReferenceExecutionPreviewBuilder :
+    IExecutionPreviewBuilder
 {
     private readonly TimeProvider _timeProvider;
 
-    public ExecutionPreviewBuilder(TimeProvider timeProvider)
+    public ReferenceExecutionPreviewBuilder(
+        TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
 
@@ -38,59 +48,20 @@ public sealed class ExecutionPreviewBuilder : IExecutionPreviewBuilder
             };
         }
 
-        // Pre-size the step list to the exact source count to avoid the
-        // internal growth reallocations a default List<T> would perform.
-        List<ExecutionPreviewStep> steps =
-            new(decision.ExecutionPlan.Steps.Count);
+        List<ExecutionPreviewStep> steps = [];
 
-        int createCount = 0;
-        int deleteCount = 0;
-        int vpnEndpointUpdates = 0;
-        int inventoryUpdates = 0;
-
-        // Single pass: map each source step and accumulate the summary
-        // counters inline, eliminating the separate summary enumeration.
         foreach (RuntimeExecutionStep step in
                  decision.ExecutionPlan.Steps)
         {
-            ExecutionPreviewStep mapped = MapStep(step);
-            steps.Add(mapped);
-
-            switch (mapped.Operation)
-            {
-                case ExecutionPreviewOperation.Create:
-                    createCount++;
-                    break;
-
-                case ExecutionPreviewOperation.Delete:
-                    deleteCount++;
-                    break;
-            }
-
-            if (mapped.Category ==
-                ExecutionPreviewCategory.VpnEndpoint)
-            {
-                vpnEndpointUpdates++;
-            }
-            else if (mapped.Category ==
-                     ExecutionPreviewCategory.Route)
-            {
-                inventoryUpdates++;
-            }
+            steps.Add(MapStep(step));
         }
+
+        ExecutionPreviewSummary summary = BuildSummary(steps);
 
         return new ExecutionPreview
         {
             CapturedAt = capturedAt,
-            Summary = new ExecutionPreviewSummary
-            {
-                CreateCount = createCount,
-                DeleteCount = deleteCount,
-                VerifyCount = 0,
-                InventoryUpdates = inventoryUpdates,
-                CustomRouteUpdates = 0,
-                VpnEndpointUpdates = vpnEndpointUpdates
-            },
+            Summary = summary,
             Steps = steps
         };
     }
@@ -154,6 +125,51 @@ public sealed class ExecutionPreviewBuilder : IExecutionPreviewBuilder
             Operation = operation,
             Target = target,
             Reason = reason
+        };
+    }
+
+    private static ExecutionPreviewSummary BuildSummary(
+        IReadOnlyList<ExecutionPreviewStep> steps)
+    {
+        int createCount = 0;
+        int deleteCount = 0;
+        int vpnEndpointUpdates = 0;
+        int inventoryUpdates = 0;
+
+        foreach (ExecutionPreviewStep step in steps)
+        {
+            switch (step.Operation)
+            {
+                case ExecutionPreviewOperation.Create:
+                    createCount++;
+                    break;
+
+                case ExecutionPreviewOperation.Delete:
+                    deleteCount++;
+                    break;
+            }
+
+            if (step.Category ==
+                ExecutionPreviewCategory.VpnEndpoint)
+            {
+                vpnEndpointUpdates++;
+            }
+
+            if (step.Category ==
+                ExecutionPreviewCategory.Route)
+            {
+                inventoryUpdates++;
+            }
+        }
+
+        return new ExecutionPreviewSummary
+        {
+            CreateCount = createCount,
+            DeleteCount = deleteCount,
+            VerifyCount = 0,
+            InventoryUpdates = inventoryUpdates,
+            CustomRouteUpdates = 0,
+            VpnEndpointUpdates = vpnEndpointUpdates
         };
     }
 }

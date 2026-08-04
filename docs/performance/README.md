@@ -289,6 +289,11 @@ bytes and allocation count. Trust only full-mode numbers.
    — repeat benchmarks confirming the UTF-8 export optimization is stable and
    exact-output compatible; exporter allocation ~75% lower with no regression,
    adopts add99ff as the new serialization baseline.
+- [Phase 29.1 execution preview builder allocation optimization](baselines/phase-29.1-execution-preview-optimization.md)
+   — single-pass `Build()` with pre-sized step list and inline summary counters;
+   `ExecutionPreview.Categories` cached on first access; `Build()` allocation
+   −21% at 50K and repeated category reads ~73–90% lower, exact mapping/order
+   preserved.
    — `DiagnosticReport` caches grouped `Categories` once at construction and
    `DiagnosticReportFormatter` drops Compact LINQ/Join; repeated category
    grouping becomes O(1) and zero-alloc (5K `Categories`×10: ~1.46 MB → 0 B;
