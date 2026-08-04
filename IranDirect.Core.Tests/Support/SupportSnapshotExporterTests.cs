@@ -601,7 +601,8 @@ public sealed class SupportSnapshotExporterTests
     }
 
     private sealed class CountingSerializer :
-        ISupportSnapshotSerializer
+        ISupportSnapshotSerializer,
+        ISupportSnapshotUtf8Serializer
     {
         private readonly SupportSnapshotSerializer _inner;
 
@@ -617,6 +618,12 @@ public sealed class SupportSnapshotExporterTests
         {
             CallCount++;
             return _inner.Serialize(snapshot);
+        }
+
+        public byte[] SerializeToUtf8Bytes(SupportSnapshot snapshot)
+        {
+            CallCount++;
+            return _inner.SerializeToUtf8Bytes(snapshot);
         }
     }
 }

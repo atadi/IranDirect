@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace IranDirect.Core.Support;
 
 public sealed class SupportSnapshotSerializer :
-    ISupportSnapshotSerializer
+    ISupportSnapshotSerializer,
+    ISupportSnapshotUtf8Serializer
 {
     private static readonly JsonSerializerOptions s_options =
         CreateOptions();
@@ -17,11 +18,15 @@ public sealed class SupportSnapshotSerializer :
             s_options);
     }
 
-    private static JsonSerializerOptions CreateOptions()
+    public byte[] SerializeToUtf8Bytes(SupportSnapshot snapshot)
     {
-        return new JsonSerializerOptions
-        {
-            WriteIndented = true
-        };
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        return JsonSerializer.SerializeToUtf8Bytes(
+            snapshot,
+            s_options);
     }
+
+    private static JsonSerializerOptions CreateOptions() =>
+        new() { WriteIndented = true };
 }

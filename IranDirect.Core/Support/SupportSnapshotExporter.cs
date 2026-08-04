@@ -1,20 +1,15 @@
-using System.Text;
-
 namespace IranDirect.Core.Support;
 
 public sealed class SupportSnapshotExporter :
     ISupportSnapshotExporter
 {
-    private static readonly UTF8Encoding s_utf8NoBom =
-        new(encoderShouldEmitUTF8Identifier: false);
-
     private readonly ISupportSnapshotProvider _provider;
-    private readonly ISupportSnapshotSerializer _serializer;
+    private readonly ISupportSnapshotUtf8Serializer _serializer;
     private readonly TimeProvider _timeProvider;
 
     public SupportSnapshotExporter(
         ISupportSnapshotProvider provider,
-        ISupportSnapshotSerializer serializer,
+        ISupportSnapshotUtf8Serializer serializer,
         TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
@@ -49,11 +44,11 @@ public sealed class SupportSnapshotExporter :
             await _provider.CaptureAsync(
                 cancellationToken);
 
-        string json = _serializer.Serialize(snapshot);
+        byte[] bytes = _serializer.SerializeToUtf8Bytes(snapshot);
 
         long bytesWritten = await WriteAtomicallyAsync(
             outputPath,
-            json,
+            bytes,
             options,
             cancellationToken);
 
@@ -68,7 +63,7 @@ public sealed class SupportSnapshotExporter :
 
     private static async Task<long> WriteAtomicallyAsync(
         string outputPath,
-        string content,
+        byte[] bytes,
         SupportSnapshotExportOptions options,
         CancellationToken cancellationToken)
     {
@@ -94,8 +89,6 @@ public sealed class SupportSnapshotExporter :
         {
             File.Delete(tempPath);
         }
-
-        byte[] bytes = s_utf8NoBom.GetBytes(content);
 
         bool tempCreated = false;
         bool moved = false;

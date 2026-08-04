@@ -281,6 +281,10 @@ bytes and allocation count. Trust only full-mode numbers.
    — repeat benchmarks confirming cached category access is O(1)/zero-alloc,
    construction is O(n) with no Gen2 at 5K, formatter output and serialization
    unchanged; adopts 474eb6a as the new diagnostics category baseline.
+- [Phase 28.1 support snapshot serializer allocation optimization](baselines/phase-28.1-support-snapshot-serializer-optimization.md)
+   — direct UTF-8 byte serialization for the export path removes the duplicate
+   string→UTF-8 re-encode; ~75% lower end-to-end exporter allocation, exact
+   JSON/byte contract preserved, serializer string API unchanged.
    — `DiagnosticReport` caches grouped `Categories` once at construction and
    `DiagnosticReportFormatter` drops Compact LINQ/Join; repeated category
    grouping becomes O(1) and zero-alloc (5K `Categories`×10: ~1.46 MB → 0 B;
