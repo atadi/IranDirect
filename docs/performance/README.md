@@ -311,6 +311,12 @@ bytes and allocation count. Trust only full-mode numbers.
    disappear, and replaces the global `OrderBy(Kind).ThenBy(Identity)` with
    per-kind partition sorts; Mixed 50K allocation −24%, DuplicateInput −36%,
    Gen2 down everywhere, exact ordering and semantics preserved.
+- [Phase 30.3 planner second-pass post-optimization validation](baselines/phase-30.3-planner-second-pass-validation.md)
+   — two repeat runs of the optimized planner (`b0b7484`) vs the pre-change
+   baseline (`4f0e444`); allocation reproduces to ≤0.003% (Mixed 50K −24.4%,
+   DuplicateInput 50K −35.8%), Gen2 lower everywhere, runtime deltas shown to
+   sit inside a 28–49% host jitter envelope; adopts `b0b7484` as the new
+   planner baseline and records identity-caching as the next opportunity.
 - [Phase 25.2 prefix comparer post-optimization validation](baselines/phase-25.2-prefix-comparer-validation.md)
   — two repeat runs of the optimized comparer (commit `614ee61`) vs the
   pre-change baseline (`f3af1f2`), run-to-run stability, scaling analysis,
