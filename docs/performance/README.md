@@ -270,9 +270,12 @@ bytes and allocation count. Trust only full-mode numbers.
   `f78d2e7`), reference-oracle equivalence strategy, before/after
   benchmark table, and remaining noise.
 - [Phase 26.1 diagnostic summary recalculation optimization](baselines/phase-26.1-diagnostic-summary-optimization.md)
-  — `DiagnosticReport` defensive copy + one-time `DiagnosticSummary`
-  computation; repeated summary/counter reads become O(1) and zero-alloc
-  (5K `Summary`×100: 3.95 ms → 40 ns); serialization/formatter unchanged.
+   — `DiagnosticReport` defensive copy + one-time `DiagnosticSummary`
+   computation; repeated summary/counter reads become O(1) and zero-alloc
+   (5K `Summary`×100: 3.95 ms → 40 ns); serialization/formatter unchanged.
+- [Phase 26.2 diagnostic summary repeat benchmark validation](baselines/phase-26.2-diagnostic-summary-validation.md)
+   — two repeat benchmark runs confirming Phase 26.1 optimization stability;
+   cached reads at sub-nanosecond with consistent run-to-run results.
 - [Phase 25.2 prefix comparer post-optimization validation](baselines/phase-25.2-prefix-comparer-validation.md)
   — two repeat runs of the optimized comparer (commit `614ee61`) vs the
   pre-change baseline (`f3af1f2`), run-to-run stability, scaling analysis,
