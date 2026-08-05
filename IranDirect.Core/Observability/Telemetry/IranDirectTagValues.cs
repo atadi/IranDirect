@@ -14,6 +14,10 @@ public static class IranDirectTagValues
     public const string NoChange = "no_change";
     public const string OutcomeUnknown = "unknown";
 
+    // operation
+    public const string OperationRuntimeCycle = "runtime_cycle";
+    public const string OperationPlanChanges = "plan_changes";
+
     // trigger
     public const string TriggerScheduled = "scheduled";
     public const string TriggerForced = "forced";

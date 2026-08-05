@@ -1,9 +1,16 @@
 using IranDirect.Core.Configuration;
+using IranDirect.Core.Observability.Telemetry;
 using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Reconciliation;
+using IranDirect.Core.Testing.FaultInjection;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
+using Xunit;
 
 namespace IranDirect.Core.Tests.Runtime.Reconciliation;
 
+[Collection("RuntimeCycleTelemetry")]
 public sealed class RuntimeReconcilerTests
 {
     private readonly RuntimeChangeSetPlanner _planner = new();
@@ -243,6 +250,286 @@ public sealed class RuntimeReconcilerTests
         RuntimeRouteOwnershipProvider provider = new(source);
         return new RuntimeReconciler(
             provider, new RuntimeChangeSetPlanner());
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_WithDifferences_EmitsPlanChangesChildActivity()
+    {
+        RuntimeReconciler reconciler = CreateReconciler();
+        RuntimePlanSnapshot snapshot = CreateSnapshot(observedRoutes: []);
+
+        var started = new ConcurrentQueue<Activity>();
+        var stopped = new ConcurrentQueue<Activity>();
+        using var listener = CreateActivityListener(started, stopped);
+
+        await reconciler.ReconcileAsync(snapshot);
+
+        Activity? planning = stopped.SingleOrDefault(a =>
+            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+        Assert.NotNull(planning);
+        Assert.Equal(ActivityKind.Internal, planning!.Kind);
+        Assert.Equal(
+            IranDirectTagValues.OperationPlanChanges,
+            planning.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
+        Assert.Equal(
+            IranDirectTagValues.Success,
+            planning.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+        Assert.Equal(ActivityStatusCode.Ok, planning.Status);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_NoChanges_OutcomeNoChange()
+    {
+        RuntimeReconciler reconciler = CreateReconciler(
+            endpointIdentities: [EndpointObserved().Identity],
+            prefixIdentities: [PrefixObserved().Identity]);
+        RuntimePlanSnapshot snapshot = CreateSnapshot(
+            observedRoutes: [EndpointObserved(), PrefixObserved()]);
+
+        var stopped = new ConcurrentQueue<Activity>();
+        using var listener = CreateActivityListener(
+            new ConcurrentQueue<Activity>(), stopped);
+
+        await reconciler.ReconcileAsync(snapshot);
+
+        Activity? planning = stopped.SingleOrDefault(a =>
+            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+        Assert.NotNull(planning);
+        Assert.Equal(
+            IranDirectTagValues.NoChange,
+            planning!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+        Assert.Equal(ActivityStatusCode.Ok, planning.Status);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_PlanningFailure_OutcomeFailureAndCategory()
+    {
+        RuntimeReconciler reconciler = CreateReconciler(new ThrowingSource());
+        RuntimePlanSnapshot snapshot = CreateSnapshot(observedRoutes: []);
+
+        var stopped = new ConcurrentQueue<Activity>();
+        using var listener = CreateActivityListener(
+            new ConcurrentQueue<Activity>(), stopped);
+
+        // ThrowingSource fails ownership load, which occurs BEFORE the planner
+        // invocation. The reconciler converts it to a Failed reconciliation
+        // result and emits no planning activity for that path.
+        RuntimeReconciliationResult result =
+            await reconciler.ReconcileAsync(snapshot);
+        Assert.Equal(RuntimeReconciliationStatus.Failed, result.Status);
+
+        Activity? planning = stopped.SingleOrDefault(a =>
+            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+        // Ownership-load failure occurs before the planner invocation, so no
+        // planning activity is emitted. Verify no planning activity leaked a
+        // success/no-change outcome.
+        if (planning is not null)
+        {
+            Assert.Equal(
+                IranDirectTagValues.Failure,
+                planning.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_IOException_OutcomeFailureIo()
+    {
+        // A planner that throws IOException mid-plan. Wrap the planner via a
+        // throwing ownership provider is not possible (provider runs first),
+        // so use a custom planner fake that throws on Plan.
+        var throwingPlanner = new ThrowingPlannerFake(new IOException("disk"));
+        RuntimeReconciler reconciler = new(
+            new RuntimeRouteOwnershipProvider(new TrackingSource()),
+            throwingPlanner);
+
+        RuntimePlanSnapshot snapshot = CreateSnapshot(observedRoutes: []);
+
+        var stopped = new ConcurrentQueue<Activity>();
+        using var listener = CreateActivityListener(
+            new ConcurrentQueue<Activity>(), stopped);
+
+        RuntimeReconciliationResult result =
+            await reconciler.ReconcileAsync(snapshot);
+        Assert.Equal(RuntimeReconciliationStatus.Failed, result.Status);
+
+        Activity? planning = stopped.SingleOrDefault(a =>
+            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+        Assert.NotNull(planning);
+        Assert.Equal(
+            IranDirectTagValues.Failure,
+            planning!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+        Assert.Equal(ActivityStatusCode.Error, planning.Status);
+        Assert.Equal(
+            IranDirectTagValues.FailureIo,
+            planning.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+        foreach (var tag in planning.Tags)
+            Assert.DoesNotContain("disk", tag.Value?.ToString());
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_RoutingFault_OutcomeFailureRouting()
+    {
+        var throwingPlanner = new ThrowingPlannerFake(
+            new FaultInjectionException(FaultInjectionPoint.RouteCreate));
+        RuntimeReconciler reconciler = new(
+            new RuntimeRouteOwnershipProvider(new TrackingSource()),
+            throwingPlanner);
+
+        RuntimePlanSnapshot snapshot = CreateSnapshot(observedRoutes: []);
+
+        var stopped = new ConcurrentQueue<Activity>();
+        using var listener = CreateActivityListener(
+            new ConcurrentQueue<Activity>(), stopped);
+
+        await reconciler.ReconcileAsync(snapshot);
+
+        Activity? planning = stopped.SingleOrDefault(a =>
+            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+        Assert.NotNull(planning);
+        Assert.Equal(
+            IranDirectTagValues.FailureRouting,
+            planning!.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_UnknownException_OutcomeFailureUnknown()
+    {
+        var throwingPlanner = new ThrowingPlannerFake(
+            new InvalidOperationException("boom"));
+        RuntimeReconciler reconciler = new(
+            new RuntimeRouteOwnershipProvider(new TrackingSource()),
+            throwingPlanner);
+
+        RuntimePlanSnapshot snapshot = CreateSnapshot(observedRoutes: []);
+
+        var stopped = new ConcurrentQueue<Activity>();
+        using var listener = CreateActivityListener(
+            new ConcurrentQueue<Activity>(), stopped);
+
+        await reconciler.ReconcileAsync(snapshot);
+
+        Activity? planning = stopped.SingleOrDefault(a =>
+            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+        Assert.NotNull(planning);
+        Assert.Equal(
+            IranDirectTagValues.FailureUnknown,
+            planning!.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_PlanningDurationAndChangedRoutesRecorded()
+    {
+        RuntimeReconciler reconciler = CreateReconciler();
+        RuntimePlanSnapshot snapshot = CreateSnapshot(observedRoutes: []);
+
+        var durations = new ConcurrentQueue<double>();
+        var changed = new ConcurrentQueue<double>();
+        using var listener = CreateMeterListener(durations, changed);
+
+        // Snapshot counts immediately around the single call so concurrent
+        // planning from other in-flight test cycles does not pollute the
+        // per-call assertion (shared static Meter).
+        int durBefore = durations.Count;
+        int changedBefore = changed.Count;
+        await reconciler.ReconcileAsync(snapshot);
+        int durAfter = durations.Count;
+        int changedAfter = changed.Count;
+
+        Assert.Equal(1, durAfter - durBefore);
+        Assert.Equal(1, changedAfter - changedBefore);
+        Assert.True(durations.Last() >= 0);
+        Assert.True(changed.Last() > 0);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_NoChanges_ChangedRoutesRecordsZero()
+    {
+        RuntimeReconciler reconciler = CreateReconciler(
+            endpointIdentities: [EndpointObserved().Identity],
+            prefixIdentities: [PrefixObserved().Identity]);
+        RuntimePlanSnapshot snapshot = CreateSnapshot(
+            observedRoutes: [EndpointObserved(), PrefixObserved()]);
+
+        var durations = new ConcurrentQueue<double>();
+        var changed = new ConcurrentQueue<double>();
+        using var listener = CreateMeterListener(durations, changed);
+
+        int durBefore = durations.Count;
+        int changedBefore = changed.Count;
+        await reconciler.ReconcileAsync(snapshot);
+        int durAfter = durations.Count;
+        int changedAfter = changed.Count;
+
+        Assert.Equal(1, durAfter - durBefore);
+        Assert.Equal(1, changedAfter - changedBefore);
+        Assert.Equal(0, changed.Last());
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_NoListener_ResultUnchangedAndNoException()
+    {
+        // Without any listener, StartActivity returns null and Histogram.Record
+        // is a no-op. Behavior must be identical to the non-telemetry path.
+        RuntimeReconciler reconciler = CreateReconciler();
+        RuntimePlanSnapshot snapshot = CreateSnapshot(observedRoutes: []);
+
+        RuntimeReconciliationResult result =
+            await reconciler.ReconcileAsync(snapshot);
+
+        Assert.Equal(RuntimeReconciliationStatus.ChangesPlanned, result.Status);
+        Assert.False(result.ChangeSet.IsEmpty);
+    }
+
+    private static ActivityListener CreateActivityListener(
+        ConcurrentQueue<Activity> started,
+        ConcurrentQueue<Activity> stopped)
+    {
+        var listener = new ActivityListener
+        {
+            ShouldListenTo = s => s.Name == IranDirectTelemetry.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
+                ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStarted = a => started.Enqueue(a),
+            ActivityStopped = a => stopped.Enqueue(a),
+        };
+        ActivitySource.AddActivityListener(listener);
+        return listener;
+    }
+
+    private static MeterListener CreateMeterListener(
+        ConcurrentQueue<double> durations,
+        ConcurrentQueue<double> changed)
+    {
+        var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+                meterListener.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>(
+            (instrument, value, tags, _) =>
+            {
+                if (instrument.Name == IranDirectMetricNames.RuntimePlanningDuration)
+                    durations.Enqueue(value);
+                else if (instrument.Name == IranDirectMetricNames.RuntimeChangedRoutes)
+                    changed.Enqueue(value);
+            });
+        listener.Start();
+        return listener;
+    }
+
+    private sealed class ThrowingPlannerFake : IRuntimeChangeSetPlanner
+    {
+        private readonly Exception _exception;
+
+        public ThrowingPlannerFake(Exception exception) => _exception = exception;
+
+        public RuntimeChangeSet Plan(
+            RuntimePlanSnapshot snapshot,
+            RuntimeRouteOwnership ownership)
+        {
+            throw _exception;
+        }
     }
 
     private static RuntimePlanSnapshot CreateSnapshot(

@@ -13,6 +13,11 @@ Telemetry architecture and instrumentation plan for IranDirect.
   `IranDirect.RuntimeCycle` activity, four counters, one duration histogram,
   bounded outcome/trigger/failure-category tags; controller boundary, no child
   spans, no OTel packages, profiler-independent.
+- [Phase 32.4 runtime planning telemetry](phase-32.4-runtime-planning-telemetry.md)
+  — instruments change-set planning as a child `Runtime.PlanChanges` activity
+  under the runtime-cycle root; planning-duration + changed-routes histograms;
+  bounded outcome/failure-category; reconciler owner, no planner lifecycle
+  counters, no `change_bucket` (not approved).
 
 Status: contracts implemented; workflows not yet instrumented. Implementation
 continues at Phase 32.3.

@@ -547,10 +547,10 @@ public sealed class RuntimeCycleTelemetryTests
         h.ExecutorResult = RuntimeExecutionResult.NoExecutionRequired();
 
         // Warm-up so JIT/static init costs are excluded.
-        h.Controller.RunCycleAsync().GetAwaiter().GetResult();
+        await h.Controller.RunCycleAsync();
 
         long before = GC.GetAllocatedBytesForCurrentThread();
-        h.Controller.RunCycleAsync().GetAwaiter().GetResult();
+        await h.Controller.RunCycleAsync();
         long after = GC.GetAllocatedBytesForCurrentThread();
 
         long delta = after - before;

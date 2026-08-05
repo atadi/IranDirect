@@ -335,6 +335,8 @@ builder.Services.AddSingleton<
     InventoryRouteOwnershipSource>();
 builder.Services.AddSingleton<RuntimeRouteOwnershipProvider>();
 builder.Services.AddSingleton<RuntimeChangeSetPlanner>();
+builder.Services.AddSingleton<IRuntimeChangeSetPlanner>(
+    sp => sp.GetRequiredService<RuntimeChangeSetPlanner>());
 builder.Services.AddSingleton<
     IRuntimeReconciler,
     RuntimeReconciler>();

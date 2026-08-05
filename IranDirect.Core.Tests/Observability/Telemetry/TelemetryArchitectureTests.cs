@@ -118,6 +118,14 @@ public sealed class TelemetryArchitectureTests
             foreach (var file in Directory.GetFiles(
                          Path.Combine(RepoRoot(), dir), "*.cs", SearchOption.AllDirectories))
             {
+                // RuntimeReconciler is the approved planning-telemetry owner;
+                // planner models and the planner implementation itself must
+                // stay telemetry-free (verified by
+                // PlannerModelsAndPlannerImplementation_AreTelemetryFree).
+                if (file.Replace('\\', '/').EndsWith(
+                        "Runtime/Reconciliation/RuntimeReconciler.cs"))
+                    continue;
+
                 string content = File.ReadAllText(file);
                 Assert.DoesNotContain(
                     "Observability.Telemetry",
@@ -182,7 +190,7 @@ public sealed class TelemetryArchitectureTests
 
             string content = File.ReadAllText(file);
             if (content.Contains("StartActivity(") &&
-                content.Contains("RuntimeCycle"))
+                content.Contains("IranDirectActivityNames.RuntimeCycle"))
                 runtimeCycleStarts++;
         }
 
@@ -275,6 +283,92 @@ public sealed class TelemetryArchitectureTests
                 _output.WriteLine(m);
             Assert.Fail($"{matches.Count} workflow instrumentation match(es) found");
         }
+    }
+
+    [Fact]
+    public void ExactlyOnePlanningStartActivity_NoChildSpansBeyondPlanChanges()
+    {
+        // Production must start exactly one Runtime.PlanChanges activity, and
+        // no child spans beneath it. Count StartActivity( occurrences that
+        // reference RuntimePlanChanges (Telemetry foundation is the home of
+        // the one approved call; tests excluded).
+        string root = RepoRoot();
+        int planStarts = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            if (content.Contains("StartActivity(") &&
+                content.Contains("RuntimePlanChanges"))
+                planStarts++;
+        }
+
+        Assert.Equal(1, planStarts);
+
+        // No production StartActivity with a non-constant string name.
+        var matches = new List<string>();
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            foreach (var line in File.ReadAllLines(file))
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(
+                        line, @"StartActivity\s*\(\s*\"""))
+                    matches.Add($"{file}: {line.Trim()}");
+            }
+        }
+        if (matches.Count != 0)
+        {
+            foreach (var m in matches.Take(20))
+                _output.WriteLine(m);
+            Assert.Fail($"{matches.Count} dynamic span name(s) found");
+        }
+    }
+
+    [Fact]
+    public void ExactlyOnePlanningDurationAndChangedRoutesHistograms()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RuntimePlanningTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int durations = System.Text.RegularExpressions.Regex.Matches(
+            content, @"Meter\.CreateHistogram<double>").Count;
+        Assert.Equal(2, durations); // planning.duration + changed_routes
+
+        // No planner lifecycle counters invented.
+        Assert.DoesNotContain("planner.started", content);
+        Assert.DoesNotContain("planner.completed", content);
+        Assert.DoesNotContain("planner.failed", content);
+        Assert.DoesNotContain("CreateCounter", content);
+    }
+
+    [Fact]
+    public void PlannerModelsAndPlannerImplementation_AreTelemetryFree()
+    {
+        // RuntimeChangeSetPlanner itself must remain free of telemetry
+        // references (only a non-sealed/virtual Plan seam was added for tests).
+        string plannerPath = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Runtime/Reconciliation/RuntimeChangeSetPlanner.cs");
+        string content = File.ReadAllText(plannerPath);
+        Assert.DoesNotContain("Observability.Telemetry", content);
+        Assert.DoesNotContain("StartActivity", content);
+        Assert.DoesNotContain("Meter", content);
     }
 
     private static string RepoRoot()

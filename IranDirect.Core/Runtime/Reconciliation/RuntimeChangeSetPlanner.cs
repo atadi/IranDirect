@@ -1,6 +1,6 @@
 namespace IranDirect.Core.Runtime.Reconciliation;
 
-public sealed class RuntimeChangeSetPlanner
+public sealed class RuntimeChangeSetPlanner : IRuntimeChangeSetPlanner
 {
     public RuntimeChangeSet Plan(
         RuntimePlanSnapshot snapshot,

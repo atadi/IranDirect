@@ -1,13 +1,15 @@
 namespace IranDirect.Core.Runtime.Reconciliation;
 
+using IranDirect.Core.Observability.Telemetry;
+
 public sealed class RuntimeReconciler : IRuntimeReconciler
 {
     private readonly RuntimeRouteOwnershipProvider _ownershipProvider;
-    private readonly RuntimeChangeSetPlanner _changeSetPlanner;
+    private readonly IRuntimeChangeSetPlanner _changeSetPlanner;
 
     public RuntimeReconciler(
         RuntimeRouteOwnershipProvider ownershipProvider,
-        RuntimeChangeSetPlanner changeSetPlanner)
+        IRuntimeChangeSetPlanner changeSetPlanner)
     {
         _ownershipProvider = ownershipProvider;
         _changeSetPlanner = changeSetPlanner;
@@ -46,15 +48,26 @@ public sealed class RuntimeReconciler : IRuntimeReconciler
 
         RuntimeChangeSet changeSet;
 
-        try
+        using (RuntimePlanningTelemetryScope planning =
+            RuntimePlanningTelemetry.Start())
         {
-            changeSet = _changeSetPlanner.Plan(
-                snapshot, ownership);
-        }
-        catch (Exception ex)
-        {
-            return RuntimeReconciliationResult.Failed(
-                [$"Change planning failed: {ex.Message}"]);
+            try
+            {
+                changeSet = _changeSetPlanner.Plan(
+                    snapshot, ownership);
+                planning.CompleteSuccess(changeSet.Count);
+                RuntimePlanningTelemetry.RecordChangedRoutes(
+                    changeSet.Count > 0
+                        ? IranDirectTagValues.Success
+                        : IranDirectTagValues.NoChange,
+                    changeSet.Count);
+            }
+            catch (Exception ex)
+            {
+                planning.CompleteFailure(ex);
+                return RuntimeReconciliationResult.Failed(
+                    [$"Change planning failed: {ex.Message}"]);
+            }
         }
 
         if (changeSet.IsEmpty)
