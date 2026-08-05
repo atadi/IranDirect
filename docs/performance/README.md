@@ -317,6 +317,12 @@ bytes and allocation count. Trust only full-mode numbers.
    DuplicateInput 50K −35.8%), Gen2 lower everywhere, runtime deltas shown to
    sit inside a 28–49% host jitter envelope; adopts `b0b7484` as the new
    planner baseline and records identity-caching as the next opportunity.
+- [Phase 31.1 route identity caching design and compatibility analysis](baselines/phase-31.1-route-identity-caching-analysis.md)
+   — evaluates caching route `Identity` on the model types; identity strings
+   are 26–80% of remaining planner allocation (88 B each) but Phase 30.2
+   already reduced the planner to one read per route, so caching saves ~0%,
+   and a lazy cache is proven to return a **stale identity after `with`**.
+   **No-change decision: identity caching rejected, planner optimization stops.**
 - [Phase 25.2 prefix comparer post-optimization validation](baselines/phase-25.2-prefix-comparer-validation.md)
   — two repeat runs of the optimized comparer (commit `614ee61`) vs the
   pre-change baseline (`f3af1f2`), run-to-run stability, scaling analysis,
