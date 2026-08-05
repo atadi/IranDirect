@@ -29,7 +29,13 @@ Telemetry architecture and instrumentation plan for IranDirect.
   `Routes.Delete` child activities under `Runtime.Execute`; three route-operation
   counters + one system-call duration histogram; bounded operation/change-kind/
   route-kind tags; no per-route spans or metrics, no OpenTelemetry packages.
+- [Phase 32.7 prefix update and DNS telemetry](phase-32.7-prefix-and-dns-telemetry.md)
+  — instruments the official prefix update check (`IranDirect.PrefixUpdateCheck`,
+  HEAD→optional GET→optional Compare) and the custom-route DNS refresh
+  (`IranDirect.CustomRouteRefresh`, cache-read→resolve→cache-write); approved
+  prefix + DNS counters and duration histograms; bounded operation/source/outcome/
+  cache-state/trigger/failure-category tags; no per-prefix or per-address spans,
+  no URLs/domains/IPs attached, no OpenTelemetry packages.
 
-Status: contracts implemented; runtime cycle, planning, execution, and the native
-route boundary instrumented. Implementation continues with the remaining
-runtime-cycle child operations.
+Status: contracts implemented; runtime cycle, planning, execution, the native
+route boundary, and the prefix/DNS network workflows instrumented.

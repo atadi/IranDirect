@@ -633,6 +633,270 @@ public sealed class TelemetryArchitectureTests
         Assert.DoesNotContain("Meter.Create", content);
     }
 
+    [Fact]
+    public void PrefixUpdateTelemetry_ExactlyOneRootNoPerPrefixSpans()
+    {
+        // All PrefixUpdateCheck / Prefix.* activities must originate from the
+        // two approved helper files. Count production files that reference a
+        // Prefix activity name AND a StartActivity( call.
+        string root = RepoRoot();
+        int files = 0;
+        int startCalls = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            bool referencesPrefix = content.Contains("PrefixUpdateCheck") ||
+                content.Contains("PrefixHttpHead") ||
+                content.Contains("PrefixHttpGet") ||
+                content.Contains("PrefixCompare") ||
+                content.Contains("PrefixPersistMetadata");
+            if (referencesPrefix && content.Contains("StartActivity("))
+            {
+                files++;
+                startCalls += System.Text.RegularExpressions.Regex
+                    .Matches(content, @"StartActivity\s*\(").Count;
+            }
+        }
+
+        Assert.Equal(1, files);   // PrefixUpdateTelemetry.cs only
+        // The helper has exactly TWO literal StartActivity( calls: one for the
+        // root PrefixUpdateCheck span, and one shared StartChild(...) used by
+        // the Head/Get/Compare children. No per-prefix StartActivity exists.
+        Assert.Equal(2, startCalls);
+    }
+
+    [Fact]
+    public void PrefixUpdateTelemetry_UsesApprovedActivityConstants()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/PrefixUpdateTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectActivityNames.PrefixUpdateCheck", content);
+        Assert.Contains("IranDirectActivityNames.PrefixHttpHead", content);
+        Assert.Contains("IranDirectActivityNames.PrefixHttpGet", content);
+        Assert.Contains("IranDirectActivityNames.PrefixCompare", content);
+    }
+
+    [Fact]
+    public void PrefixUpdateTelemetry_ExactlyOneCounterAndOneHistogram()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/PrefixUpdateTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int counters = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateCounter<long>").Count;
+        int histograms = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateHistogram<double>").Count;
+
+        Assert.Equal(1, counters);  // prefix.checks
+        Assert.Equal(1, histograms); // prefix.check.duration
+
+        Assert.Contains(
+            "IranDirectMetricNames.PrefixChecks", content);
+        Assert.Contains(
+            "IranDirectMetricNames.PrefixCheckDuration", content);
+    }
+
+    [Fact]
+    public void PrefixUpdateTelemetry_OnlyApprovedTags_NoProhibited()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/PrefixUpdateTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectTagNames.Operation", content);
+        Assert.Contains("IranDirectTagNames.Outcome", content);
+        Assert.Contains("IranDirectTagNames.Source", content);
+        Assert.Contains("IranDirectTagNames.Trigger", content);
+
+        foreach (var tag in IranDirectTagNames.Prohibited)
+        {
+            Assert.DoesNotContain($"\"{tag}\"", content);
+        }
+    }
+
+    [Fact]
+    public void PrefixUpdateChecker_OnlyUsesTelemetryHelpers()
+    {
+        // The owner may call the dedicated telemetry helpers but must not
+        // create activities/instruments itself.
+        string path = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Prefixes/OfficialIranPrefixUpdateChecker.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("PrefixUpdateTelemetry.StartCheck", content);
+        Assert.DoesNotContain("StartActivity(", content);
+        Assert.DoesNotContain("Meter.Create", content);
+        Assert.DoesNotContain("new ActivitySource", content);
+    }
+
+    [Fact]
+    public void PrefixDatasetComparer_RemainsTelemetryFree()
+    {
+        string path = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Prefixes/PrefixDatasetComparer.cs");
+        string content = File.ReadAllText(path);
+        Assert.DoesNotContain("Observability.Telemetry", content);
+        Assert.DoesNotContain("StartActivity", content);
+        Assert.DoesNotContain("Meter", content);
+    }
+
+    [Fact]
+    public void CustomRouteRefreshTelemetry_ExactlyOneRootNoPerAddressSpans()
+    {
+        string root = RepoRoot();
+        int files = 0;
+        int startCalls = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            bool referencesDns = content.Contains("CustomRouteRefresh") ||
+                content.Contains("DnsCacheRead") ||
+                content.Contains("DnsResolve") ||
+                content.Contains("DnsCacheWrite");
+            if (referencesDns && content.Contains("StartActivity("))
+            {
+                files++;
+                startCalls += System.Text.RegularExpressions.Regex
+                    .Matches(content, @"StartActivity\s*\(").Count;
+            }
+        }
+
+        Assert.Equal(1, files);   // CustomRouteRefreshTelemetry.cs only
+        // The helper has exactly TWO literal StartActivity( calls: one for the
+        // root CustomRouteRefresh span, and one shared StartChild(...) used by
+        // the CacheRead/Resolve/CacheWrite children. No per-address
+        // StartActivity exists.
+        Assert.Equal(2, startCalls);
+    }
+
+    [Fact]
+    public void CustomRouteRefreshTelemetry_UsesApprovedActivityConstants()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/CustomRouteRefreshTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectActivityNames.CustomRouteRefresh", content);
+        Assert.Contains("IranDirectActivityNames.DnsCacheRead", content);
+        Assert.Contains("IranDirectActivityNames.DnsResolve", content);
+        Assert.Contains("IranDirectActivityNames.DnsCacheWrite", content);
+    }
+
+    [Fact]
+    public void CustomRouteRefreshTelemetry_ExactlyOneLookupCounterAndHistogram()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/CustomRouteRefreshTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int counters = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateCounter<long>").Count;
+        int histograms = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateHistogram<double>").Count;
+
+        Assert.Equal(1, counters);  // dns.lookups
+        Assert.Equal(1, histograms); // dns.lookup.duration
+
+        Assert.Contains("IranDirectMetricNames.DnsLookups", content);
+        Assert.Contains("IranDirectMetricNames.DnsLookupDuration", content);
+        Assert.DoesNotContain("IranDirectMetricNames.DnsRefreshes", content);
+        Assert.DoesNotContain("IranDirectMetricNames.DnsRefreshDuration", content);
+    }
+
+    [Fact]
+    public void CustomRouteRefreshTelemetry_OnlyApprovedTags_NoProhibited()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/CustomRouteRefreshTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectTagNames.Operation", content);
+        Assert.Contains("IranDirectTagNames.Outcome", content);
+        Assert.Contains("IranDirectTagNames.Source", content);
+        Assert.Contains("IranDirectTagNames.CacheState", content);
+
+        foreach (var tag in IranDirectTagNames.Prohibited)
+        {
+            Assert.DoesNotContain($"\"{tag}\"", content);
+        }
+    }
+
+    [Fact]
+    public void CustomRouteResolver_OnlyUsesTelemetryHelpers()
+    {
+        string path = Path.Combine(
+            RepoRoot(), "IranDirect.Core/CustomRoutes/CustomRouteResolver.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("CustomRouteRefreshTelemetry.StartRefresh", content);
+        Assert.DoesNotContain("StartActivity(", content);
+        Assert.DoesNotContain("Meter.Create", content);
+        Assert.DoesNotContain("new ActivitySource", content);
+    }
+
+    [Fact]
+    public void JsonStore_FreeOfTelemetryReferences()
+    {
+        string storeDir = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Persistence/JsonStore");
+        if (!Directory.Exists(storeDir))
+        {
+            storeDir = Path.Combine(
+                RepoRoot(), "IranDirect.Core/Persistence");
+        }
+        foreach (var file in Directory.GetFiles(
+                     storeDir, "JsonStore.cs", SearchOption.AllDirectories))
+        {
+            string content = File.ReadAllText(file);
+            Assert.DoesNotContain("Observability.Telemetry", content);
+            Assert.DoesNotContain("StartActivity", content);
+            Assert.DoesNotContain("Meter", content);
+        }
+    }
+
+    [Fact]
+    public void NoOpenTelemetryPackagesOrExporters()
+    {
+        foreach (var project in new[]
+                 {
+                     "IranDirect.Core",
+                     "IranDirect.Service",
+                 })
+        {
+            string file = Path.Combine(RepoRoot(), project, $"{project}.csproj");
+            string content = File.ReadAllText(file);
+            Assert.DoesNotContain(
+                "OpenTelemetry", content, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(
+                "Exporter", content, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     private static string RepoRoot()
     {
         string? dir = AppContext.BaseDirectory;

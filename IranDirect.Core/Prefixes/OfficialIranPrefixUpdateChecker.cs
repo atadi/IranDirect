@@ -1,4 +1,5 @@
 using System.Net;
+using IranDirect.Core.Observability.Telemetry;
 using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Prefixes;
@@ -33,6 +34,9 @@ public sealed class OfficialIranPrefixUpdateChecker :
     {
         DateTimeOffset checkedAt = _timeProvider.GetUtcNow();
 
+        PrefixUpdateCheckResult result;
+        using var scope = PrefixUpdateTelemetry.StartCheck();
+
         PrefixSourceMetadata? current;
         try
         {
@@ -42,27 +46,32 @@ public sealed class OfficialIranPrefixUpdateChecker :
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
         {
+            scope.CompleteCancelled();
             throw;
         }
         catch (Exception ex)
         {
-            return new PrefixUpdateCheckResult
+            result = new PrefixUpdateCheckResult
             {
                 Status = PrefixUpdateCheckStatus.Unknown,
                 CheckedAt = checkedAt,
                 Reason = Truncate(
                     $"Local metadata unavailable: {ex.Message}")
             };
+            scope.Complete(result.Status);
+            return result;
         }
 
         if (current is null)
         {
-            return new PrefixUpdateCheckResult
+            result = new PrefixUpdateCheckResult
             {
                 Status = PrefixUpdateCheckStatus.Unknown,
                 CheckedAt = checkedAt,
                 Reason = "No local metadata available."
             };
+            scope.Complete(result.Status);
+            return result;
         }
 
         try
@@ -73,18 +82,26 @@ public sealed class OfficialIranPrefixUpdateChecker :
             timeout.CancelAfter(_options.Timeout);
 
             PrefixUpdateCheckRemoteMetadata remote =
-                await ProbeRemoteAsync(timeout.Token);
+                await ProbeRemoteAsync(scope, timeout.Token);
 
-            return Compare(current, remote, checkedAt);
+            bool canCompare = remote.ETag is not null
+                || remote.LastModified is not null
+                || remote.ContentLength is not null;
+            using var compareScope = canCompare
+                ? scope.StartCompare()
+                : null;
+            result = Compare(current, remote, checkedAt);
+            compareScope?.CompleteSuccess();
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
         {
+            scope.CompleteCancelled();
             throw;
         }
         catch (OperationCanceledException)
         {
-            return new PrefixUpdateCheckResult
+            result = new PrefixUpdateCheckResult
             {
                 Status = PrefixUpdateCheckStatus.Failed,
                 CurrentMetadata = current,
@@ -92,10 +109,12 @@ public sealed class OfficialIranPrefixUpdateChecker :
                 Reason = $"Remote check timed out after " +
                     $"{_options.Timeout.TotalSeconds:0.#} seconds."
             };
+            scope.Complete(result.Status);
+            return result;
         }
         catch (Exception ex)
         {
-            return new PrefixUpdateCheckResult
+            result = new PrefixUpdateCheckResult
             {
                 Status = PrefixUpdateCheckStatus.Failed,
                 CurrentMetadata = current,
@@ -103,44 +122,17 @@ public sealed class OfficialIranPrefixUpdateChecker :
                 Reason = Truncate(
                     $"Remote check failed: {ex.Message}")
             };
+            scope.CompleteFailure(ex);
+            return result;
         }
+
+        scope.Complete(result.Status);
+        return result;
     }
 
     private async Task<PrefixUpdateCheckRemoteMetadata>
-        ProbeRemoteAsync(CancellationToken cancellationToken)
-    {
-        if (FaultInjectionResolver.ShouldFail(
-                _faultPolicy,
-                FaultInjectionPoint.HttpRequest))
-        {
-            throw new FaultInjectionException(
-                FaultInjectionPoint.HttpRequest);
-        }
-
-        using HttpRequestMessage headRequest = new(
-            HttpMethod.Head,
-            OfficialIranPrefixSource.Descriptor.Uri);
-
-        using HttpResponseMessage headResponse =
-            await _httpClient.SendAsync(
-                headRequest,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-
-        if (headResponse.StatusCode == HttpStatusCode.MethodNotAllowed
-            || headResponse.StatusCode == HttpStatusCode.NotImplemented)
-        {
-            return await FetchRemoteMetadataAsync(
-                cancellationToken);
-        }
-
-        headResponse.EnsureSuccessStatusCode();
-
-        return ReadMetadata(headResponse);
-    }
-
-    private async Task<PrefixUpdateCheckRemoteMetadata>
-        FetchRemoteMetadataAsync(
+        ProbeRemoteAsync(
+            PrefixUpdateTelemetry.PrefixCheckScope scope,
             CancellationToken cancellationToken)
     {
         if (FaultInjectionResolver.ShouldFail(
@@ -151,15 +143,77 @@ public sealed class OfficialIranPrefixUpdateChecker :
                 FaultInjectionPoint.HttpRequest);
         }
 
-        using HttpResponseMessage response =
-            await _httpClient.GetAsync(
-                OfficialIranPrefixSource.Descriptor.Uri,
+        using HttpResponseMessage headResponse =
+            await SendHeadAsync(scope, cancellationToken);
+
+        if (headResponse.StatusCode == HttpStatusCode.MethodNotAllowed
+            || headResponse.StatusCode == HttpStatusCode.NotImplemented)
+        {
+            return await FetchRemoteMetadataAsync(
+                scope, cancellationToken);
+        }
+
+        headResponse.EnsureSuccessStatusCode();
+
+        return ReadMetadata(headResponse);
+    }
+
+    private async Task<HttpResponseMessage> SendHeadAsync(
+        PrefixUpdateTelemetry.PrefixCheckScope scope,
+        CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage headRequest = new(
+            HttpMethod.Head,
+            OfficialIranPrefixSource.Descriptor.Uri);
+
+        using var headScope = scope.StartHead();
+        try
+        {
+            HttpResponseMessage headResponse = await _httpClient.SendAsync(
+                headRequest,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
+            headScope.CompleteSuccess();
+            return headResponse;
+        }
+        catch (Exception ex)
+        {
+            headScope.CompleteFailure(ex);
+            throw;
+        }
+    }
 
-        response.EnsureSuccessStatusCode();
+    private async Task<PrefixUpdateCheckRemoteMetadata>
+        FetchRemoteMetadataAsync(
+            PrefixUpdateTelemetry.PrefixCheckScope scope,
+            CancellationToken cancellationToken)
+    {
+        if (FaultInjectionResolver.ShouldFail(
+                _faultPolicy,
+                FaultInjectionPoint.HttpRequest))
+        {
+            throw new FaultInjectionException(
+                FaultInjectionPoint.HttpRequest);
+        }
 
-        return ReadMetadata(response);
+        using var getScope = scope.StartGet();
+        try
+        {
+            using HttpResponseMessage response =
+                await _httpClient.GetAsync(
+                    OfficialIranPrefixSource.Descriptor.Uri,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+            response.EnsureSuccessStatusCode();
+            getScope.CompleteSuccess();
+            return ReadMetadata(response);
+        }
+        catch (Exception ex)
+        {
+            getScope.CompleteFailure(ex);
+            throw;
+        }
     }
 
     private static PrefixUpdateCheckRemoteMetadata ReadMetadata(

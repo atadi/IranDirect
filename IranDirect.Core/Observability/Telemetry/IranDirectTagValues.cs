@@ -22,6 +22,19 @@ public static class IranDirectTagValues
     public const string OperationCreateRoutes = "create_routes";
     public const string OperationDeleteRoutes = "delete_routes";
 
+    // prefix operations
+    public const string OperationPrefixUpdateCheck = "prefix_update_check";
+    public const string OperationPrefixHttpHead = "prefix_http_head";
+    public const string OperationPrefixHttpGet = "prefix_http_get";
+    public const string OperationPrefixCompare = "prefix_compare";
+    public const string OperationPrefixPersistMetadata = "prefix_persist_metadata";
+
+    // dns / custom-route operations
+    public const string OperationCustomRouteRefresh = "custom_route_refresh";
+    public const string OperationDnsCacheRead = "dns_cache_read";
+    public const string OperationDnsResolve = "dns_resolve";
+    public const string OperationDnsCacheWrite = "dns_cache_write";
+
     // trigger
     public const string TriggerScheduled = "scheduled";
     public const string TriggerForced = "forced";

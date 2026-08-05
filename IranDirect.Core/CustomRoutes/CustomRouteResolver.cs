@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using IranDirect.Core.Observability.Telemetry;
 using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.CustomRoutes;
@@ -43,65 +44,75 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
     public async Task<CustomRouteResolutionResult> ResolveAsync(
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<CustomRouteEntry> entries =
-            await _repository.GetAllAsync(cancellationToken);
-
-        HashSet<string> prefixes =
-            new(StringComparer.OrdinalIgnoreCase);
-
-        List<CustomRouteResolutionFailure> failures = [];
-        List<CustomRouteResolutionDiagnostic> diagnostics = [];
-
-        foreach (CustomRouteEntry entry in entries)
+        CustomRouteResolutionResult result;
+        using (CustomRouteRefreshTelemetry.CustomRouteRefreshScope root =
+            CustomRouteRefreshTelemetry.StartRefresh())
         {
-            if (!entry.Enabled)
+            IReadOnlyList<CustomRouteEntry> entries =
+                await _repository.GetAllAsync(cancellationToken);
+
+            HashSet<string> prefixes =
+                new(StringComparer.OrdinalIgnoreCase);
+
+            List<CustomRouteResolutionFailure> failures = [];
+            List<CustomRouteResolutionDiagnostic> diagnostics = [];
+
+            foreach (CustomRouteEntry entry in entries)
             {
-                continue;
+                if (!entry.Enabled)
+                {
+                    continue;
+                }
+
+                switch (entry.Type)
+                {
+                    case CustomRouteEntryType.IpAddress:
+                        ResolveIpAddress(entry, prefixes, failures);
+                        break;
+
+                    case CustomRouteEntryType.Cidr:
+                        ResolveCidr(entry, prefixes, failures);
+                        break;
+
+                    case CustomRouteEntryType.Domain:
+                        break;
+
+                    default:
+                        failures.Add(
+                            CreateFailure(
+                                entry,
+                                $"Unsupported entry type: {entry.Type}."));
+                        break;
+                }
             }
 
-            switch (entry.Type)
+            await ResolveDomainsAsync(
+                root,
+                entries,
+                prefixes,
+                failures,
+                diagnostics,
+                cancellationToken);
+
+            await CleanupCacheAsync(
+                entries,
+                diagnostics,
+                cancellationToken);
+
+            result = new CustomRouteResolutionResult
             {
-                case CustomRouteEntryType.IpAddress:
-                    ResolveIpAddress(entry, prefixes, failures);
-                    break;
+                Prefixes = prefixes
+                    .OrderBy(ParseAddress)
+                    .ThenBy(ParsePrefixLength)
+                    .ToArray(),
+                Failures = failures,
+                Diagnostics = diagnostics
+            };
 
-                case CustomRouteEntryType.Cidr:
-                    ResolveCidr(entry, prefixes, failures);
-                    break;
-
-                case CustomRouteEntryType.Domain:
-                    break;
-
-                default:
-                    failures.Add(
-                        CreateFailure(
-                            entry,
-                            $"Unsupported entry type: {entry.Type}."));
-                    break;
-            }
+            root.Complete(result.Failures.Count == 0);
         }
 
-        await ResolveDomainsAsync(
-            entries,
-            prefixes,
-            failures,
-            diagnostics,
-            cancellationToken);
-
-        await CleanupCacheAsync(
-            entries,
-            diagnostics,
-            cancellationToken);
-
-        return new CustomRouteResolutionResult
-        {
-            Prefixes = prefixes
-                .OrderBy(ParseAddress)
-                .ThenBy(ParsePrefixLength)
-                .ToArray(),
-            Failures = failures,
-            Diagnostics = diagnostics
-        };
+        return result;
     }
 
     private static void ResolveIpAddress(
@@ -150,6 +161,7 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
     }
 
     private async Task ResolveDomainsAsync(
+        CustomRouteRefreshTelemetry.CustomRouteRefreshScope root,
         IReadOnlyList<CustomRouteEntry> entries,
         HashSet<string> prefixes,
         List<CustomRouteResolutionFailure> failures,
@@ -183,6 +195,7 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
             {
                 results[item.index] =
                     await ResolveDomainCoreAsync(
+                        root,
                         item.entry,
                         token);
             });
@@ -207,6 +220,7 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
     }
 
     private async Task<DomainResolution> ResolveDomainCoreAsync(
+        CustomRouteRefreshTelemetry.CustomRouteRefreshScope root,
         CustomRouteEntry entry,
         CancellationToken cancellationToken)
     {
@@ -214,11 +228,18 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
         List<CustomRouteResolutionFailure> failures = [];
         List<CustomRouteResolutionDiagnostic> diagnostics = [];
 
-        CustomRouteDnsCacheEntry? cache =
-            await LoadCacheEntryAsync(
+        CustomRouteDnsCacheEntry? cache;
+        using (var cacheRead = root.StartCacheRead())
+        {
+            cache = await LoadCacheEntryAsync(
                 entry,
                 diagnostics,
                 cancellationToken);
+            cacheRead.SetCacheState(
+                TelemetryOutcomeMapper.Map(
+                    CacheStateOf(cache, _timeProvider.GetUtcNow())));
+            cacheRead.CompleteSuccess();
+        }
 
         DateTimeOffset now = _timeProvider.GetUtcNow();
 
@@ -251,10 +272,23 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
                     FaultInjectionPoint.DnsLookup);
             }
 
-            dnsAddresses =
-                await _dnsLookup(
-                    entry.Value,
-                    timeoutCts.Token);
+            using (var resolve = root.StartResolve())
+            {
+                try
+                {
+                    dnsAddresses =
+                        await _dnsLookup(
+                            entry.Value,
+                            timeoutCts.Token);
+                }
+                catch (Exception ex)
+                {
+                    resolve.CompleteLookupFailure(ex);
+                    throw;
+                }
+
+                resolve.CompleteLookupSuccess();
+            }
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -268,6 +302,7 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
                 : $"DNS resolution failed: {exception.Message}";
 
             await RecordDnsFailureAsync(
+                root,
                 entry,
                 cache,
                 now,
@@ -289,6 +324,7 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
         if (ipv4.Count == 0)
         {
             await RecordDnsFailureAsync(
+                root,
                 entry,
                 cache,
                 now,
@@ -304,24 +340,30 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
                 failures);
         }
 
-        bool persisted = await TryUpsertSuccessAsync(
-            entry,
-            ipv4,
-            diagnostics,
-            cancellationToken);
-
-        diagnostics.Add(
-            CreateDiagnostic(
-                entry,
-                CustomRouteResolutionStatus.Refreshed));
-
-        if (!persisted)
+        using (var cacheWrite = root.StartCacheWrite())
         {
+            cacheWrite.SetCacheState(
+                TelemetryOutcomeMapper.Map(CacheStateOf(cache, now)));
+            bool persisted = await TryUpsertSuccessAsync(
+                entry,
+                ipv4,
+                diagnostics,
+                cancellationToken);
+            cacheWrite.CompleteSuccess();
+
             diagnostics.Add(
                 CreateDiagnostic(
                     entry,
-                    CustomRouteResolutionStatus.Failure,
-                    "DNS cache update failed."));
+                    CustomRouteResolutionStatus.Refreshed));
+
+            if (!persisted)
+            {
+                diagnostics.Add(
+                    CreateDiagnostic(
+                        entry,
+                        CustomRouteResolutionStatus.Failure,
+                        "DNS cache update failed."));
+            }
         }
 
         foreach (string address in ipv4)
@@ -336,6 +378,7 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
     }
 
     private async Task RecordDnsFailureAsync(
+        CustomRouteRefreshTelemetry.CustomRouteRefreshScope root,
         CustomRouteEntry entry,
         CustomRouteDnsCacheEntry? cache,
         DateTimeOffset now,
@@ -345,11 +388,17 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
         List<CustomRouteResolutionFailure> failures,
         CancellationToken cancellationToken)
     {
-        await TryUpsertFailureAsync(
-            entry,
-            reason,
-            diagnostics,
-            cancellationToken);
+        using (var cacheWrite = root.StartCacheWrite())
+        {
+            cacheWrite.SetCacheState(
+                TelemetryOutcomeMapper.Map(CacheStateOf(cache, now)));
+            await TryUpsertFailureAsync(
+                entry,
+                reason,
+                diagnostics,
+                cancellationToken);
+            cacheWrite.CompleteSuccess();
+        }
 
         if (cache is not null
             && cache.IPv4Addresses.Count > 0
@@ -518,6 +567,29 @@ public sealed class CustomRouteResolver : ICustomRouteResolver
         && cache.IPv4Addresses.Count > 0
         && cache.ExpiresAt is { } expiresAt
         && expiresAt > now;
+
+    private static CustomRouteDnsCacheState CacheStateOf(
+        CustomRouteDnsCacheEntry? cache,
+        DateTimeOffset now)
+    {
+        if (cache is null)
+        {
+            return CustomRouteDnsCacheState.Missing;
+        }
+
+        if (IsFresh(cache, now))
+        {
+            return CustomRouteDnsCacheState.Fresh;
+        }
+
+        if (cache.StaleUntil is { } staleUntil
+            && staleUntil > now)
+        {
+            return CustomRouteDnsCacheState.Stale;
+        }
+
+        return CustomRouteDnsCacheState.Expired;
+    }
 
     private static IReadOnlyList<string> ToPrefixes(
         IEnumerable<string> addresses) =>
