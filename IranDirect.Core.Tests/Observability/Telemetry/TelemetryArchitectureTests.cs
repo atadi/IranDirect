@@ -1,0 +1,197 @@
+using System.Diagnostics;
+using System.Reflection;
+using IranDirect.Core.Observability.Telemetry;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace IranDirect.Core.Tests.Observability.Telemetry;
+
+/// <summary>
+/// Guards the architectural boundary of the telemetry foundation: no
+/// OpenTelemetry packages, no second ActivitySource/Meter, no workflow
+/// instrumentation, no generic free-form helpers, planner/models telemetry-free.
+/// Relies on reflection/assembly scanning, permitted in tests.
+/// </summary>
+public sealed class TelemetryArchitectureTests
+{
+    private readonly ITestOutputHelper _output;
+
+    public TelemetryArchitectureTests(ITestOutputHelper output) => _output = output;
+
+    [Fact]
+    public void NoOpenTelemetryPackageReferences()
+    {
+        string[] projectFiles = Directory.GetFiles(
+            Path.Combine(RepoRoot(), "IranDirect.Core"),
+            "*.csproj",
+            SearchOption.TopDirectoryOnly);
+
+        foreach (var file in projectFiles)
+        {
+            string content = File.ReadAllText(file);
+            Assert.DoesNotContain(
+                "OpenTelemetry",
+                content,
+                StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void SingleActivitySourceAndMeterDefinition()
+    {
+        var types = typeof(IranDirectTelemetry).Assembly.GetTypes();
+        int sourceDefs = types.Count(t =>
+            t.GetProperties(BindingFlags.Static | BindingFlags.Public)
+             .Any(f => f.PropertyType == typeof(ActivitySource) &&
+                       f.Name == nameof(IranDirectTelemetry.ActivitySource)));
+        int meterDefs = types.Count(t =>
+            t.GetProperties(BindingFlags.Static | BindingFlags.Public)
+             .Any(f => f.PropertyType == typeof(System.Diagnostics.Metrics.Meter) &&
+                       f.Name == nameof(IranDirectTelemetry.Meter)));
+
+        Assert.Equal(1, sourceDefs);
+        Assert.Equal(1, meterDefs);
+    }
+
+    [Fact]
+    public void NoProductionWorkflowStartsActivities()
+    {
+        AssertNoMatch("StartActivity", new[]
+        {
+            "IranDirect.Core/Observability/Telemetry/",
+            "IranDirect.Core.Tests/",
+        });
+    }
+
+    [Fact]
+    public void NoWorkflowRecordsMetrics()
+    {
+        // Only metric-instrument construction is forbidden in workflows this
+        // phase. Collection .Add(.Record( on List/Dictionary/HashSet are
+        // unrelated and intentionally ignored.
+        AssertNoMatch(
+            "Meter[.]Create|new Counter<|new Histogram<|new ObservableGauge<|CreateCounter|CreateHistogram|CreateGauge",
+            new[]
+            {
+                "IranDirect.Core/Observability/Telemetry/",
+                "IranDirect.Core.Tests/",
+            });
+    }
+
+    [Fact]
+    public void NoGenericFreeFormTelemetryHelpers()
+    {
+        // The foundation must expose only strongly-typed accessors, constants,
+        // and bounded mappers — not StartActivity(name, Dictionary<...>) or
+        // RecordMetric(name, params object[]).
+        var methods = typeof(IranDirectTelemetry).Assembly
+            .GetTypes()
+            .Where(t => t.Namespace != null &&
+                        t.Namespace.Contains("Observability.Telemetry"))
+            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            .ToList();
+
+        foreach (var m in methods)
+        {
+            Assert.False(
+                m.GetParameters().Any(p => p.ParameterType == typeof(string) &&
+                                           p.Name.Contains("name", StringComparison.OrdinalIgnoreCase) &&
+                                           m.Name.Contains("Start", StringComparison.OrdinalIgnoreCase)),
+                $"free-form StartActivity-like API found: {m.DeclaringType}.{m.Name}");
+        }
+    }
+
+    [Fact]
+    public void PlannerAndModelNamespaces_DoNotReferenceTelemetry()
+    {
+        string[] dirs =
+        [
+            "IranDirect.Core/Runtime/Reconciliation",
+            "IranDirect.Core/Runtime/Execution",
+            "IranDirect.Core/Routing",
+        ];
+        foreach (var dir in dirs)
+        {
+            if (!Directory.Exists(Path.Combine(RepoRoot(), dir)))
+                continue;
+            foreach (var file in Directory.GetFiles(
+                         Path.Combine(RepoRoot(), dir), "*.cs", SearchOption.AllDirectories))
+            {
+                string content = File.ReadAllText(file);
+                Assert.DoesNotContain(
+                    "Observability.Telemetry",
+                    content,
+                    StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Fact]
+    public void ProhibitedTagConstants_DoNotAppearInProductionSource()
+    {
+        // Prohibited tag names live in the test catalog consts only; assert the
+        // production telemetry foundation never references them as actual tags.
+        string[] prohibited = IranDirectTagNames.Prohibited.ToArray();
+        string foundationDir = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Observability/Telemetry");
+        foreach (var file in Directory.GetFiles(foundationDir, "*.cs"))
+        {
+            // IranDirectTagNames.cs defines the prohibited list itself, and
+            // IranDirectTagValues.cs / the mapper legitimately carry bounded
+            // values (e.g. route_kind=endpoint). The contract under test is
+            // that no workflow uses a prohibited name as a tag *name*; with no
+            // instrumentation yet, the remaining files must be clean.
+            string normalized = file.Replace('\\', '/');
+            if (normalized.EndsWith("IranDirectTagNames.cs") ||
+                normalized.EndsWith("IranDirectTagValues.cs") ||
+                normalized.EndsWith("TelemetryOutcomeMapper.cs") ||
+                normalized.EndsWith("TelemetryFailureCategoryMapper.cs"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            foreach (var tag in prohibited)
+            {
+                Assert.DoesNotContain(
+                    $"\"{tag}\"",
+                    content,
+                    StringComparison.Ordinal);
+            }
+        }
+    }
+
+    private void AssertNoMatch(string pattern, string[] excludeDirs)
+    {
+        var matches = new List<string>();
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(RepoRoot(), "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            if (excludeDirs.Any(d =>
+                    file.Replace('\\', '/').Contains(d.Replace('\\', '/'))))
+                continue;
+
+            string[] lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(lines[i], pattern))
+                    matches.Add($"{file}:{i + 1}: {lines[i].Trim()}");
+            }
+        }
+
+        if (matches.Count != 0)
+        {
+            foreach (var m in matches.Take(20))
+                _output.WriteLine(m);
+            Assert.Fail($"{matches.Count} workflow instrumentation match(es) found");
+        }
+    }
+
+    private static string RepoRoot()
+    {
+        string? dir = AppContext.BaseDirectory;
+        while (dir != null && !File.Exists(Path.Combine(dir, "IranDirect.slnx")))
+            dir = Path.GetDirectoryName(dir);
+        return dir ?? throw new InvalidOperationException("repo root not found");
+    }
+}
