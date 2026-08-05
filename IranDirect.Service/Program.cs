@@ -8,6 +8,7 @@ using IranDirect.Core.Diagnostics.Runtime;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Observability;
+using IranDirect.Core.Observability.Telemetry;
 using IranDirect.Core.Planning;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
@@ -222,9 +223,19 @@ builder.Services.AddSingleton(
 builder.Services.AddSingleton<GatewayDetector>();
 builder.Services.AddSingleton<CommandRunner>();
 
-builder.Services.AddSingleton<
-    IRouteManager,
-    WindowsRouteManager>();
+// The native route boundary (WindowsRouteApi -> powershell.exe / netsh.exe)
+// is wrapped with the telemetry decorator so every enumerate/create/delete
+// system call emits one Routes.* activity and one set of route-operation
+// measurements. WindowsRouteApi stays native-only; the decorator lives in the
+// Observability.Telemetry namespace and is a legitimate composition-root seam.
+builder.Services.AddSingleton<IRouteManager>(serviceProvider =>
+{
+    var commandRunner =
+        serviceProvider.GetRequiredService<CommandRunner>();
+    var windowsApi = new WindowsRouteApi(commandRunner);
+    var telemetryApi = new TelemetryRouteApi(windowsApi);
+    return new WindowsRouteManager(commandRunner, telemetryApi);
+});
 
 builder.Services.AddSingleton<VpnEndpointRouteManager>();
 builder.Services.AddSingleton<IranDirectController>();

@@ -459,6 +459,167 @@ public sealed class TelemetryArchitectureTests
     }
 
     [Fact]
+    public void ExactlyOneRouteSystemCallActivityLocation_NoPerRouteSpans()
+    {
+        // All Routes.* activities must originate from a single shared helper in
+        // RouteSystemCallTelemetry. Count production (excludes tests) files that
+        // reference a Routes.* activity name AND StartActivity(. There must be
+        // exactly one such file, containing exactly one StartActivity call.
+        string root = RepoRoot();
+        int files = 0;
+        int startCalls = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            bool referencesRoutes = content.Contains("RoutesEnumerate") ||
+                content.Contains("RoutesCreate") ||
+                content.Contains("RoutesDelete");
+            if (referencesRoutes && content.Contains("StartActivity("))
+            {
+                files++;
+                startCalls += System.Text.RegularExpressions.Regex
+                    .Matches(content, @"StartActivity\s*\(").Count;
+            }
+        }
+
+        Assert.Equal(1, files);
+        Assert.Equal(1, startCalls);
+    }
+
+    [Fact]
+    public void RouteTelemetry_UsesApprovedActivityConstants()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RouteSystemCallTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectActivityNames.RoutesEnumerate", content);
+        Assert.Contains("IranDirectActivityNames.RoutesCreate", content);
+        Assert.Contains("IranDirectActivityNames.RoutesDelete", content);
+    }
+
+    [Fact]
+    public void RouteTelemetry_ExactlyThreeCountersAndOneHistogram()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RouteSystemCallTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int counters = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateCounter<long>").Count;
+        int histograms = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateHistogram<double>").Count;
+
+        Assert.Equal(3, counters); // requested, succeeded, failed
+        Assert.Equal(1, histograms); // system_call.duration
+
+        Assert.Contains(
+            "IranDirectMetricNames.RoutesOperationsRequested", content);
+        Assert.Contains(
+            "IranDirectMetricNames.RoutesOperationsSucceeded", content);
+        Assert.Contains(
+            "IranDirectMetricNames.RoutesOperationsFailed", content);
+        Assert.Contains(
+            "IranDirectMetricNames.RoutesSystemCallDuration", content);
+    }
+
+    [Fact]
+    public void RouteTelemetry_NoPerRouteRecordsOrLoops()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RouteSystemCallTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        // No Histogram.Record calls inside any loop; the single duration Record
+        // is in the static terminal helper. No per-route Counter.Add.
+        int recordCalls = System.Text.RegularExpressions.Regex.Matches(
+            content, @"\.Record\(").Count;
+        int addCalls = System.Text.RegularExpressions.Regex.Matches(
+            content, @"\.Add\(").Count;
+
+        Assert.Equal(1, recordCalls); // duration only
+        Assert.Equal(3, addCalls);    // requested, succeeded, failed (each once)
+
+        // No foreach/for over routes inside the telemetry file.
+        Assert.DoesNotContain("foreach", content);
+        Assert.DoesNotContain("for (", content);
+    }
+
+    [Fact]
+    public void RouteTelemetry_NoTelemetryReferencesInNativeOrModels()
+    {
+        // The native boundary and route models must stay telemetry-free so the
+        // decorator remains the sole bridge.
+        string windowsApi = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Routing/WindowsRouteApi.cs");
+        Assert.DoesNotContain(
+            "Observability.Telemetry", File.ReadAllText(windowsApi));
+        Assert.DoesNotContain("StartActivity", File.ReadAllText(windowsApi));
+        Assert.DoesNotContain("Meter", File.ReadAllText(windowsApi));
+
+        string managedRoute = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Routing/ManagedRoute.cs");
+        Assert.DoesNotContain(
+            "Observability.Telemetry", File.ReadAllText(managedRoute));
+    }
+
+    [Fact]
+    public void RouteTelemetry_OnlyApprovedTags_NoProhibited()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RouteSystemCallTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectTagNames.Operation", content);
+        Assert.Contains("IranDirectTagNames.Outcome", content);
+
+        foreach (var tag in IranDirectTagNames.Prohibited)
+        {
+            Assert.DoesNotContain($"\"{tag}\"", content);
+        }
+
+        // No command/process-output tags: the file never references native
+        // output, exit codes, or script contents as data.
+        Assert.DoesNotContain("StandardOutput", content);
+        Assert.DoesNotContain("StandardError", content);
+        Assert.DoesNotContain("ExitCode", content);
+    }
+
+    [Fact]
+    public void RouteTelemetry_WrapperIsOnlyBridge_NoOpenTelemetry()
+    {
+        // The decorator lives in the telemetry namespace and is the only new
+        // file bridging to the native boundary; no OpenTelemetry packages or
+        // exporters are introduced.
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/TelemetryRouteApi.cs");
+        string content = File.ReadAllText(path);
+        Assert.Contains("IWindowsRouteApi", content);
+        Assert.DoesNotContain("OpenTelemetry", content, StringComparison.OrdinalIgnoreCase);
+
+        // Program.cs composition root must wire the wrapper but add no exporter
+        // and no OpenTelemetry reference.
+        string program = Path.Combine(RepoRoot(), "IranDirect.Service/Program.cs");
+        string programContent = File.ReadAllText(program);
+        Assert.Contains("TelemetryRouteApi", programContent);
+        Assert.DoesNotContain(
+            "OpenTelemetry", programContent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Controller_OnlyApprovedExecutionInstrumentation()
     {
         // The controller may only call RuntimeExecutionTelemetry.Start and the

@@ -23,6 +23,13 @@ Telemetry architecture and instrumentation plan for IranDirect.
   runtime-cycle root; execution-duration + operations-per-cycle histograms; bounded
   outcome/failure-category; controller orchestration owner, `RuntimeExecutor`
   stays telemetry-free, no per-step or per-route spans.
+- [Phase 32.6 route system-call telemetry](phase-32.6-route-system-call-telemetry.md)
+  — instruments the native route boundary (`WindowsRouteApi` via the
+  `TelemetryRouteApi` decorator) with `Routes.Enumerate` / `Routes.Create` /
+  `Routes.Delete` child activities under `Runtime.Execute`; three route-operation
+  counters + one system-call duration histogram; bounded operation/change-kind/
+  route-kind tags; no per-route spans or metrics, no OpenTelemetry packages.
 
-Status: contracts implemented; runtime cycle, planning, and execution instrumented.
-Implementation continues with the remaining runtime-cycle child operations.
+Status: contracts implemented; runtime cycle, planning, execution, and the native
+route boundary instrumented. Implementation continues with the remaining
+runtime-cycle child operations.
