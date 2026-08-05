@@ -95,7 +95,8 @@ public sealed class TelemetryArchitectureTests
         {
             Assert.False(
                 m.GetParameters().Any(p => p.ParameterType == typeof(string) &&
-                                           p.Name.Contains("name", StringComparison.OrdinalIgnoreCase) &&
+                                           p.Name is { } pname &&
+                                           pname.Contains("name", StringComparison.OrdinalIgnoreCase) &&
                                            m.Name.Contains("Start", StringComparison.OrdinalIgnoreCase)),
                 $"free-form StartActivity-like API found: {m.DeclaringType}.{m.Name}");
         }
@@ -157,6 +158,95 @@ public sealed class TelemetryArchitectureTests
                     StringComparison.Ordinal);
             }
         }
+    }
+
+    [Fact]
+    public void ExactlyOneRuntimeCycleStartActivity_NoChildSpans()
+    {
+        // Production must start exactly one runtime-cycle root activity, and
+        // no child spans yet. The single approved StartActivity passes the
+        // Phase 32.2 name constant. Count StartActivity( occurrences in
+        // production that reference RuntimeCycle (Telemetry foundation is the
+        // home of the one approved call; tests are excluded).
+        string root = RepoRoot();
+        int runtimeCycleStarts = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            if (content.Contains("StartActivity(") &&
+                content.Contains("RuntimeCycle"))
+                runtimeCycleStarts++;
+        }
+
+        Assert.Equal(1, runtimeCycleStarts);
+
+        // No workflow StartActivity with a non-constant string name anywhere in
+        // production (tests excluded).
+        var matches = new List<string>();
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            foreach (var line in File.ReadAllLines(file))
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(
+                        line, @"StartActivity\s*\(\s*\"""))
+                    matches.Add($"{file}: {line.Trim()}");
+            }
+        }
+        if (matches.Count != 0)
+        {
+            foreach (var m in matches.Take(20))
+                _output.WriteLine(m);
+            Assert.Fail($"{matches.Count} dynamic span name(s) found");
+        }
+    }
+
+    [Fact]
+    public void ExactlyFiveRuntimeCycleInstruments()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RuntimeCycleTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int counters = System.Text.RegularExpressions.Regex.Matches(
+            content, @"Meter\.CreateCounter<long>").Count;
+        int histograms = System.Text.RegularExpressions.Regex.Matches(
+            content, @"Meter\.CreateHistogram<double>").Count;
+
+        Assert.Equal(4, counters);
+        Assert.Equal(1, histograms);
+    }
+
+    [Fact]
+    public void Controller_OnlyApprovedRuntimeCycleInstrumentation()
+    {
+        // The controller may only StartActivity(IranDirectActivityNames.RuntimeCycle)
+        // and call RuntimeCycleTelemetry.Start; it must not create instruments
+        // or use any other telemetry name.
+        string path = Path.Combine(RepoRoot(), "IranDirect.Core/IranDirectController.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains(
+            "RuntimeCycleTelemetry.Start(TelemetryTrigger",
+            content);
+        Assert.DoesNotContain("new ActivitySource", content);
+        Assert.DoesNotContain("Meter.Create", content);
+        Assert.DoesNotContain("StartActivity(IranDirectActivityNames.", content);
     }
 
     private void AssertNoMatch(string pattern, string[] excludeDirs)

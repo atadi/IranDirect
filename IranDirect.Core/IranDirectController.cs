@@ -8,6 +8,7 @@ using IranDirect.Core.Runtime;
 using IranDirect.Core.Runtime.Execution;
 using IranDirect.Core.Runtime.Profiling;
 using IranDirect.Core.State;
+using IranDirect.Core.Observability.Telemetry;
 using IranDirect.Core.Vpn;
 using Microsoft.Extensions.Logging;
 using System.Net;
@@ -295,6 +296,8 @@ public sealed class IranDirectController :
         CancellationToken cancellationToken = default)
     {
         using IDisposable cycle = _profiler.BeginCycleIfNone("enable");
+        using RuntimeCycleTelemetryScope telemetry =
+            RuntimeCycleTelemetry.Start(TelemetryTrigger.Forced);
 
         _operationStatus.Begin(OperationState.Enabling, "user");
 
@@ -305,10 +308,14 @@ public sealed class IranDirectController :
             await _configurationService.SetEnabledAsync(
                 true, cancellationToken);
 
-            return await RunCycleCoreAsync(cancellationToken);
+            RuntimeCycleExecutionResult result =
+                await RunCycleCoreAsync(cancellationToken);
+            telemetry.CompleteSuccess(result.Execution.MutatedInfrastructure);
+            return result;
         }
         catch (OperationCanceledException)
         {
+            telemetry.CompleteCancelled();
             RecordCycleOutcome(
                 CycleCompletionStatus.Cancelled,
                 "Operation was cancelled.");
@@ -316,6 +323,7 @@ public sealed class IranDirectController :
         }
         catch (Exception ex)
         {
+            telemetry.CompleteFailure(ex);
             RecordCycleOutcome(
                 CycleCompletionStatus.Failed,
                 ex.Message);
@@ -327,6 +335,8 @@ public sealed class IranDirectController :
         CancellationToken cancellationToken = default)
     {
         using IDisposable cycle = _profiler.BeginCycleIfNone("disable");
+        using RuntimeCycleTelemetryScope telemetry =
+            RuntimeCycleTelemetry.Start(TelemetryTrigger.Forced);
 
         _operationStatus.Begin(OperationState.Disabling, "user");
 
@@ -335,10 +345,14 @@ public sealed class IranDirectController :
             await _configurationService.SetEnabledAsync(
                 false, cancellationToken);
 
-            return await RunCycleCoreAsync(cancellationToken);
+            RuntimeCycleExecutionResult result =
+                await RunCycleCoreAsync(cancellationToken);
+            telemetry.CompleteSuccess(result.Execution.MutatedInfrastructure);
+            return result;
         }
         catch (OperationCanceledException)
         {
+            telemetry.CompleteCancelled();
             RecordCycleOutcome(
                 CycleCompletionStatus.Cancelled,
                 "Operation was cancelled.");
@@ -346,6 +360,7 @@ public sealed class IranDirectController :
         }
         catch (Exception ex)
         {
+            telemetry.CompleteFailure(ex);
             RecordCycleOutcome(
                 CycleCompletionStatus.Failed,
                 ex.Message);
@@ -357,15 +372,21 @@ public sealed class IranDirectController :
         CancellationToken cancellationToken = default)
     {
         using IDisposable cycle = _profiler.BeginCycleIfNone("repair");
+        using RuntimeCycleTelemetryScope telemetry =
+            RuntimeCycleTelemetry.Start(TelemetryTrigger.Repair);
 
         _operationStatus.Begin(OperationState.Repairing, "cycle");
 
         try
         {
-            return await RunCycleCoreAsync(cancellationToken);
+            RuntimeCycleExecutionResult result =
+                await RunCycleCoreAsync(cancellationToken);
+            telemetry.CompleteSuccess(result.Execution.MutatedInfrastructure);
+            return result;
         }
         catch (OperationCanceledException)
         {
+            telemetry.CompleteCancelled();
             RecordCycleOutcome(
                 CycleCompletionStatus.Cancelled,
                 "Operation was cancelled.");
@@ -373,6 +394,7 @@ public sealed class IranDirectController :
         }
         catch (Exception ex)
         {
+            telemetry.CompleteFailure(ex);
             RecordCycleOutcome(
                 CycleCompletionStatus.Failed,
                 ex.Message);

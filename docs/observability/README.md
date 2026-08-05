@@ -8,6 +8,11 @@ Telemetry architecture and instrumentation plan for IranDirect.
 - [Phase 32.2 core telemetry contracts](phase-32.2-core-telemetry-contracts.md)
   — `ActivitySource`/`Meter` definitions, span/metric/tag catalogs, bounded
   values, enum + failure-category mappers, tag validator, 90 contract tests.
+- [Phase 32.3 runtime cycle tracing and metrics](phase-32.3-runtime-cycle-telemetry.md)
+  — instruments the top-level runtime reconciliation cycle only: one root
+  `IranDirect.RuntimeCycle` activity, four counters, one duration histogram,
+  bounded outcome/trigger/failure-category tags; controller boundary, no child
+  spans, no OTel packages, profiler-independent.
 
 Status: contracts implemented; workflows not yet instrumented. Implementation
 continues at Phase 32.3.
