@@ -18,6 +18,11 @@ Telemetry architecture and instrumentation plan for IranDirect.
   under the runtime-cycle root; planning-duration + changed-routes histograms;
   bounded outcome/failure-category; reconciler owner, no planner lifecycle
   counters, no `change_bucket` (not approved).
+- [Phase 32.5 runtime execution telemetry](phase-32.5-runtime-execution-telemetry.md)
+  — instruments runtime execution as a child `Runtime.Execute` activity under the
+  runtime-cycle root; execution-duration + operations-per-cycle histograms; bounded
+  outcome/failure-category; controller orchestration owner, `RuntimeExecutor`
+  stays telemetry-free, no per-step or per-route spans.
 
-Status: contracts implemented; workflows not yet instrumented. Implementation
-continues at Phase 32.3.
+Status: contracts implemented; runtime cycle, planning, and execution instrumented.
+Implementation continues with the remaining runtime-cycle child operations.

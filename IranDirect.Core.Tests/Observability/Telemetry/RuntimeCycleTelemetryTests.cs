@@ -231,6 +231,19 @@ public sealed class RuntimeCycleTelemetryTests
             foreach (double d in durations) sum += d;
             return new MetricCapture(s, c, f, x, durations.Count, sum);
         }
+
+        // Deterministic under parallelism: the runtime-cycle metrics live on a
+        // process-global Meter, so other in-flight test collections also emit
+        // cycles.* samples. Capturing before/after the single call and taking
+        // the delta isolates exactly the samples produced by THIS call.
+        public static MetricCapture Delta(
+            MetricCapture before, MetricCapture after) => new(
+            after.Started - before.Started,
+            after.Completed - before.Completed,
+            after.Failed - before.Failed,
+            after.Cancelled - before.Cancelled,
+            after.DurationCount - before.DurationCount,
+            after.DurationSum - before.DurationSum);
     }
 
     private static MeterListener CreateMeterListener(
@@ -271,6 +284,7 @@ public sealed class RuntimeCycleTelemetryTests
 
         using var al = CreateActivityListener(stopped, started);
         using var ml = CreateMeterListener(counters, durations);
+        MetricCapture before = MetricCapture.From(counters, durations);
 
         h.ExecutorResult = RuntimeExecutionResult.Completed(
         [
@@ -286,7 +300,8 @@ public sealed class RuntimeCycleTelemetryTests
         RuntimeCycleExecutionResult result = await h.Controller.RunCycleAsync();
 
         Assert.True(result.IsSuccess);
-        MetricCapture cap = MetricCapture.From(counters, durations);
+        MetricCapture after = MetricCapture.From(counters, durations);
+        MetricCapture cap = MetricCapture.Delta(before, after);
 
         Assert.Equal(1, cap.Started);
         Assert.Equal(1, cap.Completed);
@@ -295,7 +310,8 @@ public sealed class RuntimeCycleTelemetryTests
         Assert.Equal(1, cap.DurationCount);
         Assert.True(cap.DurationSum >= 0);
 
-        Activity? activity = stopped.SingleOrDefault();
+        Activity? activity = stopped.SingleOrDefault(
+            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(IranDirectActivityNames.RuntimeCycle, activity!.OperationName);
         Assert.Equal(ActivityKind.Internal, activity.Kind);
@@ -321,18 +337,21 @@ public sealed class RuntimeCycleTelemetryTests
 
         using var al = CreateActivityListener(stopped, started);
         using var ml = CreateMeterListener(counters, durations);
+        MetricCapture before = MetricCapture.From(counters, durations);
 
         h.ExecutorResult = RuntimeExecutionResult.NoExecutionRequired();
 
         RuntimeCycleExecutionResult result = await h.Controller.RunCycleAsync();
 
         Assert.True(result.IsSuccess);
-        MetricCapture cap = MetricCapture.From(counters, durations);
+        MetricCapture after = MetricCapture.From(counters, durations);
+        MetricCapture cap = MetricCapture.Delta(before, after);
         Assert.Equal(1, cap.Started);
         Assert.Equal(1, cap.Completed);
         Assert.Equal(1, cap.DurationCount);
 
-        Activity? activity = stopped.SingleOrDefault();
+        Activity? activity = stopped.SingleOrDefault(
+            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
             IranDirectTagValues.NoChange,
@@ -351,20 +370,23 @@ public sealed class RuntimeCycleTelemetryTests
 
         using var al = CreateActivityListener(stopped, started);
         using var ml = CreateMeterListener(counters, durations);
+        MetricCapture before = MetricCapture.From(counters, durations);
 
         h.FakeExecutor.ThrowOnExecute = new IOException("secret path C:\\x");
 
         await Assert.ThrowsAsync<IOException>(
             () => h.Controller.RunCycleAsync());
 
-        MetricCapture cap = MetricCapture.From(counters, durations);
+        MetricCapture after = MetricCapture.From(counters, durations);
+        MetricCapture cap = MetricCapture.Delta(before, after);
         Assert.Equal(1, cap.Started);
         Assert.Equal(1, cap.Failed);
         Assert.Equal(0, cap.Completed);
         Assert.Equal(0, cap.Cancelled);
         Assert.Equal(1, cap.DurationCount);
 
-        Activity? activity = stopped.SingleOrDefault();
+        Activity? activity = stopped.SingleOrDefault(
+            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
             IranDirectTagValues.Failure,
@@ -392,11 +414,13 @@ public sealed class RuntimeCycleTelemetryTests
 
         using var al = CreateActivityListener(stopped, started);
         using var ml = CreateMeterListener(counters, durations);
+        MetricCapture before = MetricCapture.From(counters, durations);
 
         await Assert.ThrowsAsync<FaultInjectionException>(
             () => h.Controller.RunCycleAsync());
 
-        Activity? activity = stopped.SingleOrDefault();
+        Activity? activity = stopped.SingleOrDefault(
+            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
             IranDirectTagValues.FailureRouting,
@@ -417,11 +441,13 @@ public sealed class RuntimeCycleTelemetryTests
 
         using var al = CreateActivityListener(stopped, started);
         using var ml = CreateMeterListener(counters, durations);
+        MetricCapture before = MetricCapture.From(counters, durations);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => h.Controller.RunCycleAsync());
 
-        Activity? activity = stopped.SingleOrDefault();
+        Activity? activity = stopped.SingleOrDefault(
+            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
             IranDirectTagValues.FailureUnknown,
@@ -442,18 +468,21 @@ public sealed class RuntimeCycleTelemetryTests
 
         using var al = CreateActivityListener(stopped, started);
         using var ml = CreateMeterListener(counters, durations);
+        MetricCapture before = MetricCapture.From(counters, durations);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => h.Controller.RunCycleAsync());
 
-        MetricCapture cap = MetricCapture.From(counters, durations);
+        MetricCapture after = MetricCapture.From(counters, durations);
+        MetricCapture cap = MetricCapture.Delta(before, after);
         Assert.Equal(1, cap.Started);
         Assert.Equal(1, cap.Cancelled);
         Assert.Equal(0, cap.Failed);
         Assert.Equal(0, cap.Completed);
         Assert.Equal(1, cap.DurationCount);
 
-        Activity? activity = stopped.SingleOrDefault();
+        Activity? activity = stopped.SingleOrDefault(
+            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
             IranDirectTagValues.Cancelled,
@@ -506,7 +535,8 @@ public sealed class RuntimeCycleTelemetryTests
 
         await h.Controller.EnableAsync();
 
-        Activity? activity = stopped.SingleOrDefault();
+        Activity? activity = stopped.SingleOrDefault(
+            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
             IranDirectTagValues.TriggerForced,

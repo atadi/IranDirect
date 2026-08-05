@@ -17,6 +17,7 @@ public static class IranDirectTagValues
     // operation
     public const string OperationRuntimeCycle = "runtime_cycle";
     public const string OperationPlanChanges = "plan_changes";
+    public const string OperationExecute = "execute";
 
     // trigger
     public const string TriggerScheduled = "scheduled";

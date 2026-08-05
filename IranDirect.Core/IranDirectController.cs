@@ -415,28 +415,49 @@ public sealed class IranDirectController :
 
             RuntimeExecutionResult execution;
 
-            using (_profiler.Measure(
-                RuntimePerfCategory.ExecutionTotal))
+            using (RuntimeExecutionTelemetryScope executionTelemetry =
+                RuntimeExecutionTelemetry.Start(decision.ExecutionPlan.Count))
             {
-                execution =
-                    await _runtimeExecutor.ExecuteAsync(
-                        decision.ExecutionPlan,
-                        _operationStatus,
-                        cancellationToken);
+                try
+                {
+                    using (_profiler.Measure(
+                        RuntimePerfCategory.ExecutionTotal))
+                    {
+                        execution =
+                            await _runtimeExecutor.ExecuteAsync(
+                                decision.ExecutionPlan,
+                                _operationStatus,
+                                cancellationToken);
+                    }
+
+                    _operationStatus.Complete(execution);
+
+                    await UpdateStateAsync(
+                        decision, execution, cancellationToken);
+
+                    RecordCycleOutcome(execution, decision);
+
+                    executionTelemetry.Complete(execution);
+                }
+                catch (OperationCanceledException)
+                {
+                    executionTelemetry.CompleteCancelled();
+                    _operationStatus.Fail("Operation was cancelled.");
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    executionTelemetry.CompleteFailure(ex);
+                    _operationStatus.Fail(ex.Message);
+                    throw;
+                }
+
+                return new RuntimeCycleExecutionResult
+                {
+                    Decision = decision,
+                    Execution = execution
+                };
             }
-
-            _operationStatus.Complete(execution);
-
-            await UpdateStateAsync(
-                decision, execution, cancellationToken);
-
-            RecordCycleOutcome(execution, decision);
-
-            return new RuntimeCycleExecutionResult
-            {
-                Decision = decision,
-                Execution = execution
-            };
         }
         catch (OperationCanceledException)
         {

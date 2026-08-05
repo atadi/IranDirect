@@ -371,6 +371,107 @@ public sealed class TelemetryArchitectureTests
         Assert.DoesNotContain("Meter", content);
     }
 
+    [Fact]
+    public void ExactlyOneExecutionStartActivity_NoChildSpans()
+    {
+        // Production must start exactly one Runtime.Execute activity. Count
+        // StartActivity( occurrences that reference RuntimeExecute.
+        string root = RepoRoot();
+        int execStarts = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            if (content.Contains("StartActivity(") &&
+                content.Contains("RuntimeExecute"))
+                execStarts++;
+        }
+
+        Assert.Equal(1, execStarts);
+    }
+
+    [Fact]
+    public void ExactlyTwoExecutionHistograms_NoLifecycleCounters()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RuntimeExecutionTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int histograms = System.Text.RegularExpressions.Regex.Matches(
+            content, @"Meter\.CreateHistogram<double>").Count;
+        Assert.Equal(2, histograms); // execution.duration + operations.per_cycle
+
+        // No execution lifecycle counters invented.
+        Assert.DoesNotContain("execution.started", content);
+        Assert.DoesNotContain("execution.completed", content);
+        Assert.DoesNotContain("execution.failed", content);
+        Assert.DoesNotContain("CreateCounter", content);
+    }
+
+    [Fact]
+    public void NoStartActivityInsideExecutorOrLoops_NoPerStepRecords()
+    {
+        // RuntimeExecutor must remain telemetry-free, and no per-step
+        // Histogram.Record calls may exist in execution paths.
+        string executorPath = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Runtime/Execution/RuntimeExecutor.cs");
+        string executorContent = File.ReadAllText(executorPath);
+        Assert.DoesNotContain("Observability.Telemetry", executorContent);
+        Assert.DoesNotContain("StartActivity", executorContent);
+        Assert.DoesNotContain("Histogram", executorContent);
+
+        string execTelemetry = File.ReadAllText(Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RuntimeExecutionTelemetry.cs"));
+        // The two histograms are created once at static init; no per-step
+        // Record calls should appear outside the two terminal helpers.
+        int recordCalls = System.Text.RegularExpressions.Regex.Matches(
+            execTelemetry, @"\.Record\(").Count;
+        // 2 terminal helpers each call Record once.
+        Assert.Equal(2, recordCalls);
+    }
+
+    [Fact]
+    public void ExecutionTelemetry_OnlyApprovedTags_NoProhibited()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/RuntimeExecutionTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        // operation / outcome / failure_category only.
+        Assert.Contains("IranDirectTagNames.Operation", content);
+        Assert.Contains("IranDirectTagNames.Outcome", content);
+
+        foreach (var tag in IranDirectTagNames.Prohibited)
+        {
+            Assert.DoesNotContain($"\"{tag}\"", content);
+        }
+    }
+
+    [Fact]
+    public void Controller_OnlyApprovedExecutionInstrumentation()
+    {
+        // The controller may only call RuntimeExecutionTelemetry.Start and the
+        // scope terminal methods; it must not create instruments or use other
+        // telemetry names for execution.
+        string path = Path.Combine(RepoRoot(), "IranDirect.Core/IranDirectController.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("RuntimeExecutionTelemetry.Start(", content);
+        Assert.DoesNotContain("new ActivitySource", content);
+        Assert.DoesNotContain("Meter.Create", content);
+    }
+
     private static string RepoRoot()
     {
         string? dir = AppContext.BaseDirectory;
