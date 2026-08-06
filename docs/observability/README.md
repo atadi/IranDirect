@@ -51,6 +51,15 @@ Telemetry architecture and instrumentation plan for IranDirect.
   ActivitySource/Meter, optional OTLP and Development-only console export, bounded
   resource attributes, options validation, failure/shutdown isolation. No new
   workflow instrumentation; Core contracts unchanged; Core remains BCL-only.
+- [Phase 33.1 telemetry consumption architecture](phase-33.1-telemetry-consumption-architecture.md)
+  — analysis and deployment design for consuming the emitted telemetry:
+  committed telemetry inventory, deployment assumptions, candidate stack
+  comparison (Collector+Prometheus+Tempo+Grafana selected), Collector design,
+  metrics/trace storage, sampling, dashboard catalog, recording rules, alert
+  catalog, notification routing, privacy/security, retention/sizing,
+  backup/recovery, deployment topology, environment separation, runbook
+  requirements, failure-isolation confirmation, and a phased roadmap
+  (33.2–33.6). Documentation only — no infrastructure, no source changes.
 - [Observability operations guide](operations.md)
   — how to enable/configure OTLP and console export, environment-variable secret
   handling, sampling, collector-unavailable behavior, shutdown/flush, privacy
@@ -59,4 +68,5 @@ Telemetry architecture and instrumentation plan for IranDirect.
 Status: contracts implemented; runtime cycle, planning, execution, the native
 route boundary, the prefix/DNS network workflows, IPC, and support export
 instrumented. Optional OpenTelemetry export hosting is available (off by
-default).
+default). Consumption-platform architecture is designed (Phase 33.1); the
+local stack, dashboards, alerts, and hardening are planned for Phases 33.2–33.6.
