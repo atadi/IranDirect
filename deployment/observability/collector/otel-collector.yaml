@@ -1,0 +1,90 @@
+# OpenTelemetry Collector Contrib configuration - IranDirect Phase 33.2.
+#
+# Implements Phase 33.1 s6 exactly. The collector is the only OTLP endpoint
+# the application talks to. It performs NO attribute mutation, NO transforms
+# and NO tail sampling: the application telemetry contract is frozen and the
+# pipeline passes span/metric/tag names through untouched.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # First in every pipeline: protects the host from OOM by forcing drops
+  # under memory pressure rather than growing unbounded.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+
+  # Reduces export calls to the backends.
+  batch:
+    timeout: 5s
+    send_batch_size: 8192
+    send_batch_max_size: 10000
+
+  # Defensive only. The Service already sets service.name, service.version
+  # and deployment.environment.name; these inserts are no-ops when present
+  # and never overwrite (`upsert` is deliberately not used).
+  resource:
+    attributes:
+      - key: service.name
+        value: IranDirect.Service
+        action: insert
+      - key: deployment.environment.name
+        value: development
+        action: insert
+
+exporters:
+  # Metrics: exposed for Prometheus to scrape. Not published to the host;
+  # only Prometheus inside the stack network reaches it.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: false
+
+  # Traces: forwarded to Tempo over OTLP gRPC with bounded queue and retry.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # DEVELOPMENT TOGGLE ONLY.
+  # Attached to the pipelines below but inert unless OTEL_DEBUG_VERBOSITY is
+  # set (e.g. `normal`) in the environment. Never enable in production: it
+  # writes telemetry summaries to the collector log.
+  debug:
+    verbosity: ${env:OTEL_DEBUG_VERBOSITY:-none}
+
+extensions:
+  # Container health checks and startup-order gates.
+  health_check:
+    endpoint: 0.0.0.0:13133
+  # pprof and zpages are deliberately omitted (Phase 33.1 s6).
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/tempo, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [prometheus, debug]
+  telemetry:
+    logs:
+      level: info

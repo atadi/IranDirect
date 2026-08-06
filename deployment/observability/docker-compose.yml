@@ -1,0 +1,173 @@
+# IranDirect local observability stack (Phase 33.2).
+#
+# Consumes the telemetry already emitted by IranDirect.Service (Phases
+# 32.2-32.9) without changing it. The OpenTelemetry Collector is the ONLY
+# endpoint the application talks to; Prometheus, Tempo and Grafana are never
+# addressed directly by the Service.
+#
+# Components (exactly four, per Phase 33.1 Option A):
+#   otel-collector  OTLP ingest boundary (gRPC 4317, HTTP 4318)
+#   prometheus      metric storage, scrapes the collector
+#   tempo           trace storage, filesystem backend
+#   grafana         dashboarding, provisioned datasources only
+#
+# Resource guidance (Phase 33.1 s4/s15) - deliberately NOT enforced as hard
+# limits so the dev stack degrades gracefully on a laptop:
+#   otel-collector  ~50-150 MB RAM   (memory_limiter caps at 400 MiB)
+#   prometheus      ~300-600 MB RAM  + ~15 GB disk at 30d retention
+#   tempo           ~500 MB-1 GB RAM + < 2 GB disk at dev retention
+#   grafana         ~100-300 MB RAM
+#   Total planning figure: ~2 GB RAM, ~45 GB disk with headroom.
+# To enforce limits on a shared host, uncomment the `deploy.resources` blocks.
+
+name: irandirect-observability
+
+networks:
+  # Internal stack network. Backends are reachable by service name only.
+  observability:
+    name: irandirect-observability
+    driver: bridge
+
+volumes:
+  # Persistent storage. Survives `docker compose down`; removed only by
+  # `docker compose down -v` (see README "Wipe data").
+  prometheus-data:
+    name: irandirect-prometheus-data
+  tempo-data:
+    name: irandirect-tempo-data
+  grafana-data:
+    name: irandirect-grafana-data
+
+services:
+  # --------------------------------------------------------------------
+  # OpenTelemetry Collector - the sole application-facing OTLP endpoint.
+  # --------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: irandirect-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./collector/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    environment:
+      # Development-only debug exporter toggle. Empty/absent => disabled.
+      # Set OTEL_DEBUG_VERBOSITY=normal in .env to log a telemetry summary.
+      OTEL_DEBUG_VERBOSITY: ${OTEL_DEBUG_VERBOSITY:-}
+    ports:
+      # Justified host ports: the Windows Service runs on the host, outside
+      # this network, and must reach the collector.
+      - "127.0.0.1:4317:4317"   # OTLP gRPC   (Service -> collector)
+      - "127.0.0.1:4318:4318"   # OTLP HTTP   (Service -> collector, alt)
+      - "127.0.0.1:13133:13133" # health_check (operator smoke tests)
+      # 8889 (Prometheus scrape endpoint) is intentionally NOT published:
+      # only Prometheus, inside the network, needs it.
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "--help"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # deploy:
+    #   resources:
+    #     limits: { memory: 512M, cpus: "0.50" }
+
+  # --------------------------------------------------------------------
+  # Prometheus - metric storage. Scrapes the collector; no remote write.
+  # --------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: irandirect-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      # Justified: operators query PromQL directly during development.
+      - "127.0.0.1:9090:9090"
+    networks:
+      - observability
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    # deploy:
+    #   resources:
+    #     limits: { memory: 1G, cpus: "1.00" }
+
+  # --------------------------------------------------------------------
+  # Tempo - trace storage. Filesystem backend, local blocks, no object store.
+  # --------------------------------------------------------------------
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: irandirect-tempo
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    user: "0:0" # writes to the named volume; dev-only convenience
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    # No host ports: only the collector (OTLP 4317) and Grafana (HTTP 3200)
+    # reach Tempo, both from inside the network.
+    expose:
+      - "3200"
+      - "4317"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # deploy:
+    #   resources:
+    #     limits: { memory: 1G, cpus: "1.00" }
+
+  # --------------------------------------------------------------------
+  # Grafana - dashboarding. Datasources provisioned; no dashboards yet.
+  # --------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: irandirect-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:?set GF_SECURITY_ADMIN_USER in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD in .env}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # Justified: the Grafana UI is the operator entry point.
+      - "127.0.0.1:3000:3000"
+    networks:
+      - observability
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # deploy:
+    #   resources:
+    #     limits: { memory: 512M, cpus: "0.50" }

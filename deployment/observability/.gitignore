@@ -1,0 +1,2 @@
+# Local stack secrets - never committed. Use .env.example as the template.
+.env

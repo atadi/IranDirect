@@ -1,0 +1,51 @@
+# Tempo configuration - IranDirect Phase 33.2.
+#
+# Single-binary Tempo with a filesystem backend and local blocks. No object
+# storage and no external search backend (Phase 33.1 s8). Retention is a
+# development value; production tuning is Phase 33.5.
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+
+distributor:
+  receivers:
+    # OTLP gRPC only - the collector is the sole writer.
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  # Small windows keep traces queryable quickly in development.
+  max_block_duration: 5m
+  complete_block_timeout: 15m
+
+compactor:
+  compaction:
+    # Development retention: 3 days (Phase 33.1 recommends 1-3d for dev,
+    # 7-14d for production).
+    block_retention: 72h
+    compacted_block_retention: 1h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+    pool:
+      max_workers: 20
+      queue_depth: 2000
+
+query_frontend:
+  search:
+    duration_slo: 5s
+  trace_by_id:
+    duration_slo: 5s
+
+usage_report:
+  reporting_enabled: false

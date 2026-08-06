@@ -60,6 +60,16 @@ Telemetry architecture and instrumentation plan for IranDirect.
   backup/recovery, deployment topology, environment separation, runbook
   requirements, failure-isolation confirmation, and a phased roadmap
   (33.2–33.6). Documentation only — no infrastructure, no source changes.
+- [Phase 33.2 local observability stack](../../deployment/observability/README.md)
+  — reproducible local Docker Compose stack implementing the Phase 33.1 design:
+  OpenTelemetry Collector (sole OTLP endpoint, gRPC 4317 / HTTP 4318),
+  Prometheus (15s scrape, 30-day retention), Tempo (filesystem backend, local
+  blocks) and Grafana (Prometheus + Tempo datasources provisioned, anonymous
+  access disabled, admin credentials via environment only). Named volumes,
+  health checks, loopback-only host ports, `.env.example` placeholders, and
+  documented startup/shutdown/wipe/manual-verification procedures. Consumer
+  only — no dashboards yet, and the application telemetry contract is
+  unchanged. Lives in [`deployment/observability/`](../../deployment/observability/).
 - [Observability operations guide](operations.md)
   — how to enable/configure OTLP and console export, environment-variable secret
   handling, sampling, collector-unavailable behavior, shutdown/flush, privacy
@@ -68,5 +78,7 @@ Telemetry architecture and instrumentation plan for IranDirect.
 Status: contracts implemented; runtime cycle, planning, execution, the native
 route boundary, the prefix/DNS network workflows, IPC, and support export
 instrumented. Optional OpenTelemetry export hosting is available (off by
-default). Consumption-platform architecture is designed (Phase 33.1); the
-local stack, dashboards, alerts, and hardening are planned for Phases 33.2–33.6.
+default). Consumption-platform architecture is designed (Phase 33.1) and the
+local consumption stack (Collector + Prometheus + Tempo + Grafana) is available
+under `deployment/observability/` (Phase 33.2); dashboards, alerts, and
+hardening are planned for Phases 33.3–33.6.

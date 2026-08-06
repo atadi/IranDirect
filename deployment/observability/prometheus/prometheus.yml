@@ -1,0 +1,29 @@
+# Prometheus configuration - IranDirect Phase 33.2.
+#
+# Scrapes the OpenTelemetry Collector's prometheus exporter. No remote write,
+# no recording rules and no alert rules yet (Phase 33.4 owns those).
+#
+# Retention (30 days) is set on the command line in docker-compose.yml via
+# --storage.tsdb.retention.time=30d; it is not a config-file setting.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: irandirect-local
+
+# No remote_write.
+# No rule_files yet - recording rules and alerts arrive in Phase 33.4.
+
+scrape_configs:
+  # IranDirect application telemetry, republished by the collector.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+        labels:
+          job_source: irandirect-service
+
+  # Prometheus' own metrics - lets operators verify scrape health.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
