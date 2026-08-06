@@ -22,6 +22,7 @@ using IranDirect.Core.SystemTools;
 using IranDirect.Core.Vpn;
 using IranDirect.Service;
 using IranDirect.Service.Ipc;
+using IranDirect.Service.Observability;
 using IranDirect.Service.Operations;
 
 string dataDirectory = Path.Combine(
@@ -404,6 +405,10 @@ builder.Services.AddSingleton<ISupportBundleExporter>(
 builder.Services.AddSingleton<SupportBundleCommandHandler>();
 builder.Services.AddSingleton<NamedPipeCommandServer>();
 builder.Services.AddHostedService<IranDirectWorker>();
+
+builder.Services.AddIranDirectObservability(
+    builder.Configuration,
+    builder.Environment.EnvironmentName);
 
 IHost host = builder.Build();
 

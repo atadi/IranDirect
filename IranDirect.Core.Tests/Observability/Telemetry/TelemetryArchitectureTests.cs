@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using IranDirect.Core.Observability.Telemetry;
 using Xunit;
 using Xunit.Abstractions;
@@ -882,18 +883,43 @@ public sealed class TelemetryArchitectureTests
     [Fact]
     public void NoOpenTelemetryPackagesOrExporters()
     {
-        foreach (var project in new[]
-                 {
-                     "IranDirect.Core",
-                     "IranDirect.Service",
-                 })
+        // Phase 32.9 intentionally adds OpenTelemetry hosting to the Service
+        // host (and its test project). Core, CLI, Tray, Benchmarks, and Testing
+        // must remain OpenTelemetry-free so the Core telemetry contracts stay
+        // BCL-only and no telemetry is added to CLI/Tray business logic.
+        string[] allowed = new[]
         {
-            string file = Path.Combine(RepoRoot(), project, $"{project}.csproj");
-            string content = File.ReadAllText(file);
-            Assert.DoesNotContain(
-                "OpenTelemetry", content, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(
-                "Exporter", content, StringComparison.OrdinalIgnoreCase);
+            "IranDirect.Service/IranDirect.Service.csproj",
+            "IranDirect.Service.Tests/IranDirect.Service.Tests.csproj",
+        };
+        string[] forbidden = new[]
+        {
+            "IranDirect.Core/IranDirect.Core.csproj",
+            "IranDirect.Cli/IranDirect.Cli.csproj",
+            "IranDirect.Tray/IranDirect.Tray.csproj",
+            "IranDirect.Benchmarks/IranDirect.Benchmarks.csproj",
+            "IranDirect.Testing/IranDirect.Testing.csproj",
+        };
+
+        foreach (string proj in allowed)
+        {
+            string content = File.ReadAllText(
+                Path.Combine(RepoRoot(), proj));
+            Assert.True(
+                content.Contains("OpenTelemetry", StringComparison.OrdinalIgnoreCase),
+                $"{proj} should reference OpenTelemetry packages");
+        }
+
+        foreach (string proj in forbidden)
+        {
+            string content = File.ReadAllText(
+                Path.Combine(RepoRoot(), proj));
+            Assert.False(
+                content.Contains("OpenTelemetry", StringComparison.OrdinalIgnoreCase),
+                $"{proj} must not reference OpenTelemetry packages");
+            Assert.False(
+                content.Contains("Exporter", StringComparison.OrdinalIgnoreCase),
+                $"{proj} must not reference exporters");
         }
     }
 
@@ -1219,6 +1245,245 @@ public sealed class TelemetryArchitectureTests
         Assert.Contains("SupportBundlesExported", metricNames);
         Assert.Contains("SupportBundlesFailed", metricNames);
         Assert.Contains("SupportBundleDuration", metricNames);
+    }
+
+    [Fact]
+    public void OpenTelemetryPackages_OnlyInServiceAndServiceTests()
+    {
+        // OpenTelemetry package references must be confined to the Service
+        // host and its test project. Core, CLI, Tray, Benchmarks, Testing must
+        // remain OpenTelemetry-free so the Core telemetry contracts stay BCL-only.
+        string[] allowed = new[]
+        {
+            "IranDirect.Service/IranDirect.Service.csproj",
+            "IranDirect.Service.Tests/IranDirect.Service.Tests.csproj",
+        };
+        string[] forbidden = new[]
+        {
+            "IranDirect.Core/IranDirect.Core.csproj",
+            "IranDirect.Cli/IranDirect.Cli.csproj",
+            "IranDirect.Tray/IranDirect.Tray.csproj",
+            "IranDirect.Benchmarks/IranDirect.Benchmarks.csproj",
+            "IranDirect.Testing/IranDirect.Testing.csproj",
+        };
+
+        string otelMarker = "OpenTelemetry";
+
+        foreach (string proj in allowed)
+        {
+            string content = File.ReadAllText(
+                Path.Combine(RepoRoot(), proj));
+            Assert.True(
+                content.Contains(otelMarker),
+                $"{proj} should reference OpenTelemetry packages");
+        }
+
+        foreach (string proj in forbidden)
+        {
+            string content = File.ReadAllText(
+                Path.Combine(RepoRoot(), proj));
+            Assert.False(
+                content.Contains("OpenTelemetry"),
+                $"{proj} must not reference OpenTelemetry packages");
+        }
+    }
+
+    [Fact]
+    public void OpenTelemetry_NoAutomaticInstrumentationPackages()
+    {
+        // No auto-instrumentation (HTTP, runtime, process, SQL, ASP.NET) may
+        // be introduced. Only the minimal hosting/export packages are allowed.
+        string serviceCsproj = File.ReadAllText(Path.Combine(
+            RepoRoot(), "IranDirect.Service/IranDirect.Service.csproj"));
+        string serviceTestsCsproj = File.ReadAllText(Path.Combine(
+            RepoRoot(),
+            "IranDirect.Service.Tests/IranDirect.Service.Tests.csproj"));
+
+        string combined = serviceCsproj + "\n" + serviceTestsCsproj;
+
+        Assert.Contains(
+            "OpenTelemetry.Extensions.Hosting", combined);
+        Assert.Contains(
+            "OpenTelemetry.Exporter.OpenTelemetryProtocol", combined);
+
+        Assert.DoesNotContain(
+            "OpenTelemetry.Instrumentation", combined);
+        Assert.DoesNotContain(
+            "OpenTelemetry.Exporter.Prometheus", combined);
+    }
+
+    [Fact]
+    public void CoreTelemetryContracts_RemainBclOnly()
+    {
+        // IranDirectTelemetry and the telemetry helpers must not reference
+        // OpenTelemetry exporter/provider/sampler namespaces.
+        string[] coreFiles =
+        {
+            "IranDirect.Core/Observability/Telemetry/IranDirectTelemetry.cs",
+            "IranDirect.Core/Observability/Telemetry/IranDirectActivityNames.cs",
+            "IranDirect.Core/Observability/Telemetry/IranDirectMetricNames.cs",
+        };
+
+        foreach (string file in coreFiles)
+        {
+            string content = File.ReadAllText(
+                Path.Combine(RepoRoot(), file));
+            Assert.DoesNotContain(
+                "OpenTelemetry.Exporter", content);
+            Assert.DoesNotContain(
+                "OpenTelemetry.Trace", content);
+            Assert.DoesNotContain(
+                "OpenTelemetry.Metrics", content);
+            Assert.DoesNotContain(
+                "TracerProvider", content);
+            Assert.DoesNotContain(
+                "MeterProvider", content);
+            Assert.DoesNotContain(
+                "Sampler", content);
+        }
+    }
+
+    [Fact]
+    public void ObservabilityHosting_ConfinedToService()
+    {
+        // The OpenTelemetry registration must live only under
+        // IranDirect.Service/Observability. Core business namespaces must not
+        // register providers or exporters.
+        string serviceDir = Path.Combine(
+            RepoRoot(), "IranDirect.Service/Observability");
+        Assert.True(Directory.Exists(serviceDir));
+
+        string[] registrationFiles = Directory.GetFiles(
+            serviceDir, "*.cs", SearchOption.AllDirectories);
+        bool hasRegistration = false;
+        foreach (string file in registrationFiles)
+        {
+            string content = File.ReadAllText(file);
+            if (content.Contains("AddOpenTelemetry") ||
+                content.Contains("AddOtlpExporter") ||
+                content.Contains("AddConsoleExporter"))
+            {
+                hasRegistration = true;
+            }
+        }
+        Assert.True(hasRegistration);
+
+        // Core business (planner/executor/routing/prefix/dns/ipc/support) must
+        // not reference OTel hosting.
+        string[] coreNamespaces = new[]
+        {
+            "IranDirect.Core/Runtime",
+            "IranDirect.Core/Routing",
+            "IranDirect.Core/Prefixes",
+            "IranDirect.Core/Networking",
+            "IranDirect.Core/Ipc",
+            "IranDirect.Core/Support",
+            "IranDirect.Core/CustomRoutes",
+        };
+        foreach (string ns in coreNamespaces)
+        {
+            string dir = Path.Combine(RepoRoot(), ns);
+            if (!Directory.Exists(dir))
+            {
+                continue;
+            }
+
+            foreach (string file in Directory.GetFiles(
+                dir, "*.cs", SearchOption.AllDirectories))
+            {
+                string content = File.ReadAllText(file);
+                Assert.DoesNotContain(
+                    "OpenTelemetry.Extensions.Hosting", content);
+                Assert.DoesNotContain(
+                    "AddOpenTelemetry", content);
+                Assert.DoesNotContain(
+                    "OtlpExporter", content);
+            }
+        }
+    }
+
+    [Fact]
+    public void Appsettings_ContainNoSecrets()
+    {
+        // Committed configuration must not carry OTLP headers/tokens or other
+        // secrets. Headers are loaded from environment variables only.
+        string[] appsettings =
+        {
+            "IranDirect.Service/appsettings.json",
+            "IranDirect.Service/appsettings.Development.json",
+        };
+        string[] secretKeys = new[]
+        {
+            "Token", "Secret", "Password", "ApiKey",
+            "Authorization", "Bearer",
+        };
+
+        foreach (string file in appsettings)
+        {
+            string content = File.ReadAllText(
+                Path.Combine(RepoRoot(), file));
+            // The OTLP headers ENVIRONMENT VARIABLE NAME is a config key with an
+            // empty value; the actual secret value is supplied via the env var,
+            // never committed. Only the secret material (keys/values below) is
+            // forbidden.
+            foreach (string key in secretKeys)
+            {
+                Assert.False(
+                    content.Contains(key),
+                    $"{file} must not contain secret key '{key}'");
+            }
+            // OTLP endpoint must be blank by default.
+            Assert.DoesNotContain(
+                "4317", content);
+            Assert.DoesNotContain(
+                "4318", content);
+            Assert.DoesNotContain(
+                "http://", content);
+            Assert.DoesNotContain(
+                "https://", content);
+        }
+    }
+
+    [Fact]
+    public void ObservabilityResource_HasNoForbiddenAttributes()
+    {
+        string content = File.ReadAllText(Path.Combine(
+            RepoRoot(),
+            "IranDirect.Service/Observability/ObservabilityResourceBuilder.cs"));
+
+        string[] forbidden = new[]
+        {
+            "machine.name", "host.name", "host.id", "host.arch",
+            "service.instance.id", "process.command_line",
+            "process.executable.path", "cloud.account.id",
+            "cloud.region", "cloud.availability_zone",
+            "user.name", "local.ip",
+        };
+        foreach (string attr in forbidden)
+        {
+            Assert.DoesNotContain(attr, content);
+        }
+    }
+
+    [Fact]
+    public void ServiceRegistration_ExactlyOneExtension()
+    {
+        string content = File.ReadAllText(Path.Combine(
+            RepoRoot(),
+            "IranDirect.Service/Observability/" +
+            "ObservabilityServiceCollectionExtensions.cs"));
+
+        int addMethods = 0;
+        foreach (Match m in Regex.Matches(
+            content, @"public static IServiceCollection AddIranDirectObservability\("))
+        {
+            addMethods++;
+        }
+        Assert.Equal(1, addMethods);
+        Assert.Contains(
+            "AddIranDirectObservability",
+            File.ReadAllText(Path.Combine(
+                RepoRoot(), "IranDirect.Service/Program.cs")));
     }
 
     private static string RepoRoot()

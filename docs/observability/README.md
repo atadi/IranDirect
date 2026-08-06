@@ -45,7 +45,18 @@ Telemetry architecture and instrumentation plan for IranDirect.
   support counters + duration histograms; bounded operation/ipc_command/outcome/
   failure-category tags; no duplicate roots when a bundle drives the snapshot
   exporter, no payload/path/identity attachments, no OpenTelemetry packages.
+- [Phase 32.9 OpenTelemetry hosting and export configuration](phase-32.9-opentelemetry-hosting.md)
+  — adds **optional**, disabled-by-default OpenTelemetry hosting inside
+  `IranDirect.Service`: tracing/metrics registration for the existing Core
+  ActivitySource/Meter, optional OTLP and Development-only console export, bounded
+  resource attributes, options validation, failure/shutdown isolation. No new
+  workflow instrumentation; Core contracts unchanged; Core remains BCL-only.
+- [Observability operations guide](operations.md)
+  — how to enable/configure OTLP and console export, environment-variable secret
+  handling, sampling, collector-unavailable behavior, shutdown/flush, privacy
+  guarantees, and troubleshooting.
 
 Status: contracts implemented; runtime cycle, planning, execution, the native
 route boundary, the prefix/DNS network workflows, IPC, and support export
-instrumented.
+instrumented. Optional OpenTelemetry export hosting is available (off by
+default).
