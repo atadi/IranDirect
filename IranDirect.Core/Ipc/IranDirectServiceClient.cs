@@ -1,4 +1,5 @@
 using System.Text.Json;
+using IranDirect.Core.Observability.Telemetry;
 using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Ipc;
@@ -38,56 +39,144 @@ public sealed class IranDirectServiceClient :
                 request,
                 IranDirectJson.Options);
 
-        if (ShouldFailAt(FaultInjectionPoint.NamedPipeSend))
-        {
-            throw new FaultInjectionException(
-                FaultInjectionPoint.NamedPipeSend);
-        }
-
-        using CancellationTokenSource timeoutSource =
-            CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken);
-
-        timeoutSource.CancelAfter(DefaultConnectTimeout);
-
-        INamedPipeClientConnection connection;
+        using IpcRequestTelemetry.IpcRequestScope root =
+            IpcRequestTelemetry.Start(command);
 
         try
         {
-            connection =
-                await _factory.ConnectAsync(timeoutSource.Token);
-        }
-        catch (OperationCanceledException)
-            when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                "IranDirect Service is unavailable or did not " +
-                "accept the connection within 5 seconds.");
-        }
+            if (ShouldFailAt(FaultInjectionPoint.NamedPipeSend))
+            {
+                throw new FaultInjectionException(
+                    FaultInjectionPoint.NamedPipeSend);
+            }
 
-        await using (connection)
-        {
-            await connection.WriteRequestLineAsync(
-                requestJson,
-                cancellationToken);
-
-            string? responseJson =
-                await connection.ReadResponseLineAsync(
+            using CancellationTokenSource timeoutSource =
+                CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken);
 
-            ServiceResponse? response =
-                JsonSerializer.Deserialize<ServiceResponse>(
-                    responseJson ?? "",
-                    IranDirectJson.Options);
+            timeoutSource.CancelAfter(DefaultConnectTimeout);
 
-            return response
-                ?? new ServiceResponse
+            INamedPipeClientConnection connection;
+
+            using (IpcRequestTelemetry.IpcChildScope connect =
+                root.StartConnect())
+            {
+                try
                 {
-                    Success = false,
-                    ErrorCode = "INVALID_RESPONSE",
-                    Message =
-                        "The service returned an invalid response."
-                };
+                    connection =
+                        await _factory.ConnectAsync(timeoutSource.Token);
+                    connect.CompleteSuccess();
+                }
+                catch (OperationCanceledException)
+                    when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Connect timeout (not caller cancellation) is remapped to
+                    // TimeoutException; surface it on the child now.
+                    connect.CompleteTimeout();
+                    throw new TimeoutException(
+                        "IranDirect Service is unavailable or did not " +
+                        "accept the connection within 5 seconds.");
+                }
+                catch (OperationCanceledException)
+                {
+                    connect.CompleteCancelled();
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    connect.CompleteFailure(ex);
+                    throw;
+                }
+            }
+
+            await using (connection)
+            {
+                using (IpcRequestTelemetry.IpcChildScope send =
+                    root.StartSend())
+                {
+                    try
+                    {
+                        await connection.WriteRequestLineAsync(
+                            requestJson,
+                            cancellationToken);
+                        send.CompleteSuccess();
+                    }
+                    catch (Exception ex)
+                    {
+                        send.CompleteFailure(ex);
+                        throw;
+                    }
+                }
+
+                string? responseJson;
+                using (IpcRequestTelemetry.IpcChildScope receive =
+                    root.StartReceive())
+                {
+                    try
+                    {
+                        responseJson =
+                            await connection.ReadResponseLineAsync(
+                                cancellationToken);
+                        receive.CompleteSuccess();
+                    }
+                    catch (Exception ex)
+                    {
+                        receive.CompleteFailure(ex);
+                        throw;
+                    }
+                }
+
+                ServiceResponse? response =
+                    JsonSerializer.Deserialize<ServiceResponse>(
+                        responseJson ?? "",
+                        IranDirectJson.Options);
+
+                if (response is null)
+                {
+                    response = new ServiceResponse
+                    {
+                        Success = false,
+                        ErrorCode = "INVALID_RESPONSE",
+                        Message =
+                            "The service returned an invalid response."
+                    };
+                }
+
+                string? failureCategory =
+                    (!response.Success &&
+                     response.ErrorCode == "INVALID_RESPONSE")
+                        ? IranDirectTagValues.FailureInvalidResponse
+                        : null;
+
+                root.Complete(
+                    response.Success
+                        ? TelemetryOutcome.Success
+                        : TelemetryOutcome.Failure,
+                    failureCategory);
+
+                return response;
+            }
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            root.CompleteCancelled();
+            throw;
+        }
+        catch (TimeoutException)
+        {
+            root.CompleteTimeout();
+            throw;
+        }
+        catch (FaultInjectionException ex)
+        {
+            root.CompleteFailure(ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            root.CompleteFailure(ex);
+            throw;
         }
     }
 

@@ -36,6 +36,16 @@ Telemetry architecture and instrumentation plan for IranDirect.
   prefix + DNS counters and duration histograms; bounded operation/source/outcome/
   cache-state/trigger/failure-category tags; no per-prefix or per-address spans,
   no URLs/domains/IPs attached, no OpenTelemetry packages.
+- [Phase 32.8 IPC and support export telemetry](phase-32.8-ipc-and-support-export-telemetry.md)
+  — instruments the named-pipe IPC request/response (`IranDirect.IpcRequest` root
+  + `Ipc.Connect`/`Ipc.Send`/`Ipc.Receive` children, plus an independent
+  `Ipc.Dispatch` server root) and the support snapshot/bundle export
+  (`IranDirect.SupportBundleExport` shared root + `Support.CaptureSnapshot`/
+  `Support.Serialize`/`Support.WriteJson`/`Support.CreateZip` children); IPC and
+  support counters + duration histograms; bounded operation/ipc_command/outcome/
+  failure-category tags; no duplicate roots when a bundle drives the snapshot
+  exporter, no payload/path/identity attachments, no OpenTelemetry packages.
 
 Status: contracts implemented; runtime cycle, planning, execution, the native
-route boundary, and the prefix/DNS network workflows instrumented.
+route boundary, the prefix/DNS network workflows, IPC, and support export
+instrumented.

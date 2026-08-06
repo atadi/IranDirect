@@ -35,6 +35,21 @@ public static class IranDirectTagValues
     public const string OperationDnsResolve = "dns_resolve";
     public const string OperationDnsCacheWrite = "dns_cache_write";
 
+    // ipc operations
+    public const string OperationIpcRequest = "ipc_request";
+    public const string OperationIpcConnect = "ipc_connect";
+    public const string OperationIpcSend = "ipc_send";
+    public const string OperationIpcReceive = "ipc_receive";
+    public const string OperationIpcDispatch = "ipc_dispatch";
+
+    // support export operations
+    public const string OperationSupportSnapshotExport = "support_snapshot_export";
+    public const string OperationSupportBundleExport = "support_bundle_export";
+    public const string OperationSupportCaptureSnapshot = "support_capture_snapshot";
+    public const string OperationSupportSerialize = "support_serialize";
+    public const string OperationSupportWriteJson = "support_write_json";
+    public const string OperationSupportCreateZip = "support_create_zip";
+
     // trigger
     public const string TriggerScheduled = "scheduled";
     public const string TriggerForced = "forced";

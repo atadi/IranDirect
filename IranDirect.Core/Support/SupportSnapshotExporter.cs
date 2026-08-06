@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using IranDirect.Core.Observability.Telemetry;
+
 namespace IranDirect.Core.Support;
 
 public sealed class SupportSnapshotExporter :
@@ -35,30 +38,116 @@ public sealed class SupportSnapshotExporter :
         SupportSnapshotExportOptions options,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(
+        return await ExportCoreAsync(
             outputPath,
-            nameof(outputPath));
+            options,
+            createRootTelemetry: true,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Internal nested path used by <see cref="SupportBundleExporter"/>.
+    /// Performs the snapshot work (capture, serialize, write) as children of
+    /// the enclosing bundle export root without creating a second root Activity
+    /// or recording a duplicate terminal metric. The bundle scope already owns
+    /// the root and the terminal counter/histogram, so this path attaches only
+    /// the CaptureSnapshot/Serialize/WriteJson children. The nested decision is
+    /// explicit (the caller chooses this method) and never depends on
+    /// <c>Activity.Current</c>.
+    /// </summary>
+    public Task<SupportSnapshotExportResult> ExportWithinBundleAsync(
+        string outputPath,
+        CancellationToken cancellationToken = default)
+    {
+        return ExportCoreAsync(
+            outputPath,
+            SupportSnapshotExportOptions.Default,
+            createRootTelemetry: false,
+            cancellationToken);
+    }
+
+    private async Task<SupportSnapshotExportResult> ExportCoreAsync(
+        string outputPath,
+        SupportSnapshotExportOptions options,
+        bool createRootTelemetry,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            outputPath, nameof(outputPath));
         ArgumentNullException.ThrowIfNull(options);
 
-        SupportSnapshot snapshot =
-            await _provider.CaptureAsync(
-                cancellationToken);
-
-        byte[] bytes = _serializer.SerializeToUtf8Bytes(snapshot);
-
-        long bytesWritten = await WriteAtomicallyAsync(
-            outputPath,
-            bytes,
-            options,
-            cancellationToken);
-
-        return new SupportSnapshotExportResult
+        // Create the telemetry root eagerly (before any throwing work) so a
+        // failure during path validation still yields one root with a
+        // failure outcome. The nested bundle path uses StartNested, which
+        // attaches children to the enclosing root without a second root.
+        SupportExportTelemetry.SupportExportScope scope =
+            createRootTelemetry
+                ? SupportExportTelemetry.Start(
+                    IranDirectTagValues.OperationSupportSnapshotExport)
+                : SupportExportTelemetry.StartNested(
+                    IranDirectTagValues.OperationSupportSnapshotExport);
+        using (scope)
         {
-            OutputPath = outputPath,
-            BytesWritten = bytesWritten,
-            ExportedAt = _timeProvider.GetUtcNow(),
-            Snapshot = snapshot
-        };
+        try
+        {
+        string fullPath = Path.GetFullPath(outputPath);
+        if (File.Exists(fullPath) &&
+            !options.OverwriteExisting)
+        {
+            throw new IOException(
+                $"File '{fullPath}' already exists.");
+        }
+
+        string? parentDirectory =
+            Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            Directory.CreateDirectory(parentDirectory);
+        }
+
+            SupportSnapshot snapshot;
+            using (SupportExportTelemetry.SupportChildScope capture =
+                scope.StartCaptureSnapshot())
+            {
+                snapshot = await _provider.CaptureAsync(
+                    cancellationToken);
+                capture.CompleteSuccess();
+            }
+
+            byte[] bytes;
+            using (SupportExportTelemetry.SupportChildScope serialize =
+                scope.StartSerialize())
+            {
+                bytes = _serializer.SerializeToUtf8Bytes(snapshot);
+                serialize.CompleteSuccess();
+            }
+
+            using (SupportExportTelemetry.SupportChildScope write =
+                scope.StartWriteJson())
+            {
+                long bytesWritten = await WriteAtomicallyAsync(
+                    outputPath,
+                    bytes,
+                    options,
+                    cancellationToken);
+                write.CompleteSuccess();
+
+                scope.CompleteSuccess();
+                return new SupportSnapshotExportResult
+                {
+                    OutputPath = outputPath,
+                    BytesWritten = bytesWritten,
+                    ExportedAt = _timeProvider.GetUtcNow(),
+                    Snapshot = snapshot
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            scope.CompleteFailure(ex);
+            throw;
+        }
+        }
     }
 
     private static async Task<long> WriteAtomicallyAsync(

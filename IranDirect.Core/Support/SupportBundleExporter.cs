@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using IranDirect.Core.Observability.Telemetry;
 
 namespace IranDirect.Core.Support;
 
@@ -71,35 +72,54 @@ public sealed class SupportBundleExporter :
         bool moved = false;
         SupportSnapshotExportResult? innerResult = null;
 
+        using SupportExportTelemetry.SupportExportScope scope =
+            SupportExportTelemetry.Start(
+                IranDirectTagValues.OperationSupportBundleExport);
+
         try
         {
             string snapshotJsonPath = Path.Combine(
                 workingDirectory, SnapshotFileName);
 
+            // Explicit nested path: the snapshot exporter attaches its
+            // CaptureSnapshot/Serialize/WriteJson children to this root,
+            // creating no second root and no duplicate terminal metric.
             innerResult =
-                await _snapshotExporter.ExportAsync(
+                await _snapshotExporter.ExportWithinBundleAsync(
                     snapshotJsonPath,
                     cancellationToken);
 
-            long bytesWritten = await CreateZipAsync(
-                tempZipPath,
-                snapshotJsonPath,
-                options,
-                cancellationToken);
-
-            File.Move(
-                tempZipPath,
-                fullZipPath,
-                overwrite: true);
-            moved = true;
-
-            return new SupportBundleExportResult
+            using (SupportExportTelemetry.SupportChildScope zip =
+                scope.StartCreateZip())
             {
-                BundlePath = fullZipPath,
-                BytesWritten = bytesWritten,
-                ExportedAt = _timeProvider.GetUtcNow(),
-                Snapshot = innerResult.Snapshot
-            };
+                long bytesWritten = await CreateZipAsync(
+                    tempZipPath,
+                    snapshotJsonPath,
+                    options,
+                    cancellationToken);
+
+                File.Move(
+                    tempZipPath,
+                    fullZipPath,
+                    overwrite: true);
+                moved = true;
+
+                zip.CompleteSuccess();
+                scope.CompleteSuccess();
+
+                return new SupportBundleExportResult
+                {
+                    BundlePath = fullZipPath,
+                    BytesWritten = bytesWritten,
+                    ExportedAt = _timeProvider.GetUtcNow(),
+                    Snapshot = innerResult.Snapshot
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            scope.CompleteFailure(ex);
+            throw;
         }
         finally
         {

@@ -897,6 +897,330 @@ public sealed class TelemetryArchitectureTests
         }
     }
 
+    [Fact]
+    public void IpcRequestTelemetry_ExactlyOneRootNoPerHandlerSpans()
+    {
+        // All Ipc.* activities must originate from IpcRequestTelemetry. Count
+        // production files that reference an Ipc activity name AND a
+        // StartActivity( call. Exactly one file, exactly two StartActivity
+        // calls (the IranDirect.IpcRequest root + the shared StartChild(...)).
+        string root = RepoRoot();
+        int files = 0;
+        int startCalls = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+            if (normalized.EndsWith("IpcDispatchTelemetry.cs"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            bool referencesIpc = content.Contains("IranDirectActivityNames.IpcRequest") ||
+                content.Contains("IranDirectActivityNames.IpcConnect") ||
+                content.Contains("IranDirectActivityNames.IpcSend") ||
+                content.Contains("IranDirectActivityNames.IpcReceive");
+            if (referencesIpc && content.Contains("StartActivity("))
+            {
+                files++;
+                startCalls += System.Text.RegularExpressions.Regex
+                    .Matches(content, @"StartActivity\s*\(").Count;
+            }
+        }
+
+        Assert.Equal(1, files);   // IpcRequestTelemetry.cs only
+        Assert.Equal(2, startCalls);
+    }
+
+    [Fact]
+    public void IpcRequestTelemetry_UsesApprovedActivityConstants()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/IpcRequestTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectActivityNames.IpcRequest", content);
+        Assert.Contains("IranDirectActivityNames.IpcConnect", content);
+        Assert.Contains("IranDirectActivityNames.IpcSend", content);
+        Assert.Contains("IranDirectActivityNames.IpcReceive", content);
+    }
+
+    [Fact]
+    public void IpcRequestTelemetry_ExactlyOneCounterAndOneHistogram()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/IpcRequestTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int counters = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateCounter<long>").Count;
+        int histograms = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateHistogram<double>").Count;
+
+        Assert.Equal(1, counters);  // irandirect.ipc.requests
+        Assert.Equal(1, histograms); // irandirect.ipc.request.duration
+
+        Assert.Contains("IranDirectMetricNames.IpcRequests", content);
+        Assert.Contains("IranDirectMetricNames.IpcRequestDuration", content);
+    }
+
+    [Fact]
+    public void IpcRequestTelemetry_OnlyApprovedTags_NoProhibited()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/IpcRequestTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectTagNames.Operation", content);
+        Assert.Contains("IranDirectTagNames.IpcCommand", content);
+        Assert.Contains("IranDirectTagNames.Outcome", content);
+
+        foreach (var tag in IranDirectTagNames.Prohibited)
+        {
+            Assert.DoesNotContain($"\"{tag}\"", content);
+        }
+    }
+
+    [Fact]
+    public void IranDirectServiceClient_OnlyUsesIpcTelemetryHelpers()
+    {
+        string path = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Ipc/IranDirectServiceClient.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IpcRequestTelemetry.Start(", content);
+        Assert.DoesNotContain("StartActivity(", content);
+        Assert.DoesNotContain("Meter.Create", content);
+        Assert.DoesNotContain("new ActivitySource", content);
+    }
+
+    [Fact]
+    public void IpcDispatchTelemetry_ExactlyOneLocationInService()
+    {
+        string root = RepoRoot();
+        int coreFiles = 0;
+        int serviceFiles = 0;
+        int startCalls = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            if (content.Contains("IranDirectActivityNames.IpcDispatch") &&
+                content.Contains("StartActivity("))
+            {
+                coreFiles++;
+                startCalls += System.Text.RegularExpressions.Regex
+                    .Matches(content, @"StartActivity\s*\(").Count;
+            }
+        }
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Service"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/") ||
+                normalized.Contains("IranDirect.Service.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            if (content.Contains("IpcDispatchTelemetry.Start"))
+            {
+                serviceFiles++;
+                startCalls += System.Text.RegularExpressions.Regex
+                    .Matches(content, @"StartActivity\s*\(").Count;
+            }
+        }
+
+        Assert.Equal(1, coreFiles);    // IpcDispatchTelemetry.cs (the helper)
+        Assert.Equal(1, serviceFiles); // named-pipe server uses it
+        Assert.Equal(1, startCalls);   // helper root only (no per-handler spans)
+    }
+
+    [Fact]
+    public void IpcDispatchTelemetry_UsesApprovedActivityConstants()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/IpcDispatchTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectActivityNames.IpcDispatch", content);
+    }
+
+    [Fact]
+    public void SupportExportTelemetry_ExactlyOneRootNoPerZipSpans()
+    {
+        string root = RepoRoot();
+        int files = 0;
+        int startCalls = 0;
+
+        foreach (var file in Directory.GetFiles(
+                     Path.Combine(root, "IranDirect.Core"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string normalized = file.Replace('\\', '/');
+            if (normalized.Contains("IranDirect.Core.Tests/"))
+                continue;
+
+            string content = File.ReadAllText(file);
+            bool referencesSupport = content.Contains("SupportBundleExport") ||
+                content.Contains("SupportCaptureSnapshot") ||
+                content.Contains("SupportSerialize") ||
+                content.Contains("SupportWriteJson") ||
+                content.Contains("SupportCreateZip");
+            if (referencesSupport && content.Contains("StartActivity("))
+            {
+                files++;
+                startCalls += System.Text.RegularExpressions.Regex
+                    .Matches(content, @"StartActivity\s*\(").Count;
+            }
+        }
+
+        Assert.Equal(1, files);   // SupportExportTelemetry.cs only
+        Assert.Equal(2, startCalls);
+    }
+
+    [Fact]
+    public void SupportExportTelemetry_UsesApprovedActivityConstants()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/SupportExportTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectActivityNames.SupportBundleExport", content);
+        Assert.Contains("IranDirectActivityNames.SupportCaptureSnapshot", content);
+        Assert.Contains("IranDirectActivityNames.SupportSerialize", content);
+        Assert.Contains("IranDirectActivityNames.SupportWriteJson", content);
+        Assert.Contains("IranDirectActivityNames.SupportCreateZip", content);
+    }
+
+    [Fact]
+    public void SupportExportTelemetry_ExactlyTwoCountersAndOneHistogram()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/SupportExportTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        int counters = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateCounter<long>").Count;
+        int histograms = System.Text.RegularExpressions.Regex.Matches(
+            content, @"CreateHistogram<double>").Count;
+
+        Assert.Equal(2, counters);  // bundles.exported + bundles.failed
+        Assert.Equal(1, histograms); // bundle.duration
+
+        Assert.Contains("IranDirectMetricNames.SupportBundlesExported", content);
+        Assert.Contains("IranDirectMetricNames.SupportBundlesFailed", content);
+        Assert.Contains("IranDirectMetricNames.SupportBundleDuration", content);
+    }
+
+    [Fact]
+    public void SupportExportTelemetry_OnlyApprovedTags_NoProhibited()
+    {
+        string path = Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/SupportExportTelemetry.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IranDirectTagNames.Operation", content);
+        Assert.Contains("IranDirectTagNames.Outcome", content);
+
+        foreach (var tag in IranDirectTagNames.Prohibited)
+        {
+            Assert.DoesNotContain($"\"{tag}\"", content);
+        }
+    }
+
+    [Fact]
+    public void SupportExporters_OnlyUseTelemetryHelpers()
+    {
+        string snapshotPath = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Support/SupportSnapshotExporter.cs");
+        string bundlePath = Path.Combine(
+            RepoRoot(), "IranDirect.Core/Support/SupportBundleExporter.cs");
+
+        string snapshot = File.ReadAllText(snapshotPath);
+        string bundle = File.ReadAllText(bundlePath);
+
+        Assert.Contains("SupportExportTelemetry.Start(", snapshot);
+        Assert.Contains("SupportExportTelemetry.Start(", bundle);
+        Assert.DoesNotContain("StartActivity(", snapshot);
+        Assert.DoesNotContain("StartActivity(", bundle);
+        Assert.DoesNotContain("Meter.Create", snapshot);
+        Assert.DoesNotContain("Meter.Create", bundle);
+        Assert.DoesNotContain("new ActivitySource", snapshot);
+        Assert.DoesNotContain("new ActivitySource", bundle);
+        // Orchestration of the nested snapshot export must be explicit
+        // (ExportWithinBundleAsync), never derived from ambient telemetry
+        // state such as Activity.Current. Doc comments may mention the term,
+        // but no executable reference (Activity.Current?. / Activity.Current.)
+        // may appear in the exporters.
+        Assert.DoesNotContain("Activity.Current?", snapshot);
+        Assert.DoesNotContain("Activity.Current.", snapshot);
+        Assert.DoesNotContain("Activity.Current?", bundle);
+        Assert.DoesNotContain("Activity.Current.", bundle);
+    }
+
+    [Fact]
+    public void NamedPipeCommandServer_OnlyUsesDispatchHelper()
+    {
+        string path = Path.Combine(
+            RepoRoot(), "IranDirect.Service/Ipc/NamedPipeCommandServer.cs");
+        string content = File.ReadAllText(path);
+
+        Assert.Contains("IpcDispatchTelemetry.Start(", content);
+        Assert.DoesNotContain("StartActivity(IranDirectActivityNames.", content);
+        Assert.DoesNotContain("Meter.Create", content);
+        Assert.DoesNotContain("new ActivitySource", content);
+    }
+
+    [Fact]
+    public void NoNewTelemetryActivityOrMetricNameConstants_ForIpcSupport()
+    {
+        string activityNames = File.ReadAllText(Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/IranDirectActivityNames.cs"));
+        string metricNames = File.ReadAllText(Path.Combine(
+            RepoRoot(),
+            "IranDirect.Core/Observability/Telemetry/IranDirectMetricNames.cs"));
+
+        Assert.Contains("IpcRequest", activityNames);
+        Assert.Contains("IpcConnect", activityNames);
+        Assert.Contains("IpcSend", activityNames);
+        Assert.Contains("IpcReceive", activityNames);
+        Assert.Contains("IpcDispatch", activityNames);
+        Assert.Contains("SupportBundleExport", activityNames);
+        Assert.Contains("SupportCaptureSnapshot", activityNames);
+        Assert.Contains("SupportSerialize", activityNames);
+        Assert.Contains("SupportWriteJson", activityNames);
+        Assert.Contains("SupportCreateZip", activityNames);
+
+        Assert.Contains("IpcRequests", metricNames);
+        Assert.Contains("IpcRequestDuration", metricNames);
+        Assert.Contains("SupportBundlesExported", metricNames);
+        Assert.Contains("SupportBundlesFailed", metricNames);
+        Assert.Contains("SupportBundleDuration", metricNames);
+    }
+
     private static string RepoRoot()
     {
         string? dir = AppContext.BaseDirectory;

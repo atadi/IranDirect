@@ -11,6 +11,7 @@ using IranDirect.Core.Runtime;
 using IranDirect.Core.Vpn;
 using IranDirect.Service.Operations;
 using Microsoft.Extensions.Logging;
+using IranDirect.Core.Observability.Telemetry;
 
 namespace IranDirect.Service.Ipc;
 
@@ -152,7 +153,7 @@ public sealed class NamedPipeCommandServer
             }
             else
             {
-                response = await ExecuteAsync(
+                response = await ExecuteWithTelemetryAsync(
                     request,
                     cancellationToken);
             }
@@ -186,6 +187,31 @@ public sealed class NamedPipeCommandServer
         await writer.WriteLineAsync(
             responseJson.AsMemory(),
             cancellationToken);
+    }
+
+    private async Task<ServiceResponse> ExecuteWithTelemetryAsync(
+        ServiceRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Independent server-side dispatch span. The named-pipe server runs in
+        // a separate process from the client, so this cannot be parented to the
+        // client IranDirect.IpcRequest root without changing the wire protocol.
+        using IpcDispatchTelemetry.IpcDispatchScope dispatch =
+            IpcDispatchTelemetry.Start(request.Command);
+
+        try
+        {
+            ServiceResponse response = await ExecuteAsync(
+                request,
+                cancellationToken);
+            dispatch.CompleteSuccess();
+            return response;
+        }
+        catch (Exception exception)
+        {
+            dispatch.CompleteFailure(exception);
+            throw;
+        }
     }
 
     private Task<ServiceResponse> ExecuteAsync(
