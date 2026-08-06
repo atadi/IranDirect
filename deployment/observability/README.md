@@ -16,7 +16,7 @@ Implements the reference architecture selected in
 | `otel-collector` | `otel/opentelemetry-collector-contrib:0.115.1` | The **only** OTLP endpoint the Service talks to. Receives OTLP, batches, re-exports. |
 | `prometheus` | `prom/prometheus:v3.0.1` | Metric storage. Scrapes the collector every 15s, 30-day retention. |
 | `tempo` | `grafana/tempo:2.6.1` | Trace storage. Filesystem backend, local blocks, 3-day dev retention. |
-| `grafana` | `grafana/grafana:11.4.0` | Dashboarding. Prometheus + Tempo datasources provisioned; **no dashboards yet** (Phase 33.3). |
+| `grafana` | `grafana/grafana:11.4.0` | Dashboarding. Prometheus + Tempo datasources provisioned; five version-controlled dashboards auto-loaded into the `IranDirect` folder (Phase 33.3). |
 
 Deliberately excluded: Loki, Alloy, Jaeger, Zipkin, Elasticsearch, ClickHouse.
 No log pipeline exists because the application emits no OTel logs.
@@ -127,7 +127,46 @@ What you should see once the Service runs with telemetry enabled:
 
 Nothing appears until telemetry is explicitly enabled — that is by design.
 
-## 8. Enabling observability in IranDirect.Service
+## 8. Dashboards and recording rules (Phase 33.3)
+
+Five dashboards are version-controlled and provisioned automatically — no manual
+import. They live in `grafana/dashboards/*.json` and are mounted read-only into
+the container at `/var/lib/grafana/dashboards`; the provider in
+`grafana/provisioning/dashboards/dashboards.yaml` loads them into the
+`IranDirect` folder with `allowUiUpdates: false` (edit the JSON, not the UI).
+
+| UID | Title |
+|-----|-------|
+| `irandirect-service-overview` | IranDirect / Service Overview |
+| `irandirect-runtime-reconciliation` | IranDirect / Runtime Reconciliation |
+| `irandirect-prefix-dns` | IranDirect / Prefix and DNS |
+| `irandirect-ipc-support` | IranDirect / IPC and Support Export |
+| `irandirect-reliability-errors` | IranDirect / Reliability and Errors |
+
+Recording rules live in `prometheus/rules/irandirect-recording-rules.yml`, one
+group `irandirect_recording` (30s). Prometheus loads them via `rule_files` in
+`prometheus.yml`, mounted read-only. The dashboards filter on
+`deployment_environment_name` via an `$env` variable.
+
+Validate after any change:
+
+```bash
+docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
+docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/irandirect-recording-rules.yml
+```
+
+Inspect loaded rules: `curl -s 'http://localhost:9090/api/v1/rules'`.
+Inspect a dashboard: Grafana → Dashboards → IranDirect folder.
+
+The dashboards reference only metric names and labels verified against the live
+stack. Some panels (IPC, prefix/DNS, cancellation) stay **empty** until those
+code paths run; they are valid-but-quiet, not broken. Several contract metrics
+(`service.enabled`, the prefix/DNS/route-inventory gauges, the repair counters,
+`runtime.observe.duration`, `failure_category` label, …) are not emitted by the
+running Service and are intentionally absent from every panel — see
+[the Phase 33.3 doc](../../docs/observability/phase-33.3-dashboards-and-recording-rules.md).
+
+## 9. Enabling observability in IranDirect.Service
 
 Telemetry is **disabled by default and stays that way**. Nothing in this stack
 turns it on. To enable it for a local session, override the `Observability`
@@ -155,7 +194,7 @@ itself is never stored in configuration.
 Sampling: `Observability:SamplingRatio` defaults to `1.0`, which is the
 recommended development value (full fidelity).
 
-## 9. Disabling observability
+## 10. Disabling observability
 
 Remove the overrides, or set:
 
@@ -172,7 +211,7 @@ Stopping the stack while telemetry is enabled is also safe: the OTLP exporter
 fails in isolation (bounded retry, then drop) and never affects routing,
 reconciliation or IPC (Phase 32.9 failure isolation).
 
-## 10. Wiping data
+## 11. Wiping data
 
 ```bash
 docker compose down -v                    # removes containers AND all volumes
@@ -190,7 +229,7 @@ docker volume rm irandirect-grafana-data      # Grafana users/prefs only
 Note that wiping `irandirect-grafana-data` resets the admin account to the
 values in `.env` on next start.
 
-## 11. Manual verification procedure
+## 12. Manual verification procedure
 
 The repository has no infrastructure test project, and deployment YAML is not
 exercised by `dotnet test`. Verify this stack manually:
@@ -203,15 +242,20 @@ exercised by `dotnet test`. Verify this stack manually:
 6. Prometheus → Status → Targets: `otel-collector` is `UP`.
 7. Grafana → Connections → Data sources → Prometheus / Tempo → **Save & test**
    both succeed.
-8. Start `IranDirect.Service` with the overrides from §8. Within ~30s query
+8. Start `IranDirect.Service` with the overrides from §9. Within ~30s query
    `irandirect_runtime_cycles_started` in Prometheus and search Tempo for
    `service.name = IranDirect.Service`.
+8b. Grafana → Dashboards → `IranDirect` folder shows the five Phase 33.3
+    dashboards; open **Service Overview** and confirm the cycle-rate / latency
+    panels populate within ~1 minute.
+8c. `curl -s 'http://localhost:9090/api/v1/rules'` shows group
+    `irandirect_recording` with 20 rules and no `lastError` entries.
 9. Set `Observability__Enabled=false`, restart the Service, confirm normal
    operation and no new telemetry.
 10. `docker compose stop`, restart the Service with telemetry enabled, confirm
     the Service still functions with the collector unavailable.
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | Check |
 |---------|-------|

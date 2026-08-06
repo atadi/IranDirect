@@ -87,6 +87,8 @@ services:
       - "--web.enable-lifecycle"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Phase 33.3 recording rules, read-only.
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     ports:
       # Justified: operators query PromQL directly during development.
@@ -151,6 +153,9 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Phase 33.3 dashboard JSON, read-only. The provider (see
+      # provisioning/dashboards/dashboards.yaml) points at this path.
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
       # Justified: the Grafana UI is the operator entry point.

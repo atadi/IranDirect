@@ -1,0 +1,713 @@
+{
+  "uid": "irandirect-prefix-dns",
+  "title": "IranDirect / Prefix and DNS",
+  "description": "Prefix update checks and custom-route DNS resolution: throughput, outcomes and latency. Prometheus-only; no domain, address or URL is ever exposed.",
+  "tags": [
+    "irandirect",
+    "prefix",
+    "dns",
+    "provisioned"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "irandirect-prometheus"
+        },
+        "query": {
+          "query": "label_values(irandirect_runtime_cycles_started_total, deployment_environment_name)",
+          "refId": "env"
+        },
+        "definition": "label_values(irandirect_runtime_cycles_started_total, deployment_environment_name)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {},
+        "sort": 1
+      }
+    ]
+  },
+  "links": [
+    {
+      "title": "Explore traces in Tempo",
+      "type": "link",
+      "icon": "external link",
+      "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
+      "targetBlank": true,
+      "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Prefix update checks",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Prefix check rate (by outcome)",
+      "description": "Prefix update checks per second, split by outcome.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (outcome) (rate(irandirect_prefix_checks_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "{{outcome}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Prefix check rate (by operation)",
+      "description": "Prefix check throughput split by the operation performed (HEAD/GET/compare/persist).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (operation) (rate(irandirect_prefix_checks_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "{{operation}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Prefix check latency p50/p95/p99",
+      "description": "Prefix update check duration quantiles.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(irandirect_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "p50",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(irandirect_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "p95",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(irandirect_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "p99",
+          "range": true,
+          "instant": false,
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Prefix check mean latency",
+      "description": "rate(sum)/rate(count), guarded against divide-by-zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(irandirect_prefix_check_duration_milliseconds_sum{deployment_environment_name=~\"$env\"}[5m])) / (sum(rate(irandirect_prefix_check_duration_milliseconds_count{deployment_environment_name=~\"$env\"}[5m])) > 0)",
+          "legendFormat": "mean",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "DNS lookups",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "DNS lookup rate (by outcome)",
+      "description": "Custom-route DNS lookups per second by outcome. No domain or address is ever labelled.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (outcome) (rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "{{outcome}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "DNS lookup rate (by operation)",
+      "description": "DNS work split by operation (resolve / cache read / cache write).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (operation) (rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "{{operation}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "DNS lookup latency p50/p95/p99",
+      "description": "DNS resolution latency quantiles.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(irandirect_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "p50",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(irandirect_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "p95",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(irandirect_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "p99",
+          "range": true,
+          "instant": false,
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "DNS mean latency",
+      "description": "rate(sum)/rate(count), guarded against divide-by-zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(irandirect_dns_lookup_duration_milliseconds_sum{deployment_environment_name=~\"$env\"}[5m])) / (sum(rate(irandirect_dns_lookup_duration_milliseconds_count{deployment_environment_name=~\"$env\"}[5m])) > 0)",
+          "legendFormat": "mean",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "DNS lookup failure ratio",
+      "description": "Share of DNS lookups whose outcome is not success. Empty while no lookups occur.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irandirect-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "irandirect-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\",outcome!=\"success\"}[5m])) / (sum(rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m])) > 0)",
+          "legendFormat": "failure ratio",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Coverage notes",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "text",
+      "title": "Why these panels may be empty",
+      "description": "Instrumented-but-inactive metrics, and metrics with no instrument.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Expected to be empty on a freshly started stack.**\n\nEvery query on this dashboard targets a metric that *is* instrumented in production code but was **not observed** during Phase 33.3 verification, because the prefix-update and custom-route DNS code paths did not execute in the sampled window:\n\n- `irandirect_prefix_checks_total`, `irandirect_prefix_check_duration_milliseconds_*`\n- `irandirect_dns_lookups_total`, `irandirect_dns_lookup_duration_milliseconds_*`\n\nThese panels populate once a prefix update check or a custom-route DNS refresh runs. Empty panels here mean *no activity*, not a broken query.\n\n**Not shown at all:** `irandirect.prefix.known_count`, `irandirect.dns.cache_record_count` and `irandirect.prefix.consecutive_failures` have **no instrument** in production code, so no panel is provided.\n\n**Cache-state distribution is omitted.** The `cache_state` label does not appear on any live series. Per the phase brief, deriving it from traces is out of scope, so no fresh/stale/miss panel is included."
+      }
+    }
+  ]
+}

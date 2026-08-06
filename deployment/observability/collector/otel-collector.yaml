@@ -44,8 +44,15 @@ exporters:
   # only Prometheus inside the stack network reaches it.
   prometheus:
     endpoint: 0.0.0.0:8889
+    # Phase 33.3: promote OTel *resource* attributes (service.name,
+    # service.version, deployment.environment.name) to Prometheus labels.
+    # Required for Prometheus compatibility: without this the dashboards and
+    # recording rules cannot filter by environment or service, because
+    # resource attributes are otherwise dropped at the Prometheus boundary.
+    # This is a pipeline-output concern only - it does NOT mutate, rename or
+    # add any application span/metric/tag; the telemetry contract is unchanged.
     resource_to_telemetry_conversion:
-      enabled: false
+      enabled: true
 
   # Traces: forwarded to Tempo over OTLP gRPC with bounded queue and retry.
   otlp/tempo:

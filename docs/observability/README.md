@@ -68,8 +68,15 @@ Telemetry architecture and instrumentation plan for IranDirect.
   access disabled, admin credentials via environment only). Named volumes,
   health checks, loopback-only host ports, `.env.example` placeholders, and
   documented startup/shutdown/wipe/manual-verification procedures. Consumer
-  only — no dashboards yet, and the application telemetry contract is
-  unchanged. Lives in [`deployment/observability/`](../../deployment/observability/).
+  only — no application telemetry changes. Lives in
+  [`deployment/observability/`](../../deployment/observability/).
+- [Phase 33.3 dashboards and recording rules](phase-33.3-dashboards-and-recording-rules.md)
+  — adds version-controlled Grafana dashboards (five, in the `IranDirect`
+  folder) and a Prometheus recording-rule group (`irandirect_recording`) for the
+  telemetry the stack already receives. Documents the metric-name→Prometheus
+  translation, label inventory, which contract metrics are not yet emitted, the
+  validation results, and the trace-link limitation. No application changes
+  beyond a collector pipeline-output toggle.
 - [Observability operations guide](operations.md)
   — how to enable/configure OTLP and console export, environment-variable secret
   handling, sampling, collector-unavailable behavior, shutdown/flush, privacy
@@ -79,6 +86,7 @@ Status: contracts implemented; runtime cycle, planning, execution, the native
 route boundary, the prefix/DNS network workflows, IPC, and support export
 instrumented. Optional OpenTelemetry export hosting is available (off by
 default). Consumption-platform architecture is designed (Phase 33.1) and the
-local consumption stack (Collector + Prometheus + Tempo + Grafana) is available
-under `deployment/observability/` (Phase 33.2); dashboards, alerts, and
-hardening are planned for Phases 33.3–33.6.
+consumption stack (Collector + Prometheus + Tempo + Grafana) is available
+under `deployment/observability/` (Phase 33.2), and Phase 33.3 adds
+version-controlled dashboards and recording rules to that stack; alerts and
+hardening are planned for Phases 33.4–33.6.

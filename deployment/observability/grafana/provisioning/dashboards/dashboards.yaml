@@ -1,19 +1,23 @@
-# Grafana dashboard provisioning - IranDirect Phase 33.2.
+# Grafana dashboard provisioning - IranDirect Phase 33.3.
 #
-# PLACEHOLDER. The provider is declared so that dropping dashboard JSON into
-# ./dashboards/ is picked up without a compose change, but NO dashboards are
-# shipped in this phase. Dashboards are Phase 33.3.
+# Loads the five version-controlled dashboards from /var/lib/grafana/dashboards
+# (mounted read-only from ./grafana/dashboards by docker-compose.yml). No
+# manual import is required and no dashboard is editable in the UI: the JSON in
+# this repository is the single source of truth.
 
 apiVersion: 1
 
 providers:
-  - name: irandirect
+  - name: IranDirect
     orgId: 1
     folder: IranDirect
     type: file
+    # Dashboards removed from disk are removed from Grafana too, so a deleted
+    # file cannot linger as an orphaned dashboard.
     disableDeletion: false
+    # UI edits are rejected: change the JSON in git instead.
     allowUiUpdates: false
     updateIntervalSeconds: 30
     options:
-      path: /etc/grafana/provisioning/dashboards
+      path: /var/lib/grafana/dashboards
       foldersFromFilesStructure: false

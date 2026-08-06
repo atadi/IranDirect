@@ -1,7 +1,7 @@
-# Prometheus configuration - IranDirect Phase 33.2.
+# Prometheus configuration - IranDirect Phase 33.2, extended in Phase 33.3.
 #
-# Scrapes the OpenTelemetry Collector's prometheus exporter. No remote write,
-# no recording rules and no alert rules yet (Phase 33.4 owns those).
+# Scrapes the OpenTelemetry Collector's prometheus exporter. No remote write.
+# Phase 33.3 adds recording rules; alert rules remain a later phase.
 #
 # Retention (30 days) is set on the command line in docker-compose.yml via
 # --storage.tsdb.retention.time=30d; it is not a config-file setting.
@@ -13,7 +13,9 @@ global:
     stack: irandirect-local
 
 # No remote_write.
-# No rule_files yet - recording rules and alerts arrive in Phase 33.4.
+# Recording rules only (Phase 33.3). No alert rules yet.
+rule_files:
+  - /etc/prometheus/rules/*.yml
 
 scrape_configs:
   # IranDirect application telemetry, republished by the collector.
