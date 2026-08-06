@@ -77,6 +77,14 @@ Telemetry architecture and instrumentation plan for IranDirect.
   translation, label inventory, which contract metrics are not yet emitted, the
   validation results, and the trace-link limitation. No application changes
   beyond a collector pipeline-output toggle.
+- [Phase 33.4 alerts and runbooks](phase-33.4-alerts-and-runbooks.md)
+  — adds Alertmanager as the fifth stack service, fifteen Prometheus alert rules
+  (`irandirect_alerts`), a no-op default receiver, three inhibition rules, a
+  severity/grouping/routing model, one runbook per alert under
+  `deployment/observability/runbooks/`, and dashboard alert/runbook links.
+  Documents the alert inventory, thresholds, known coverage gaps, and the
+  Phase 33.5 next scope. Infrastructure/documentation only — no application
+  telemetry changes.
 - [Observability operations guide](operations.md)
   — how to enable/configure OTLP and console export, environment-variable secret
   handling, sampling, collector-unavailable behavior, shutdown/flush, privacy
@@ -88,5 +96,6 @@ instrumented. Optional OpenTelemetry export hosting is available (off by
 default). Consumption-platform architecture is designed (Phase 33.1) and the
 consumption stack (Collector + Prometheus + Tempo + Grafana) is available
 under `deployment/observability/` (Phase 33.2), and Phase 33.3 adds
-version-controlled dashboards and recording rules to that stack; alerts and
-hardening are planned for Phases 33.4–33.6.
+version-controlled dashboards and recording rules to that stack; Phase 33.4 adds
+Alertmanager, fifteen alert rules, and operational runbooks; alerts and
+hardening are planned for Phases 33.5–33.6.

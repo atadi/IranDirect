@@ -50,6 +50,14 @@
       "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
       "targetBlank": true,
       "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+    },
+    {
+      "title": "Alertmanager",
+      "type": "link",
+      "icon": "bell",
+      "url": "http://localhost:9095",
+      "targetBlank": true,
+      "tooltip": "Open Alertmanager (local stack, no-op receiver by default)"
     }
   ],
   "panels": [
@@ -707,6 +715,22 @@
       "options": {
         "mode": "markdown",
         "content": "**Expected to be empty on a freshly started stack.**\n\nEvery query on this dashboard targets a metric that *is* instrumented in production code but was **not observed** during Phase 33.3 verification, because the prefix-update and custom-route DNS code paths did not execute in the sampled window:\n\n- `irandirect_prefix_checks_total`, `irandirect_prefix_check_duration_milliseconds_*`\n- `irandirect_dns_lookups_total`, `irandirect_dns_lookup_duration_milliseconds_*`\n\nThese panels populate once a prefix update check or a custom-route DNS refresh runs. Empty panels here mean *no activity*, not a broken query.\n\n**Not shown at all:** `irandirect.prefix.known_count`, `irandirect.dns.cache_record_count` and `irandirect.prefix.consecutive_failures` have **no instrument** in production code, so no panel is provided.\n\n**Cache-state distribution is omitted.** The `cache_state` label does not appear on any live series. Per the phase brief, deriving it from traces is out of scope, so no fresh/stale/miss panel is included."
+      }
+    },
+    {
+      "id": 15,
+      "type": "text",
+      "title": "Alert coverage & runbooks",
+      "description": "How to reach alerts and runbooks for this dashboard.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1000
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `IranDirectPrefixChecksFailing` \u2192 `deployment/observability/runbooks/prefix-check-failures.md`\n- `IranDirectDnsLookupFailureRatioHigh` \u2192 `deployment/observability/runbooks/dns-lookup-failures.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
       }
     }
   ]

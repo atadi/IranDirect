@@ -177,6 +177,66 @@ $env:IRANDIRECT_OTLP_HEADERS = "Authorization=Bearer <dev-token>"
 #     "Console": { "Enabled": true } }
 ```
 
+## Alerting (Phase 33.4)
+
+The consumption stack evaluates alerts in **Prometheus** (group
+`irandirect_alerts`, 15 rules) and routes them through **Alertmanager** (fifth
+stack service). Alert *truth* lives in Prometheus; Grafana only links to alerts
+and runbooks and does not manage them.
+
+- **Local default is no-op.** Every alert (all severities) routes to the built-in
+  `null` receiver, which delivers nothing. Alerts are inspected in the
+  Alertmanager UI/API (`http://localhost:9095`, loopback only) or Prometheus →
+  Alerts. The stack never exfiltrates data or pages anyone locally.
+- **Severity model:** `info` (UI only), `warning` (future business-hours
+  notification), `critical` (future immediate notification). Grouping is by
+  `alertname` / `deployment_environment_name` / `severity`; timings are
+  `group_wait 30s`, `group_interval 5m`, `repeat_interval 4h` (critical 1h).
+- **Inhibition:** the collector being down suppresses service-component
+  telemetry-absence alerts (telemetry is then unreliable); a down target
+  suppresses its derivatives; critical variants suppress matching warning
+  variants. `AlertmanagerUnavailable` does **not** silence application alerts in
+  Prometheus (alerts still evaluate; only delivery stops).
+- **Secret-bearing production delivery** (SMTP/email, webhook, PagerDuty) is
+  deferred to Phase 33.5. `.env.example` lists the `ALERTMANAGER_*` placeholder
+  keys; no values are committed.
+
+### Runbook catalog
+
+Every alert links to `deployment/observability/runbooks/<name>.md`:
+
+| Alert | Runbook |
+|-------|---------|
+| `IranDirectServiceTelemetryAbsent` | `service-telemetry-absent.md` |
+| `IranDirectRuntimeCycleFailureRateHigh` / `…Critical` | `runtime-cycle-failures.md` |
+| `IranDirectRuntimeCycleLatencyHigh` | `runtime-cycle-latency.md` |
+| `IranDirectRouteOperationFailureRatioHigh` | `route-operation-failures.md` |
+| `IranDirectPrefixChecksFailing` | `prefix-check-failures.md` |
+| `IranDirectDnsLookupFailureRatioHigh` | `dns-lookup-failures.md` |
+| `IranDirectIpcTimeoutRatioHigh` | `ipc-timeouts.md` |
+| `IranDirectSupportExportFailures` | `support-export-failures.md` |
+| `IranDirectCollectorUnavailable` | `collector-unavailable.md` |
+| `IranDirectPrometheusTargetDown` | `prometheus-target-down.md` |
+| `IranDirectAlertmanagerUnavailable` | `alertmanager-unavailable.md` |
+| `IranDirectTempoUnavailable` | `tempo-unavailable.md` |
+| `IranDirectGrafanaUnavailable` | `grafana-unavailable.md` |
+| `IranDirectCollectCertificateOrAuthFailure` | `certificate-or-authentication-failure.md` |
+
+Procedure runbooks: `safe-restart.md`, `upgrade-and-rollback.md`. Coverage gap
+(documented, not alerted): `prometheus-storage-pressure.md` — no host/container
+disk metric is available without node-exporter (Phase 33.5).
+
+### Inspect / silence
+
+```bash
+curl -s 'http://localhost:9090/api/v1/alerts'        # active alerts (Prometheus)
+curl -s 'http://localhost:9095/api/v2/alerts'        # active alerts (Alertmanager)
+docker compose exec -T alertmanager amtool config show   # 3 inhibit rules
+```
+
+Safe silence (do **not** disable the rule): open the firing alert in the
+Alertmanager UI → Silence → comment + duration → Create.
+
 ## Explicit non-goals
 
 - No automatic runtime/process/HTTP instrumentation.

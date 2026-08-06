@@ -50,6 +50,14 @@
       "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
       "targetBlank": true,
       "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+    },
+    {
+      "title": "Alertmanager",
+      "type": "link",
+      "icon": "bell",
+      "url": "http://localhost:9095",
+      "targetBlank": true,
+      "tooltip": "Open Alertmanager (local stack, no-op receiver by default)"
     }
   ],
   "panels": [
@@ -1040,6 +1048,22 @@
       "options": {
         "mode": "markdown",
         "content": "**Expected to be empty on a freshly started stack.**\n\nAll IPC and support-export metrics are instrumented in production code but were **not observed** during Phase 33.3 verification: no named-pipe client connected and no support bundle was exported in the sampled window.\n\n- `irandirect_ipc_requests_total`, `irandirect_ipc_request_duration_milliseconds_*`\n- `irandirect_support_bundles_exported_total`, `irandirect_support_bundles_failed_total`, `irandirect_support_bundle_duration_milliseconds_*`\n\nPanels populate as soon as the CLI or tray issues an IPC command or exports a bundle. Empty means *no activity*, not a broken query.\n\n**Privacy:** the `ipc_command` label is bounded to a fixed command vocabulary. No request or response payload, output path, or pipe content is ever labelled or displayed - the telemetry contract forbids it and no such label exists on any live series."
+      }
+    },
+    {
+      "id": 20,
+      "type": "text",
+      "title": "Alert coverage & runbooks",
+      "description": "How to reach alerts and runbooks for this dashboard.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1000
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `IranDirectIpcTimeoutRatioHigh` \u2192 `deployment/observability/runbooks/ipc-timeouts.md`\n- `IranDirectSupportExportFailures` \u2192 `deployment/observability/runbooks/support-export-failures.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
       }
     }
   ]

@@ -14,9 +14,10 @@ Implements the reference architecture selected in
 | Component | Image | Role |
 |-----------|-------|------|
 | `otel-collector` | `otel/opentelemetry-collector-contrib:0.115.1` | The **only** OTLP endpoint the Service talks to. Receives OTLP, batches, re-exports. |
-| `prometheus` | `prom/prometheus:v3.0.1` | Metric storage. Scrapes the collector every 15s, 30-day retention. |
+| `prometheus` | `prom/prometheus:v3.0.1` | Metric storage. Scrapes the collector every 15s, 30-day retention. Evaluates recording + alert rules. |
 | `tempo` | `grafana/tempo:2.6.1` | Trace storage. Filesystem backend, local blocks, 3-day dev retention. |
 | `grafana` | `grafana/grafana:11.4.0` | Dashboarding. Prometheus + Tempo datasources provisioned; five version-controlled dashboards auto-loaded into the `IranDirect` folder (Phase 33.3). |
+| `alertmanager` | `prom/alertmanager:v0.27.0` | Alert routing/delivery (Phase 33.4). Receives alerts from Prometheus; local default routes everything to a no-op receiver (delivers nothing). |
 
 Deliberately excluded: Loki, Alloy, Jaeger, Zipkin, Elasticsearch, ClickHouse.
 No log pipeline exists because the application emits no OTel logs.
@@ -35,6 +36,7 @@ All host ports bind to `127.0.0.1` only — nothing is exposed to the LAN.
 | `13133` | otel-collector | `health_check` extension, used by operator smoke tests. |
 | `9090` | prometheus | PromQL UI/API for development queries. |
 | `3000` | grafana | Operator UI. |
+| `9095` | alertmanager | Alertmanager UI/API (loopback). **Note:** the conventional `9093` is unavailable on this host because `9090`–`9094` are held by a leaked Docker Desktop port-proxy that survives stack teardown; the host bind is `127.0.0.1:9095` while the container-internal port stays `9093`, so Prometheus' `alertmanager:9093` target is unchanged. |
 
 Not published (internal network only):
 
@@ -76,6 +78,7 @@ Docker/host restart unless you explicitly stopped them.
 | `irandirect-prometheus-data` | `/prometheus` | TSDB blocks + WAL (30-day retention) |
 | `irandirect-tempo-data` | `/var/tempo` | Tempo WAL + trace blocks (3-day dev retention) |
 | `irandirect-grafana-data` | `/var/lib/grafana` | Grafana SQLite: users, preferences, saved views |
+| `irandirect-alertmanager-data` | `/alertmanager` | Alertmanager silences + notification state (notified=true) |
 
 Configuration is bind-mounted read-only from this directory and is
 version-controlled; only the volumes above hold state.
@@ -92,6 +95,7 @@ curl -s http://localhost:13133/            # collector: HTTP 200 when healthy
 curl -s http://localhost:9090/-/healthy    # Prometheus: "Prometheus Server is Healthy."
 curl -s http://localhost:3000/api/health   # Grafana: {"database":"ok",...}
 docker compose exec tempo wget -qO- http://localhost:3200/ready   # Tempo: "ready"
+curl -s --max-time 5 http://localhost:9095/-/healthy               # Alertmanager: "OK"
 ```
 
 Prometheus target health (the collector must be `up`):
@@ -157,6 +161,41 @@ docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/ira
 
 Inspect loaded rules: `curl -s 'http://localhost:9090/api/v1/rules'`.
 Inspect a dashboard: Grafana → Dashboards → IranDirect folder.
+
+### 8b. Alerts and Alertmanager (Phase 33.4)
+
+Fifteen alert rules live in `prometheus/rules/irandirect-alert-rules.yml`, one
+group `irandirect_alerts` (evaluated against the `development/service-authority`
+recording rules every 30s). Prometheus is the **source of alert truth**; Grafana
+does not manage alerts. Alertmanager (`prom/alertmanager:v0.27.0`) is the fifth
+service and the delivery layer.
+
+The local default routes **every** alert (all severities) to the built-in `null`
+receiver, which delivers nothing. Alerts are inspected via the Alertmanager
+UI/API (`http://localhost:9095`, loopback only) or Prometheus → Alerts. This is
+intentional: the local stack must never exfiltrate data or page anyone.
+
+Secret-bearing production receivers (SMTP, webhook, PagerDuty) are deferred to
+Phase 33.5. `.env.example` documents the five `ALERTMANAGER_*` placeholder keys;
+no values are committed.
+
+Runbooks for every alert live in `runbooks/` (repo-relative paths, also linked
+from each dashboard's "Alert coverage & runbooks" panel).
+
+Validate after any change:
+
+```bash
+docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/irandirect-alert-rules.yml
+docker compose exec -T alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
+```
+
+Inspect loaded alerts: `curl -s 'http://localhost:9090/api/v1/alerts'`.
+Inspect Alertmanager: `curl -s 'http://localhost:9095/api/v2/alerts'`.
+Inspect inhibition: `docker compose exec -T alertmanager amtool config show`
+(3 inhibit rules).
+
+Safe silence (do **not** disable the rule): open the firing alert in the
+Alertmanager UI → Silence → comment + duration → Create.
 
 The dashboards reference only metric names and labels verified against the live
 stack. Some panels (IPC, prefix/DNS, cancellation) stay **empty** until those
@@ -234,11 +273,12 @@ values in `.env` on next start.
 The repository has no infrastructure test project, and deployment YAML is not
 exercised by `dotnet test`. Verify this stack manually:
 
-1. `docker compose up -d --wait` — all four services report healthy.
+1. `docker compose up -d --wait` — all five services report healthy.
 2. `curl http://localhost:13133/` — collector health returns 200.
 3. `curl http://localhost:9090/-/healthy` — Prometheus healthy.
 4. `docker compose exec tempo wget -qO- http://localhost:3200/ready` — `ready`.
 5. `curl http://localhost:3000/api/health` — Grafana `database: ok`.
+5b. `curl -s --max-time 5 http://localhost:9095/-/healthy` — Alertmanager `OK`.
 6. Prometheus → Status → Targets: `otel-collector` is `UP`.
 7. Grafana → Connections → Data sources → Prometheus / Tempo → **Save & test**
    both succeed.
@@ -250,6 +290,14 @@ exercised by `dotnet test`. Verify this stack manually:
     panels populate within ~1 minute.
 8c. `curl -s 'http://localhost:9090/api/v1/rules'` shows group
     `irandirect_recording` with 20 rules and no `lastError` entries.
+8d. `curl -s 'http://localhost:9090/api/v1/rules'` also shows group
+    `irandirect_alerts` with 15 rules and no `lastError` entries.
+8e. `curl -s 'http://localhost:9090/api/v1/alertmanagers'` lists
+    `http://alertmanager:9093/...` as an active alertmanager.
+8f. Stop `otel-collector` (`docker compose stop otel-collector`) for >2m; confirm
+    `IranDirectCollectorUnavailable` fires in Prometheus and appears in
+    `curl -s 'http://localhost:9095/api/v2/alerts'`; restart the collector and
+    confirm the alert clears.
 9. Set `Observability__Enabled=false`, restart the Service, confirm normal
    operation and no new telemetry.
 10. `docker compose stop`, restart the Service with telemetry enabled, confirm
@@ -262,4 +310,6 @@ exercised by `dotnet test`. Verify this stack manually:
 | No metrics in Prometheus | Is `Observability:Enabled` **and** `Observability:Otlp:Enabled` true? Is the endpoint `http://localhost:4317`? Is the `otel-collector` target UP? |
 | No traces in Tempo | Is `TracingEnabled` true and `SamplingRatio > 0`? Check collector logs for OTLP export errors to `tempo:4317`. |
 | Grafana will not start | `GF_SECURITY_ADMIN_USER`/`GF_SECURITY_ADMIN_PASSWORD` must be set in `.env`. |
+| Alertmanager will not start | Check `docker compose logs alertmanager` for `missing name in receiver` — the `null` receiver must be the quoted string `"null"`, not a bare YAML `null`. |
+| No alerts reach Alertmanager | Confirm `curl -s 'http://localhost:9090/api/v1/alertmanagers'` lists `alertmanager:9093` active, and that no alert is currently firing (a healthy stack fires nothing). |
 | Need collector-side visibility | Set `OTEL_DEBUG_VERBOSITY=normal` in `.env` and recreate the collector. Development only. |

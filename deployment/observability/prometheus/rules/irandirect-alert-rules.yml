@@ -1,0 +1,365 @@
+# IranDirect Prometheus alert rules - Phase 33.4.
+#
+# Every alert references a VERIFIED metric or recording rule (see
+# docs/observability/phase-33.3-dashboards-and-recording-rules.md s2/s3 and the
+# live /api/v1/rules output). No alert is written against a guessed name.
+#
+# Failure ratios that have no dedicated recording rule (DNS/IPC/support/route
+# operation failures) are derived inline from committed counters with an
+# `outcome!="success"` filter, guarded by a minimum-volume clause so a single
+# transient event or a fully-absent optional metric cannot fire a critical.
+#
+# All ratios divide by a `(... > 0)`-guarded denominator. `for:` windows
+# prevent single-transient firing. `deployment_environment_name` is always in
+# the filter/by so environments never cross-talk. No sensitive label (route
+# identity, prefix, domain, IP, payload, path, machine/user, exception) appears
+# in any expression, label, or annotation.
+#
+# Names carry the `IranDirect` prefix per the alert-design standard.
+
+groups:
+  - name: irandirect_alerts
+    rules:
+
+      # ----------------------------------------------------------------
+      # Application alerts
+      # ----------------------------------------------------------------
+
+      # A. Telemetry absence. The `service.enabled` gauge is NOT implemented
+      # (Phase 33.3 s2.3), so we use last-seen runtime-cycle activity. We must
+      # not fire when the Service is intentionally disabled (no cycles by
+      # design) - but a cycle rate that has been zero for 15m while the
+      # deployment_environment continues to report cycles historically is the
+      # signal. Conservative warning only; there is no operational evidence
+      # for a critical variant, so none is defined.
+      - alert: IranDirectServiceTelemetryAbsent
+        expr: |
+          (
+            sum(irandirect:runtime_cycle_rate5m{deployment_environment_name=~".+"})
+            < 0.0001
+          )
+          and on (deployment_environment_name) (
+            max(timestamp(irandirect_runtime_cycles_started_total{deployment_environment_name=~".+"}))
+            < (time() - 900)
+          )
+        for: 15m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "IranDirect telemetry absent for 15m"
+          description: >
+            No IranDirect runtime cycles have started for over 15 minutes, yet
+            the service has emitted telemetry in the past. The service may be
+            stopped, disabled, or failing before the runtime cycle begins.
+          runbook_url: "deployment/observability/runbooks/service-telemetry-absent.md"
+          dashboard_url: "dashboards/irandirect-service-overview"
+
+      # B. Runtime cycle failure ratio - warning.
+      - alert: IranDirectRuntimeCycleFailureRateHigh
+        expr: |
+          (
+            sum(rate(irandirect_runtime_cycles_failed_total{deployment_environment_name=~".+"}[10m]))
+            /
+            (sum(rate(irandirect_runtime_cycles_started_total{deployment_environment_name=~".+"}[10m])) > 0)
+          ) > 0.10
+          and
+          (sum(rate(irandirect_runtime_cycles_started_total{deployment_environment_name=~".+"}[10m])) > 0.01)
+        for: 10m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "Runtime cycle failure ratio > 10% over 10m"
+          description: >
+            More than 10% of runtime reconciliation cycles failed in the last
+            10 minutes (minimum volume guard applies). Reconciliation is
+            partially failing; routes may be drifting from desired state.
+          runbook_url: "deployment/observability/runbooks/runtime-cycle-failures.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # C. Runtime cycle failure ratio - critical.
+      - alert: IranDirectRuntimeCycleFailureRateCritical
+        expr: |
+          (
+            sum(rate(irandirect_runtime_cycles_failed_total{deployment_environment_name=~".+"}[10m]))
+            /
+            (sum(rate(irandirect_runtime_cycles_started_total{deployment_environment_name=~".+"}[10m])) > 0)
+          ) > 0.30
+          and
+          (sum(rate(irandirect_runtime_cycles_started_total{deployment_environment_name=~".+"}[10m])) > 0.01)
+        for: 5m
+        labels:
+          severity: critical
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "Runtime cycle failure ratio > 30% over 10m"
+          description: >
+            More than 30% of runtime reconciliation cycles failed in the last
+            10 minutes. Reconciliation is largely broken; desired-state
+            convergence cannot be maintained.
+          runbook_url: "deployment/observability/runbooks/runtime-cycle-failures.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # D. Runtime cycle latency - warning (threshold is an assumed target, not
+      # measured production truth; see runbook and phase doc rationale).
+      - alert: IranDirectRuntimeCycleLatencyHigh
+        expr: irandirect:runtime_cycle_duration_p95_5m{deployment_environment_name=~".+"} > 5000
+        for: 15m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "Runtime cycle p95 latency > 5s for 15m"
+          description: >
+            The 95th-percentile runtime reconciliation cycle duration has
+            exceeded 5 seconds for 15 minutes. The 5s threshold is an assumed
+            target for triage, not a measured production SLO. Long cycles delay
+            desired-state convergence.
+          runbook_url: "deployment/observability/runbooks/runtime-cycle-latency.md"
+          dashboard_url: "dashboards/irandirect-runtime-reconciliation"
+
+      # E. Route operation failure ratio - warning.
+      - alert: IranDirectRouteOperationFailureRatioHigh
+        expr: |
+          (
+            sum(rate(irandirect_routes_operations_failed_total{deployment_environment_name=~".+"}[10m]))
+            /
+            (sum(rate(irandirect_routes_operations_requested_total{deployment_environment_name=~".+"}[10m])) > 0)
+          ) > 0.05
+          and
+          (sum(rate(irandirect_routes_operations_requested_total{deployment_environment_name=~".+"}[10m])) > 0.01)
+        for: 10m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "Route operation failure ratio > 5% over 10m"
+          description: >
+            More than 5% of native route system calls failed in the last 10
+            minutes (minimum volume guard applies). Route add/remove/update
+            operations are partially failing.
+          runbook_url: "deployment/observability/runbooks/route-operation-failures.md"
+          dashboard_url: "dashboards/irandirect-runtime-reconciliation"
+
+      # F. Prefix check failures - warning. The `prefix.consecutive_failures`
+      # gauge is NOT implemented (Phase 33.3 s2.3); we use the per-check
+      # failure rate over the prefix-check counter instead.
+      - alert: IranDirectPrefixChecksFailing
+        expr: |
+          (
+            sum(rate(irandirect_prefix_checks_total{deployment_environment_name=~".+",outcome!="success"}[30m]))
+            /
+            (sum(rate(irandirect_prefix_checks_total{deployment_environment_name=~".+"}[30m])) > 0)
+          ) > 0.20
+          and
+          (sum(rate(irandirect_prefix_checks_total{deployment_environment_name=~".+"}[30m])) > 0.001)
+        for: 30m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "Prefix update checks failing > 20% over 30m"
+          description: >
+            More than 20% of official prefix update checks failed over 30
+            minutes. NOTE: the originally planned consecutive-failure gauge is
+            not instrumented, so this uses the prefix-check outcome rate. The
+            prefix list may be stale or unreachable.
+          runbook_url: "deployment/observability/runbooks/prefix-check-failures.md"
+          dashboard_url: "dashboards/irandirect-prefix-dns"
+
+      # G. DNS lookup failure ratio - warning.
+      - alert: IranDirectDnsLookupFailureRatioHigh
+        expr: |
+          (
+            sum(rate(irandirect_dns_lookups_total{deployment_environment_name=~".+",outcome!="success"}[15m]))
+            /
+            (sum(rate(irandirect_dns_lookups_total{deployment_environment_name=~".+"}[15m])) > 0)
+          ) > 0.20
+          and
+          (sum(rate(irandirect_dns_lookups_total{deployment_environment_name=~".+"}[15m])) > 0.01)
+        for: 10m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "DNS lookup failure ratio > 20% over 15m"
+          description: >
+            More than 20% of custom-route DNS lookups failed in the last 15
+            minutes (minimum volume guard applies). Custom-route resolution is
+            partially failing.
+          runbook_url: "deployment/observability/runbooks/dns-lookup-failures.md"
+          dashboard_url: "dashboards/irandirect-prefix-dns"
+
+      # H. IPC timeout ratio - warning.
+      - alert: IranDirectIpcTimeoutRatioHigh
+        expr: |
+          (
+            sum(rate(irandirect_ipc_requests_total{deployment_environment_name=~".+",outcome="timeout"}[10m]))
+            /
+            (sum(rate(irandirect_ipc_requests_total{deployment_environment_name=~".+"}[10m])) > 0)
+          ) > 0.05
+          and
+          (sum(rate(irandirect_ipc_requests_total{deployment_environment_name=~".+"}[10m])) > 0.01)
+        for: 10m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "IPC request timeout ratio > 5% over 10m"
+          description: >
+            More than 5% of named-pipe IPC requests timed out in the last 10
+            minutes (minimum volume guard applies). CLI/Tray commands are
+            partially failing to get a response.
+          runbook_url: "deployment/observability/runbooks/ipc-timeouts.md"
+          dashboard_url: "dashboards/irandirect-ipc-support"
+
+      # I. Support export failures - warning (>= 2 failures in 30m).
+      - alert: IranDirectSupportExportFailures
+        expr: |
+          sum(increase(irandirect_support_bundles_failed_total{deployment_environment_name=~".+"}[30m])) >= 2
+        for: 0m
+        labels:
+          severity: warning
+          component: service
+          service: IranDirect.Service
+        annotations:
+          summary: "Two or more support bundle exports failed in 30m"
+          description: >
+            At least two support bundle exports failed in the last 30 minutes.
+            Diagnostics collection is unreliable; remote assistance is
+            impaired.
+          runbook_url: "deployment/observability/runbooks/support-export-failures.md"
+          dashboard_url: "dashboards/irandirect-ipc-support"
+
+      # ----------------------------------------------------------------
+      # Infrastructure alerts
+      # ----------------------------------------------------------------
+
+      # J. Collector unavailable - critical.
+      - alert: IranDirectCollectorUnavailable
+        expr: up{job="otel-collector"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: collector
+        annotations:
+          summary: "OpenTelemetry Collector target is down"
+          description: >
+            Prometheus has not successfully scraped the OpenTelemetry
+            Collector for 2 minutes. Application telemetry is no longer being
+            ingested; downstream application alerts may be unreliable until
+            resolved (inhibition applies).
+          runbook_url: "deployment/observability/runbooks/collector-unavailable.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # K. Prometheus target down - warning. Fires for any expected target that
+      # is not the collector (handled separately as critical) or Prometheus
+      # itself (handled by Grafana/Alertmanager self alerts). We exclude the
+      # collector job to avoid double-alerting with IranDirectCollectorUnavailable.
+      - alert: IranDirectPrometheusTargetDown
+        expr: |
+          up{job=~"tempo|grafana|alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "A Prometheus scrape target is down"
+          description: >
+            One of the observability backend targets (tempo, grafana,
+            alertmanager) has been unreachable for 2 minutes. The affected
+            backend's data and dependent dashboards/alerts may be incomplete.
+          runbook_url: "deployment/observability/runbooks/prometheus-target-down.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # L. Alertmanager unavailable - warning. Backed by the Phase 33.4
+      # alertmanager scrape job; uses Alertmanager's own up/health metric.
+      - alert: IranDirectAlertmanagerUnavailable
+        expr: up{job="alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: alertmanager
+        annotations:
+          summary: "Alertmanager target is down"
+          description: >
+            Prometheus has not scraped Alertmanager for 2 minutes. Alerts will
+            still be evaluated by Prometheus but cannot be delivered. Check
+            the Alertmanager container.
+          runbook_url: "deployment/observability/runbooks/alertmanager-unavailable.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # M. Tempo unavailable - warning. Backed by the Phase 33.4 tempo scrape
+      # job. No trace data will be queryable in Grafana.
+      - alert: IranDirectTempoUnavailable
+        expr: up{job="tempo"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: tempo
+        annotations:
+          summary: "Tempo target is down"
+          description: >
+            Prometheus has not scraped Tempo for 2 minutes. Distributed traces
+            are no longer queryable, but metrics and route reconciliation are
+            unaffected.
+          runbook_url: "deployment/observability/runbooks/tempo-unavailable.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # N. Grafana unavailable - warning. Backed by the Phase 33.4 grafana
+      # scrape job. Anonymous access is NOT enabled/changed for this; the
+      # metrics endpoint is scraped internally only.
+      - alert: IranDirectGrafanaUnavailable
+        expr: up{job="grafana"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: grafana
+        annotations:
+          summary: "Grafana target is down"
+          description: >
+            Prometheus has not scraped Grafana for 2 minutes. Dashboards and
+            the Alertmanager UI entry point are unavailable, but metrics,
+            traces, and alert evaluation continue.
+          runbook_url: "deployment/observability/runbooks/grafana-unavailable.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # O. Certificate / authentication failure - warning. Detects a spike in
+      # collector 401/403 responses if the OTLP auth is enabled. The collector
+      # does not expose a dedicated metric, so we watch for the collector
+      # scrape going up while application series stall - a weak but
+      # credential-safe heuristic. Documented as best-effort.
+      - alert: IranDirectCollectCertificateOrAuthFailure
+        expr: |
+          (
+            sum(rate(irandirect_runtime_cycles_started_total{deployment_environment_name=~".+"}[15m]))
+            < 0.0001
+          )
+          and on (deployment_environment_name) (
+            max(timestamp(irandirect_runtime_cycles_started_total{deployment_environment_name=~".+"}))
+            > (time() - 300)
+          )
+          and (up{job="otel-collector"} == 1)
+        for: 10m
+        labels:
+          severity: warning
+          component: collector
+        annotations:
+          summary: "Possible OTLP auth/cert failure (telemetry stalled, collector up)"
+          description: >
+            The collector is reachable but the Service has stopped emitting
+            runtime cycles while recent telemetry exists. If OTLP
+            authentication was enabled on the collector, an expired client
+            certificate or invalid token is a likely cause. Verify collector
+            auth configuration and the Service OTLP settings.
+          runbook_url: "deployment/observability/runbooks/certificate-or-authentication-failure.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"

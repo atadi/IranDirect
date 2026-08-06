@@ -1,0 +1,43 @@
+{{/*
+  IranDirect Alertmanager notification template (Phase 33.4).
+
+  Used only when a real receiver is configured (Phase 33.5). The local default
+  routes everything to the `null` receiver, so this template is not invoked in
+  the dev stack - it exists so production overrides have a consistent,
+  privacy-safe message shape. It never interpolates route identity, prefix,
+  domain, IP, payload, file path, machine/user name, or exception text.
+*/}}
+
+{{ define "__subject" }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}{{ end }}
+
+{{ define "__msg" -}}
+{{ .CommonAnnotations.summary }}
+{{ if .CommonAnnotations.description }}
+{{ .CommonAnnotations.description }}
+{{- end }}
+{{ if .CommonAnnotations.runbook_url }}
+Runbook: {{ .CommonAnnotations.runbook_url }}
+{{- end }}
+{{ end -}}
+
+{{ define "email.subject" }}{{ template "__subject" . }}{{ end }}
+
+{{ define "email.body" }}
+{{ if gt (len .Alerts.Firing) 0 -}}
+Firing ({{ .Alerts.Firing | len }}):
+{{ range .Alerts.Firing }}
+- {{ .Labels.severity | toUpper }} | {{ .Labels.alertname }}
+  {{ .Annotations.summary }}
+  {{ if .Annotations.runbook_url }}Runbook: {{ .Annotations.runbook_url }}{{ end }}
+{{ end }}
+{{- end }}
+{{ if gt (len .Alerts.Resolved) 0 -}}
+Resolved ({{ .Alerts.Resolved | len }}):
+{{ range .Alerts.Resolved }}
+- {{ .Labels.alertname }}
+{{ end }}
+{{- end }}
+{{- end }}
+
+{{ define "slack.body" }}{{ template "__msg" . }}{{ end }}
+{{ define "webhook.body" }}{{ template "__msg" . }}{{ end }}

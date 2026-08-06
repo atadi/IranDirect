@@ -11,6 +11,10 @@
 #   tempo           trace storage, filesystem backend
 #   grafana         dashboarding, provisioned datasources only
 #
+# Alertmanager (Phase 33.4) is the FIFTH service: it receives alerts from
+# Prometheus and routes them. In the local stack every route ends at a no-op
+# receiver, so no notification is exfiltrated.
+#
 # Resource guidance (Phase 33.1 s4/s15) - deliberately NOT enforced as hard
 # limits so the dev stack degrades gracefully on a laptop:
 #   otel-collector  ~50-150 MB RAM   (memory_limiter caps at 400 MiB)
@@ -37,6 +41,8 @@ volumes:
     name: irandirect-tempo-data
   grafana-data:
     name: irandirect-grafana-data
+  alertmanager-data:
+    name: irandirect-alertmanager-data
 
 services:
   # --------------------------------------------------------------------
@@ -138,7 +144,48 @@ services:
     #     limits: { memory: 1G, cpus: "1.00" }
 
   # --------------------------------------------------------------------
-  # Grafana - dashboarding. Datasources provisioned; no dashboards yet.
+  # Alertmanager - alert routing/delivery (Phase 33.4). The FIFTH service.
+  # Prometheus sends alerts here; in the local stack all routes terminate at
+  # a no-op receiver so nothing is exfiltrated. Secret-bearing production
+  # routing (SMTP/email/webhook/PagerDuty) is deferred to Phase 33.5 and is
+  # configured only via .env placeholders, never committed.
+  # --------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: irandirect-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.listen-address=:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      # Justified: operators inspect/resolve alerts via the UI/API locally.
+      # Host port 9095 (NOT the usual 9093) because 9090-9094 are held by a
+      # leaked Docker Desktop port-proxy on this host that survives stack
+      # teardown; the container-internal port stays 9093, so Prometheus'
+      # alertmanager:9093 target is unaffected. See deployment README s13.
+      - "127.0.0.1:9095:9093"
+    networks:
+      - observability
+    depends_on:
+      prometheus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # deploy:
+    #   resources:
+    #     limits: { memory: 256M, cpus: "0.25" }
+
+  # --------------------------------------------------------------------
+  # Grafana - dashboarding. Datasources provisioned; Phase 33.3 dashboards.
   # --------------------------------------------------------------------
   grafana:
     image: grafana/grafana:11.4.0

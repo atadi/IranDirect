@@ -49,6 +49,14 @@
       "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
       "targetBlank": true,
       "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+    },
+    {
+      "title": "Alertmanager",
+      "type": "link",
+      "icon": "bell",
+      "url": "http://localhost:9095",
+      "targetBlank": true,
+      "tooltip": "Open Alertmanager (local stack, no-op receiver by default)"
     }
   ],
   "panels": [
@@ -1090,6 +1098,22 @@
       "options": {
         "mode": "markdown",
         "content": "**Absent by design.** These reconciliation metrics are named in the Phase 32 contract but are not produced by the running Service (verified Phase 33.3 s2):\n\n- `irandirect.runtime.observe.duration` - no instrument in production code, so no observation-duration panel is shown.\n- `irandirect.runtime.repairs.with_changes` / `.no_changes` - no instrument. The **no-change ratio** panel below is derived from `irandirect_runtime_cycles_completed_total{outcome=\"no_change\"}`, which *is* emitted, and is the faithful substitute.\n- `irandirect.routes.operations.failed` - instrumented but never observed in the sampled window; the failures panel will populate on the first failing system call.\n\nNo `failure_category`, `route_kind` or `change_kind` label exists on any live series, so panels keyed on those labels are omitted rather than written against labels that would never match."
+      }
+    },
+    {
+      "id": 23,
+      "type": "text",
+      "title": "Alert coverage & runbooks",
+      "description": "How to reach alerts and runbooks for this dashboard.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1000
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `IranDirectRuntimeCycleFailureRateHigh` \u2192 `deployment/observability/runbooks/runtime-cycle-failures.md`\n- `IranDirectRuntimeCycleFailureRateCritical` \u2192 `deployment/observability/runbooks/runtime-cycle-failures.md`\n- `IranDirectRuntimeCycleLatencyHigh` \u2192 `deployment/observability/runbooks/runtime-cycle-latency.md`\n- `IranDirectRouteOperationFailureRatioHigh` \u2192 `deployment/observability/runbooks/route-operation-failures.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
       }
     }
   ]

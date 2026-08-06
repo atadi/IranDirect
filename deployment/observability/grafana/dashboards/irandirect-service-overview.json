@@ -49,6 +49,14 @@
       "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
       "targetBlank": true,
       "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+    },
+    {
+      "title": "Alertmanager",
+      "type": "link",
+      "icon": "bell",
+      "url": "http://localhost:9095",
+      "targetBlank": true,
+      "tooltip": "Open Alertmanager (local stack, no-op receiver by default)"
     }
   ],
   "panels": [
@@ -1004,6 +1012,22 @@
       "options": {
         "mode": "markdown",
         "content": "**Not emitted by the running Service.** The Phase 32 telemetry contract reserves these names, but no instrument is created for them in production code (verified Phase 33.3 s2):\n\n- `irandirect.service.enabled`\n- `irandirect.runtime.worker.active`\n- `irandirect.prefix.known_count`\n- `irandirect.routes.inventory_count`\n- `irandirect.dns.cache_record_count`\n- `irandirect.prefix.consecutive_failures`\n\nPanels for these are intentionally **absent** rather than shown as a misleading zero. They will appear once the gauges are instrumented."
+      }
+    },
+    {
+      "id": 21,
+      "type": "text",
+      "title": "Alert coverage & runbooks",
+      "description": "How to reach alerts and runbooks for this dashboard.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1000
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `IranDirectServiceTelemetryAbsent` \u2192 `deployment/observability/runbooks/service-telemetry-absent.md`\n- `IranDirectRuntimeCycleFailureRateHigh` \u2192 `deployment/observability/runbooks/runtime-cycle-failures.md`\n- `IranDirectRuntimeCycleFailureRateCritical` \u2192 `deployment/observability/runbooks/runtime-cycle-failures.md`\n- `IranDirectRuntimeCycleLatencyHigh` \u2192 `deployment/observability/runbooks/runtime-cycle-latency.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
       }
     }
   ]

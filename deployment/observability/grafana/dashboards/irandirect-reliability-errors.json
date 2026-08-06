@@ -50,6 +50,14 @@
       "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
       "targetBlank": true,
       "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+    },
+    {
+      "title": "Alertmanager",
+      "type": "link",
+      "icon": "bell",
+      "url": "http://localhost:9095",
+      "targetBlank": true,
+      "tooltip": "Open Alertmanager (local stack, no-op receiver by default)"
     }
   ],
   "panels": [
@@ -1151,6 +1159,22 @@
       "options": {
         "mode": "markdown",
         "content": "**Triage aid, not alerting.** Phase 33.3 ships no Grafana alert rules and no notification integrations.\n\n**`failure_category` is not available.** The tag is defined in the Phase 32 contract but does **not** appear on any live metric series, so failure-category breakdowns are omitted rather than written against a label that would never match. Failures are instead broken down by `outcome` and `operation`, which *are* exported.\n\n**Runtime cycle failures:** `irandirect_runtime_cycles_failed_total` is instrumented but was never observed - the panel stays empty until a cycle actually fails.\n\n**Tempo availability** is not queryable from Prometheus in this stack (Tempo publishes no scraped metrics here), so no Tempo panel is provided. Use the dashboard link above to reach Tempo directly."
+      }
+    },
+    {
+      "id": 23,
+      "type": "text",
+      "title": "Alert coverage & runbooks",
+      "description": "How to reach alerts and runbooks for this dashboard.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1000
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `IranDirectCollectorUnavailable` \u2192 `deployment/observability/runbooks/collector-unavailable.md`\n- `IranDirectPrometheusTargetDown` \u2192 `deployment/observability/runbooks/prometheus-target-down.md`\n- `IranDirectAlertmanagerUnavailable` \u2192 `deployment/observability/runbooks/alertmanager-unavailable.md`\n- `IranDirectTempoUnavailable` \u2192 `deployment/observability/runbooks/tempo-unavailable.md`\n- `IranDirectGrafanaUnavailable` \u2192 `deployment/observability/runbooks/grafana-unavailable.md`\n- `IranDirectCollectCertificateOrAuthFailure` \u2192 `deployment/observability/runbooks/certificate-or-authentication-failure.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
       }
     }
   ]

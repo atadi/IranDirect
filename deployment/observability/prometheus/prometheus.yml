@@ -1,7 +1,8 @@
-# Prometheus configuration - IranDirect Phase 33.2, extended in Phase 33.3.
+# Prometheus configuration - IranDirect Phase 33.2/33.3, extended in Phase 33.4.
 #
 # Scrapes the OpenTelemetry Collector's prometheus exporter. No remote write.
-# Phase 33.3 adds recording rules; alert rules remain a later phase.
+# Phase 33.3 adds recording rules; Phase 33.4 adds alert rules and wires
+# Alertmanager (the fifth stack service) as the alert receiver.
 #
 # Retention (30 days) is set on the command line in docker-compose.yml via
 # --storage.tsdb.retention.time=30d; it is not a config-file setting.
@@ -12,8 +13,13 @@ global:
   external_labels:
     stack: irandirect-local
 
-# No remote_write.
-# Recording rules only (Phase 33.3). No alert rules yet.
+# Phase 33.4: send firing alerts to Alertmanager over the internal network.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
 rule_files:
   - /etc/prometheus/rules/*.yml
 
@@ -29,3 +35,26 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # Phase 33.4 infra scrape jobs. These back the infrastructure alerts
+  # (Tempo/Grafana/Alertmanager availability). All endpoints are internal to
+  # the stack network - nothing is published to the host.
+  - job_name: tempo
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["tempo:3200"]
+        labels:
+          component: tempo
+
+  - job_name: grafana
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["grafana:3000"]
+        labels:
+          component: grafana
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels:
+          component: alertmanager

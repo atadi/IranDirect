@@ -1,0 +1,87 @@
+# Alertmanager configuration - IranDirect Phase 33.4.
+#
+# LOCAL / DEVELOPMENT DEFAULT. Every alert is routed to the `null` receiver,
+# which delivers nowhere. This is intentional: the local stack must never
+# exfiltrate data or send notifications. Alerts remain fully visible in the
+# Alertmanager UI (http://localhost:9093) and API. Secret-bearing production
+# routing (SMTP/email, webhook, PagerDuty) is deferred to Phase 33.5 and is
+# configured only through .env placeholders - never committed.
+#
+# To enable a real receiver locally, uncomment one of the receiver blocks
+# below and set the matching variable in `.env`, then reference it from a
+# route. Alertmanager expands ${VAR} from the process environment when the
+# container is started with the variable present; nothing secret lives here.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  # Root route: every alert lands here first.
+  receiver: "null"
+  group_by: ["alertname", "deployment_environment_name", "severity"]
+  group_wait: 30s        # first notification wait after a group opens
+  group_interval: 5m     # spacing between follow-up notifications in a group
+  repeat_interval: 4h    # re-notify open groups at most every 4h
+  # Severity-based sub-routing. In the local default all sub-routes still
+  # resolve to the no-op receiver; production overrides (Phase 33.5) point
+  # warning/critical at real receivers.
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: "null"
+      repeat_interval: 1h
+    - matchers:
+        - severity = "warning"
+      receiver: "null"
+    - matchers:
+        - severity = "info"
+      receiver: "null"
+
+# Receivers. The `null` receiver is built in and delivers nothing. Its name
+# must be the quoted string 'null' (the bare YAML null is not a valid name).
+receivers:
+  - name: "null"
+
+# Inhibition: suppress dependent alerts during broader outages so operators
+# see the root cause, not a cascade. Every rule is documented in
+# docs/observability/phase-33.4-alerts-and-runbooks.md.
+inhibit_rules:
+  # Collector down makes all collector-derived application telemetry
+  # unreliable - silence the application alerts while it is down.
+  - source_matchers:
+      - alertname = "IranDirectCollectorUnavailable"
+    target_matchers:
+      - component = "service"
+    equal: ["deployment_environment_name"]
+  # A Prometheus target being down suppresses derivative alerts whose
+  # truth depends on that target's scrape.
+  - source_matchers:
+      - alertname = "IranDirectPrometheusTargetDown"
+    target_matchers:
+      - component = "service"
+    equal: ["deployment_environment_name"]
+  # Critical variants suppress their matching warning variants to avoid
+  # duplicate noise for the same condition.
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ["alertname", "deployment_environment_name"]
+
+# Production override examples (uncomment and wire to a route to use):
+#
+# receivers:
+#   - name: email
+#     email_configs:
+#       - smarthost: "${ALERTMANAGER_SMTP_SMARTHOST}"
+#         from: "${ALERTMANAGER_SMTP_FROM}"
+#         to: "${ALERTMANAGER_EMAIL_TO}"
+#   - name: webhook
+#     webhook_configs:
+#       - url: "${ALERTMANAGER_WEBHOOK_URL}"
+#   - name: pagerduty
+#     pagerduty_configs:
+#       - routing_key: "${ALERTMANAGER_PAGERDUTY_ROUTING_KEY}"
+#
+# (No `route` changes are needed beyond adding a `receiver:` reference on the
+#  matching severity sub-route above.)
