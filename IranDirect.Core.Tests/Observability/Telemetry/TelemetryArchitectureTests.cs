@@ -611,11 +611,21 @@ public sealed class TelemetryArchitectureTests
         Assert.Contains("IWindowsRouteApi", content);
         Assert.DoesNotContain("OpenTelemetry", content, StringComparison.OrdinalIgnoreCase);
 
-        // Program.cs composition root must wire the wrapper but add no exporter
-        // and no OpenTelemetry reference.
+        // The composition root must wire the wrapper but add no exporter and
+        // no OpenTelemetry reference. The application graph lives in
+        // ServiceCompositionRoot.cs (Program.cs delegates to it); both files
+        // are checked so neither can smuggle in an exporter.
+        string compositionRoot = Path.Combine(
+            RepoRoot(), "IranDirect.Service/ServiceCompositionRoot.cs");
+        string compositionRootContent = File.ReadAllText(compositionRoot);
+        Assert.Contains("TelemetryRouteApi", compositionRootContent);
+        Assert.DoesNotContain(
+            "OpenTelemetry",
+            compositionRootContent,
+            StringComparison.OrdinalIgnoreCase);
+
         string program = Path.Combine(RepoRoot(), "IranDirect.Service/Program.cs");
         string programContent = File.ReadAllText(program);
-        Assert.Contains("TelemetryRouteApi", programContent);
         Assert.DoesNotContain(
             "OpenTelemetry", programContent, StringComparison.OrdinalIgnoreCase);
     }
