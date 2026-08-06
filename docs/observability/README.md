@@ -85,6 +85,15 @@ Telemetry architecture and instrumentation plan for IranDirect.
   Documents the alert inventory, thresholds, known coverage gaps, and the
   Phase 33.5 next scope. Infrastructure/documentation only — no application
   telemetry changes.
+- [Phase 33.5 production hardening](phase-33.5-production-hardening.md)
+  — adds a production Compose overlay (`docker-compose.production.yml` +
+  `production/`) hardening the stack for production-like deployment: TLS OTLP
+  with bearer-token auth, Docker-secret delivery, Alertmanager production
+  notification routing (email/webhook/PagerDuty placeholders), node-exporter
+  for host/storage alerts (closing the Phase 33.4 storage-pressure gap),
+  Prometheus size-based retention cap, backup/restore scripts, dev certificate
+  generation, upgrade/rollback, reverse-proxy/firewall model, and per-component
+  hardening. No application telemetry changes; no committed secrets.
 - [Observability operations guide](operations.md)
   — how to enable/configure OTLP and console export, environment-variable secret
   handling, sampling, collector-unavailable behavior, shutdown/flush, privacy
@@ -97,5 +106,7 @@ default). Consumption-platform architecture is designed (Phase 33.1) and the
 consumption stack (Collector + Prometheus + Tempo + Grafana) is available
 under `deployment/observability/` (Phase 33.2), and Phase 33.3 adds
 version-controlled dashboards and recording rules to that stack; Phase 33.4 adds
-Alertmanager, fifteen alert rules, and operational runbooks; alerts and
-hardening are planned for Phases 33.5–33.6.
+Alertmanager, fifteen alert rules, and operational runbooks; and Phase 33.5 adds
+a production-hardening overlay (TLS, auth, secrets, node-exporter storage
+alerts, retention caps, backup/restore). Alerts and hardening continue in
+Phases 33.6+.

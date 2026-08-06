@@ -1,0 +1,99 @@
+# OpenTelemetry Collector — PRODUCTION overlay config (Phase 33.5).
+#
+# Mounted over the base config path by docker-compose.production.yml. The base
+# (plaintext, no-auth) collector config is untouched; this is the hardened
+# variant for production-like deployment.
+#
+# Hardening applied (all per Phase 33.5):
+#   * OTLP gRPC + HTTP receivers terminate TLS (server cert below).
+#   * Bearer-token authentication on the OTLP receivers via the
+#     `bearertokenauth` extension; the token is injected from the
+#     OTLP_BEARER_TOKEN environment variable and never written inline.
+#   * TLS cert/key are mounted read-only as Docker secrets; only their paths
+#     appear here, never the material.
+#   * The pipeline still performs NO attribute mutation, NO transform, NO tail
+#     sampling — the application telemetry contract is frozen.
+#
+# mTLS is intentionally NOT enabled here: one-way TLS + a bounded bearer token
+# is sufficient for IranDirect.Service → Collector. Client-cert mTLS is
+# documented in phase-33.5 as an option but adds operational burden without a
+# second, independent identity requirement.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        tls:
+          cert_file: /run/secrets/collector_tls_cert.pem
+          key_file: /run/secrets/collector_tls_key.pem
+        auth:
+          authenticator: bearertokenauth
+      http:
+        endpoint: 0.0.0.0:4318
+        tls:
+          cert_file: /run/secrets/collector_tls_cert.pem
+          key_file: /run/secrets/collector_tls_key.pem
+        auth:
+          authenticator: bearertokenauth
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+  batch:
+    timeout: 5s
+    send_batch_size: 8192
+    send_batch_max_size: 10000
+  resource:
+    attributes:
+      - key: service.name
+        value: IranDirect.Service
+        action: insert
+      - key: deployment.environment.name
+        value: production
+        action: insert
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  # Bearer-token auth for OTLP ingestion. The token value is injected as the
+  # OTLP_BEARER_TOKEN environment variable (set from .env.production,
+  # git-ignored); it is NEVER written inline in this YAML. otelcol expands
+  # ${env:VAR} natively. Extension type is `bearertokenauth` (default id).
+  bearertokenauth:
+    token: ${env:OTLP_BEARER_TOKEN}
+
+service:
+  extensions: [health_check, bearertokenauth]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [prometheus]
+  telemetry:
+    logs:
+      level: ${env:OTELCOL_LOG_LEVEL:-info}

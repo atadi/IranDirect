@@ -1,46 +1,80 @@
-# Runbook: (planned - deferred; see note)
+# Runbook: IranDirectPrometheusStoragePressure (+ host pressure alerts)
 
-- **Alert:** `(planned - deferred; see note)`
-- **Severity:** n/a
+- **Alerts:**
+  - `IranDirectPrometheusStoragePressure` (warning, host root free < 15% / 15m)
+  - `IranDirectPrometheusStoragePressureCritical` (critical, host root free < 5% / 5m)
+  - `IranDirectHostMemoryPressure` (warning, host memory used > 90% / 15m)
+  - `IranDirectHostFilesystemInodesLow` (warning, host root inodes < 10% / 15m)
+- **Severity:** warning / critical (storage); warning (memory, inodes)
+- **Component:** prometheus / infrastructure
 - **Dashboard:** `irandirect-reliability-errors`
-- **Prometheus query:** `(no alert in Phase 33.4 - requires node-exporter or infra disk metrics)`
+- **Prometheus queries:**
+  - `node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}`
+  - `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`
+  - `node_filesystem_files_free{mountpoint="/"} / node_filesystem_files{mountpoint="/"}`
 
 ## What it means
-Prometheus storage/filesystem pressure is NOT alerted in Phase 33.4.
+The host filesystem holding the named Docker volumes (prometheus-data,
+tempo-data, grafana-data, alertmanager-data) is running low on space, memory, or
+inodes. These alerts are produced by **node-exporter** (Phase 33.5, production
+overlay only) and target **only the host root filesystem** — not every mount.
 
 ## User impact
-Without node-exporter or container filesystem metrics, host/container disk pressure on the Prometheus volume cannot be detected here.
+- **Storage pressure:** old Prometheus blocks are evicted when the size cap is
+  hit, silently shortening effective retention; if it reaches 0%, ingestion
+  halts. Tempo block writes can also fail.
+- **Memory pressure:** backend components may be OOM-killed.
+- **Inodes low:** even with free space, new files (TSDB/trace blocks) cannot be
+  created.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `(no alert in Phase 33.4 - requires node-exporter or infra disk metrics)`
+Open the `irandirect-reliability-errors` dashboard. For live host signals query
+Prometheus directly (above). node-exporter is scraped only in the production
+overlay; these alerts will not fire on the local base stack.
 
 ## Symptoms
-Prometheus TSDB may grow toward the 30d retention cap; container disk fills silently.
+Grafana panels for host metrics flatline or show rising usage; `docker system
+df` shows the irandirect-*-data volumes consuming most of the host disk.
 
 ## Likely causes
-n/a - this is a coverage gap, not an incident.
+- Telemetry growth exceeding the 30d/40GB cap without expansion.
+- A leak in a backend component consuming memory.
+- Inode-heavy directories (e.g. many small trace blocks) on a small FS.
 
 ## Safe checks
-Watch 'docker system df' and the irandirect-prometheus-data volume size. Plan node-exporter or infra monitoring for Phase 33.5.
+`docker system df`; inspect the irandirect-prometheus-data volume size; confirm
+the host root FS free% via `df -h /`; check `free -m` / `node_memory_*`; check
+`df -i /` for inodes. Do NOT delete live volume data to "fix" space.
 
 ## Corrective actions
-If the volume is near full, raise retention shorter or expand the volume. Treat as capacity planning, not paging.
+- Storage: expand the host volume / add disk; or temporarily lower
+  `--storage.tsdb.retention.time` (and the size cap) to evict older data; or
+  raise the size cap if the host has headroom.
+- Memory: identify the leaking component (`docker stats`); resize the host or
+  the `deploy.resources` limits; restart the offender.
+- Inodes: locate inode-heavy directories and clean up; expanding the FS also
+  expands the inode table on most filesystems.
 
 ## What not to do
-Do not add node-exporter in this phase (out of scope per the phase brief). Do not fabricate a storage metric.
+Do not add node-exporter to the base/local stack (it is a production-overlay
+concern). Do not fabricate a storage metric. Do not wipe volumes to recover
+space without a backup of any state you need.
 
 ## Escalation criteria
-If disk is critically low, escalate to the platform owner to expand the volume before Prometheus stops ingesting.
+Critical storage (< 5%) or any ingestion halt: page the platform owner to
+expand capacity immediately; preserve `docker system df` and volume sizes as
+evidence.
 
 ## Evidence to preserve
-Volume size, retention setting, 'docker system df'.
+`docker system df`, host `df -h /`, `df -i /`, `free -m`, retention settings,
+Prometheus/Tempo volume sizes.
 
 ## Resolution verification
-Volume has headroom; capacity plan in place for 33.5.
+Host root free% returns above threshold (storage > 15%, inodes > 10%),
+memory used < 90%, and the alert clears after its `for:` window.
 
 ## Related alerts
-IranDirectPrometheusTargetDown
+IranDirectPrometheusTargetDown, IranDirectCollectorUnavailable
 
 ## Ownership
 Observability / Platform

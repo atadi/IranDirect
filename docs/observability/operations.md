@@ -237,6 +237,42 @@ docker compose exec -T alertmanager amtool config show   # 3 inhibit rules
 Safe silence (do **not** disable the rule): open the firing alert in the
 Alertmanager UI → Silence → comment + duration → Create.
 
+## Production hardening (Phase 33.5)
+
+A production overlay (`docker-compose.production.yml` + `production/`) hardens
+the stack without changing the local base. Bring it up with:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+```
+
+Key production changes:
+
+- **TLS OTLP + bearer auth.** The Collector uses
+  `production/collector-otlp-tls.yaml` (TLS server cert + `bearer` extension).
+  Cert/key and token are mounted read-only from Docker secrets; only paths
+  appear in config. The Service connects over `https://…:4317` and supplies the
+  bearer token via `Observability:Otlp:HeadersEnvironmentVariable` (value from
+  an out-of-band env var, never in appsettings). See
+  `IranDirect.Service/appsettings.Observability.Production.example.json`.
+- **Secrets.** Real secret files live in `production/secrets/` (git-ignored);
+  `.env.production` is git-ignored too. Missing secret → container fails to
+  start loudly. No secret value in any committed file.
+- **Host monitoring.** `node-exporter` (6th service) feeds host/storage alerts
+  (storage pressure, memory, inodes) — see `prometheus-storage-pressure.md`.
+- **Retention.** Prometheus gets a 30d time **and** 40GB size cap; Tempo
+  guidance is 7–14 days.
+- **Notifications.** Production Alertmanager routes (email/webhook/PagerDuty)
+  are placeholders in `production/alertmanager/alertmanager.production.example.yml`,
+  rendered with `envsubst` into a git-ignored secret file at deploy.
+- **Grafana** runs https with secure cookies and a file-sourced admin password.
+- **Backup/restore** scripts live in `scripts/` (config-first; secrets excluded
+  by default).
+
+Failure isolation is preserved: Service → Collector (TLS) → Tempo/Prometheus;
+Prometheus → Alertmanager. Invalid TLS/auth fails the export in isolation; the
+Service keeps running. See `phase-33.5-production-hardening.md`.
+
 ## Explicit non-goals
 
 - No automatic runtime/process/HTTP instrumentation.

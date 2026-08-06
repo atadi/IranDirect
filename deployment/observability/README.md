@@ -18,9 +18,10 @@ Implements the reference architecture selected in
 | `tempo` | `grafana/tempo:2.6.1` | Trace storage. Filesystem backend, local blocks, 3-day dev retention. |
 | `grafana` | `grafana/grafana:11.4.0` | Dashboarding. Prometheus + Tempo datasources provisioned; five version-controlled dashboards auto-loaded into the `IranDirect` folder (Phase 33.3). |
 | `alertmanager` | `prom/alertmanager:v0.27.0` | Alert routing/delivery (Phase 33.4). Receives alerts from Prometheus; local default routes everything to a no-op receiver (delivers nothing). |
+| `node-exporter` | `prom/node-exporter:v1.8.2` | **Production overlay only** (Phase 33.5). Host/storage metrics for disk-pressure, memory, and inode alerts; internal-only, read-only host mounts. |
 
-Deliberately excluded: Loki, Alloy, Jaeger, Zipkin, Elasticsearch, ClickHouse.
-No log pipeline exists because the application emits no OTel logs.
+Deliberately excluded: Loki, Alloy, Jaeger, Zipkin, Elasticsearch, ClickHouse,
+cAdvisor, Kubernetes, and any bundled reverse proxy.
 
 The Service never addresses Prometheus, Tempo or Grafana directly. Only the
 collector is application-facing.
@@ -79,6 +80,7 @@ Docker/host restart unless you explicitly stopped them.
 | `irandirect-tempo-data` | `/var/tempo` | Tempo WAL + trace blocks (3-day dev retention) |
 | `irandirect-grafana-data` | `/var/lib/grafana` | Grafana SQLite: users, preferences, saved views |
 | `irandirect-alertmanager-data` | `/alertmanager` | Alertmanager silences + notification state (notified=true) |
+| `irandirect-node-exporter-data` | `/node-exporter` (textfile dir, optional) | node-exporter textfile collector drop zone (production overlay) |
 
 Configuration is bind-mounted read-only from this directory and is
 version-controlled; only the volumes above hold state.
@@ -197,6 +199,37 @@ Inspect inhibition: `docker compose exec -T alertmanager amtool config show`
 Safe silence (do **not** disable the rule): open the firing alert in the
 Alertmanager UI → Silence → comment + duration → Create.
 
+### 8c. Production overlay (Phase 33.5)
+
+`docker-compose.production.yml` + `production/` harden the stack for
+production-like deployment **without editing the base file**. Merge it on top:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --wait
+```
+
+What the overlay adds:
+
+- **TLS OTLP + bearer-token auth** on the Collector (`production/collector-otlp-tls.yaml`);
+  cert/key/token mounted read-only from Docker secrets (paths only, no values).
+- **`node-exporter` (6th service)** for host/storage metrics → storage-pressure,
+  memory, and inode alerts (`production/prometheus/production-rules/`).
+- **Prometheus size cap** (`--storage.tsdb.retention.size=40GB`) alongside the
+  30d time retention.
+- **Production Alertmanager routing** (email/webhook/PagerDuty) from
+  `production/alertmanager/alertmanager.production.example.yml` (placeholders;
+  rendered with `envsubst` into a git-ignored secret file at deploy).
+- **Grafana https** with secure cookies and a file-sourced admin password.
+- **Bounded `deploy.resources`** and `restart: always` on every service.
+- **Backup/restore scripts** in `scripts/` (config-first; secrets excluded).
+
+Secrets live in `production/secrets/` (git-ignored); `.env.production` is
+git-ignored. Dev TLS certs can be generated with
+`production/certificates/generate-dev-certs.ps1` into the git-ignored
+`certificates/generated/`. Full detail in
+[`phase-33.5-production-hardening.md`](../../docs/observability/phase-33.5-production-hardening.md)
+and `production/README.md`.
+
 The dashboards reference only metric names and labels verified against the live
 stack. Some panels (IPC, prefix/DNS, cancellation) stay **empty** until those
 code paths run; they are valid-but-quiet, not broken. Several contract metrics
@@ -279,6 +312,7 @@ exercised by `dotnet test`. Verify this stack manually:
 4. `docker compose exec tempo wget -qO- http://localhost:3200/ready` — `ready`.
 5. `curl http://localhost:3000/api/health` — Grafana `database: ok`.
 5b. `curl -s --max-time 5 http://localhost:9095/-/healthy` — Alertmanager `OK`.
+5c. (production overlay) `curl -s --max-time 5 http://localhost:9100/metrics | head -1` — node-exporter returns metrics.
 6. Prometheus → Status → Targets: `otel-collector` is `UP`.
 7. Grafana → Connections → Data sources → Prometheus / Tempo → **Save & test**
    both succeed.
@@ -312,4 +346,6 @@ exercised by `dotnet test`. Verify this stack manually:
 | Grafana will not start | `GF_SECURITY_ADMIN_USER`/`GF_SECURITY_ADMIN_PASSWORD` must be set in `.env`. |
 | Alertmanager will not start | Check `docker compose logs alertmanager` for `missing name in receiver` — the `null` receiver must be the quoted string `"null"`, not a bare YAML `null`. |
 | No alerts reach Alertmanager | Confirm `curl -s 'http://localhost:9090/api/v1/alertmanagers'` lists `alertmanager:9093` active, and that no alert is currently firing (a healthy stack fires nothing). |
+| Collector won't start in production overlay | Missing/readable secret: `secrets/collector_tls_cert.pem`, `collector_tls_key.pem`, or `otlp_bearer_token.txt` must exist and be mounted; check `docker compose logs otel-collector` for `failed to load certificate` / `secret not found`. Config validation fails loudly with no secret leaked. |
+| node-exporter shows no metrics | Confirm the production overlay is up (`docker compose -f docker-compose.yml -f docker-compose.production.yml ps`); check `curl localhost:9100/metrics`. Host `/proc`/`/sys`/`/` must be readable. |
 | Need collector-side visibility | Set `OTEL_DEBUG_VERBOSITY=normal` in `.env` and recreate the collector. Development only. |

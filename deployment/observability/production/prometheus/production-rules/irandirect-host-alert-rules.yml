@@ -1,0 +1,97 @@
+# IranDirect host/storage alert rules — PRODUCTION overlay (Phase 33.5).
+#
+# Loaded ONLY by the production Prometheus config (docker-compose.production.yml),
+# which scrapes node-exporter. These close the Phase 33.4 storage-pressure gap.
+#
+# Scope discipline: node-exporter exposes many mounts; we alert ONLY on the host
+# root filesystem (mountpoint="/") because that is where the named Docker
+# volumes (prometheus-data, tempo-data, grafana-data, alertmanager-data) live on
+# a standard Docker host. We do NOT alert on every mount. Thresholds are
+# conservative with `for:` windows. All ratios are guarded by a > 0 denominator.
+#
+# These rules must be validated against live node-exporter metrics in a
+# disposable stack before enabling in production (see phase-33.5 doc s10/s21).
+
+groups:
+  - name: irandirect_host_alerts
+    rules:
+      # A. Prometheus storage pressure — host root free ratio.
+      - alert: IranDirectPrometheusStoragePressure
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
+            /
+            (node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"} > 0)
+          ) < 0.15
+        for: 15m
+        labels:
+          severity: warning
+          component: prometheus
+        annotations:
+          summary: "Prometheus host filesystem free < 15% for 15m"
+          description: >
+            The host filesystem holding the Prometheus TSDB volume has under 15%
+            free space for 15 minutes. Old blocks will be evicted when the
+            size cap is reached, silently shortening effective retention.
+          runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      - alert: IranDirectPrometheusStoragePressureCritical
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
+            /
+            (node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"} > 0)
+          ) < 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: prometheus
+        annotations:
+          summary: "Prometheus host filesystem free < 5% for 5m"
+          description: >
+            The host filesystem holding the Prometheus TSDB volume has under 5%
+            free space. Ingestion is at risk of halting; expand the volume or
+            reduce retention immediately.
+          runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # B. Host memory pressure (actionable only).
+      - alert: IranDirectHostMemoryPressure
+        expr: |
+          (
+            1 - (node_memory_MemAvailable_bytes / (node_memory_MemTotal_bytes > 0))
+          ) > 0.90
+        for: 15m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Host memory used > 90% for 15m"
+          description: >
+            The observability host has less than 10% memory available for 15
+            minutes. Backend components may be OOM-killed; check for a leak or
+            resize the host.
+          runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"
+
+      # C. Inode exhaustion (useful on small/aging hosts).
+      - alert: IranDirectHostFilesystemInodesLow
+        expr: |
+          (
+            node_filesystem_files_free{mountpoint="/", fstype!~"tmpfs|overlay"}
+            /
+            (node_filesystem_files{mountpoint="/", fstype!~"tmpfs|overlay"} > 0)
+          ) < 0.10
+        for: 15m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Host filesystem inodes < 10% free for 15m"
+          description: >
+            The host root filesystem has under 10% free inodes. Even with disk
+            space remaining, new files (including TSDB blocks and trace blocks)
+            cannot be created. Investigate inode-heavy directories.
+          runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
+          dashboard_url: "dashboards/irandirect-reliability-errors"

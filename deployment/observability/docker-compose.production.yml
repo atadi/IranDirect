@@ -1,0 +1,173 @@
+# IranDirect observability stack — PRODUCTION overlay (Phase 33.5).
+#
+# Intended to be merged ON TOP OF docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+#
+# The base file remains the local-development definition. This overlay adds
+# production hardening WITHOUT editing the base:
+#   * Collector: TLS OTLP receiver + bearer-token auth, certs/keys mounted
+#     read-only as bind mounts (paths only, never values) and the bearer token
+#     injected via the OTLP_BEARER_TOKEN env var. Plaintext local config untouched.
+#   * node-exporter: 6th service for host/storage metrics (closes the Phase
+#     33.4 storage-pressure gap). Internal-only, read-only host mounts.
+#   * Prometheus: production config with a 30d time cap AND a size-based safety
+#     cap, plus a node-exporter scrape job and the host/storage alert rules.
+#   * Alertmanager: production example config (email/webhook/PagerDuty routing
+#     with ${VAR} placeholders) mounted read-only; rendered at deploy time.
+#   * Stronger restart policy + bounded resources on every service.
+#   * No public exposure: every published port stays 127.0.0.1; the only
+#     operator-facing endpoint is Grafana (see production README firewall section).
+#
+# Secrets are referenced, never embedded. See production/README.md and
+# .env.production.example. Actual secret files live under secrets/ (git-ignored).
+
+name: irandirect-observability
+
+networks:
+  observability:
+    name: irandirect-observability
+    driver: bridge
+
+volumes:
+  prometheus-data:
+    name: irandirect-prometheus-data
+  tempo-data:
+    name: irandirect-tempo-data
+  grafana-data:
+    name: irandirect-grafana-data
+  alertmanager-data:
+    name: irandirect-alertmanager-data
+  node-exporter-data:
+    name: irandirect-node-exporter-data
+
+services:
+  otel-collector:
+    # Override the base config with the hardened TLS+auth variant.
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./production/collector-otlp-tls.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ./secrets/collector_tls_cert.pem:/run/secrets/collector_tls_cert.pem:ro
+      - ./secrets/collector_tls_key.pem:/run/secrets/collector_tls_key.pem:ro
+    # Bearer token comes from the OTLP_BEARER_TOKEN env var (set in .env.production,
+    # git-ignored). The collector reads it via ${env:OTLP_BEARER_TOKEN}; the value
+    # is never in YAML. Missing env => collector fails to start (loud, safe).
+    environment:
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:?set OTLP_BEARER_TOKEN in .env.production}
+    # Published host ports narrow to TLS-only (4317/4318) on loopback. The
+    # Service reaches the collector over these; no plaintext alternative in prod.
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:13133:13133"
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 512M, cpus: "0.50" }
+
+  prometheus:
+    command:
+      - "--config.file=/etc/prometheus/prometheus.production.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      # Size-based safety cap: Prometheus evicts oldest blocks when the dir
+      # exceeds this, independently of the time retention. Precedence: the
+      # FIRST limit (time OR size) reached triggers eviction.
+      - "--storage.tsdb.retention.size=40GB"
+      - "--web.enable-lifecycle"
+      # Admin API intentionally left DISABLED (do not add --web.enable-admin-api).
+    volumes:
+      - ./production/prometheus/prometheus.production.yml:/etc/prometheus/prometheus.production.yml:ro
+      # Base recording + alert rules still apply (glob).
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      # Production host/storage alert rules.
+      - ./production/prometheus/production-rules:/etc/prometheus/production-rules:ro
+      - prometheus-data:/prometheus
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 1G, cpus: "1.00" }
+
+  tempo:
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 1G, cpus: "1.00" }
+
+  alertmanager:
+    volumes:
+      # Production example (placeholders only). In real deployment render this
+      # with envsubst into secrets/alertmanager.production.yml and mount that.
+      - ./secrets/alertmanager.production.yml:/etc/alertmanager/alertmanager.yml:ro
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 256M, cpus: "0.25" }
+
+  grafana:
+    environment:
+      # Production hardening additions (anon off / signup off come from base).
+      GF_SERVER_PROTOCOL: "https"
+      GF_SERVER_CERT_FILE: "/run/secrets/grafana_tls_cert.pem"
+      GF_SERVER_CERT_KEY: "/run/secrets/grafana_tls_key.pem"
+      GF_SESSION_COOKIE_SECURE: "true"
+      GF_SESSION_COOKIE_SAMESITE: "lax"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Use the password from a mounted file; clear the base's inline-password
+      # env so Grafana does not see both (they are mutually exclusive).
+      GF_SECURITY_ADMIN_PASSWORD: ""
+      GF_SECURITY_ADMIN_PASSWORD__FILE: "/run/secrets/grafana_admin_password.txt"
+      GF_PLUGINS_ENABLE_ALPHA: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+      # Grafana TLS cert/key + admin password from secrets (git-ignored).
+      - ./secrets/grafana_tls_cert.pem:/run/secrets/grafana_tls_cert.pem:ro
+      - ./secrets/grafana_tls_key.pem:/run/secrets/grafana_tls_key.pem:ro
+      - ./secrets/grafana_admin_password.txt:/run/secrets/grafana_admin_password.txt:ro
+    # HTTPS healthcheck: the base probe uses plain HTTP, which fails once TLS
+    # is enabled. Override to probe https with an insecure (self-signed) cert.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -k https://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 512M, cpus: "0.50" }
+
+  # --------------------------------------------------------------------
+  # node-exporter — 6th service (Phase 33.5). Host/storage metrics for the
+  # disk-pressure + memory + inode alerts. Internal-only; host filesystems
+  # mounted read-only. No textfile drop by default.
+  # --------------------------------------------------------------------
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: irandirect-node-exporter
+    restart: always
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host/root"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run)($$|/)"
+      - "--collector.filesystem.fs-types-exclude=^(sysfs|procfs|autofs|tmpfs|devtmpfs|overlay)($$|/)"
+      - "--no-collector.systemd"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    networks:
+      - observability
+    expose:
+      - "9100"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { memory: 128M, cpus: "0.20" }

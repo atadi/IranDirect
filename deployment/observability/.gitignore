@@ -1,2 +1,21 @@
 # Local stack secrets - never committed. Use .env.example as the template.
 .env
+
+# Production overlay secrets - never committed. Use .env.production.example.
+.env.production
+
+# Secret material (Docker secret files, rendered configs, tokens).
+secrets/
+
+# Generated TLS material (CA/server/client certs + keys). Produced by
+# production/certificates/generate-dev-certs.ps1 into this ignored dir.
+certificates/generated/
+production/certificates/generated/
+
+# Backup archives produced by scripts/backup.*. Never commit (may contain
+# state; secrets are excluded by the scripts but the archives themselves are
+# not version-controlled).
+backups/
+
+# Node-exporter textfile collector drop zone (production overlay only).
+node-exporter-textfiles/
