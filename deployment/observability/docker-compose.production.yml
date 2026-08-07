@@ -112,9 +112,9 @@ services:
       GF_SESSION_COOKIE_SAMESITE: "lax"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      # Use the password from a mounted file; clear the base's inline-password
-      # env so Grafana does not see both (they are mutually exclusive).
-      GF_SECURITY_ADMIN_PASSWORD: ""
+      # Supply the admin password from a mounted secret FILE only. Do NOT also
+      # set GF_SECURITY_ADMIN_PASSWORD (an explicit empty string would take
+      # precedence over the _FILE mechanism and leave the password blank).
       GF_SECURITY_ADMIN_PASSWORD__FILE: "/run/secrets/grafana_admin_password.txt"
       GF_PLUGINS_ENABLE_ALPHA: "false"
     volumes:

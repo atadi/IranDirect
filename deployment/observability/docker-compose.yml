@@ -192,8 +192,12 @@ services:
     container_name: irandirect-grafana
     restart: unless-stopped
     environment:
+      # Admin password is delivered via a mounted secret FILE (path from .env).
+      # The _FILE mechanism is used so the password never appears in the
+      # compose environment or process args. The production overlay mounts the
+      # file read-only; local dev points this at a .env-provided path too.
       GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:?set GF_SECURITY_ADMIN_USER in .env}
-      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD in .env}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: ${GF_SECURITY_ADMIN_PASSWORD__FILE:?set GF_SECURITY_ADMIN_PASSWORD__FILE in .env}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
@@ -204,6 +208,9 @@ services:
       # provisioning/dashboards/dashboards.yaml) points at this path.
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
+      # Admin password file for the _FILE mechanism (git-ignored). Mounted from the
+      # host path into the container at /run/secrets, matching GF_SECURITY_ADMIN_PASSWORD__FILE.
+      - ./secrets/grafana_admin_password.txt:/run/secrets/grafana_admin_password.txt:ro
     ports:
       # Justified: the Grafana UI is the operator entry point.
       - "127.0.0.1:3000:3000"

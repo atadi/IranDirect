@@ -41,16 +41,23 @@ try {
     # 2) No secret material inside. Real secrets are exact `.env`/`.env.production`
     #    and any `secrets/` directory. `.env.example` / `.env.production.example`
     #    templates and `secrets/README.md` are safe and must NOT trip this check.
+    #    Generated private key material under `certificates/generated/` (including
+    #    the `production/` variant) is also secret and must never be backed up.
     $secretHits = $listing | Where-Object {
         ($_ -eq ".env") -or ($_ -eq ".env.production") -or
-        ($_ -match "(^|/)secrets/") -or ($_ -match "\.env\.(production\.)?example$")
+        ($_ -match "(^|/)secrets/") -or
+        ($_ -match "certificates/generated/") -or
+        ($_ -match "\.pem$")
     }
     # Reverse the example-template false positives: keep only the dangerous ones.
     $secretHits = $secretHits | Where-Object {
-        ($_ -eq ".env") -or ($_ -eq ".env.production") -or ($_ -match "(^|/)secrets/")
+        ($_ -eq ".env") -or ($_ -eq ".env.production") -or
+        ($_ -match "(^|/)secrets/") -or
+        ($_ -match "certificates/generated/") -or
+        ($_ -match "\.pem$")
     }
     if ($secretHits) { throw "Secret material found in archive:`n$($secretHits -join "`n")" }
-    Write-Host "[OK] No secret files (.env*, secrets/, certificates/generated/) inside archive."
+    Write-Host "[OK] No secret files (.env*, secrets/, certificates/generated/*, *.pem) inside archive."
 
     # 3) Checksum manifest present alongside.
     $dir = Split-Path $Archive

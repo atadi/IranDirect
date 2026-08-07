@@ -38,6 +38,7 @@ $excl = @(
     "--exclude=./.env", "--exclude=./.env.production",
     "--exclude=./secrets", "--exclude=./production/secrets",
     "--exclude=./certificates/generated",
+    "--exclude=./production/certificates/generated",
     "--exclude=./backups", "--exclude=./node-exporter-textfiles",
     "--exclude=*/bin", "--exclude=*/obj"
 )
