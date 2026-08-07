@@ -267,7 +267,8 @@ public sealed class SeedObservationStep : IServiceSimulationStep
 
         if (_writePrefixFile)
         {
-            await context.Environment.PrefixRepository.SaveAsync(
+            await context.Environment.PrefixStore.SavePrefixesAsync(
+                context.Environment.Country,
                 _prefixes,
                 cancellationToken);
         }

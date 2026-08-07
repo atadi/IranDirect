@@ -77,7 +77,8 @@ public sealed record ResourceSample
                 cancellationToken);
 
         IReadOnlyList<string> prefixes =
-            await environment.PrefixRepository.LoadAsync(
+            await environment.PrefixStore.LoadPrefixesAsync(
+                environment.Country,
                 cancellationToken);
 
         IReadOnlyList<CustomRouteEntry> customRoutes =
@@ -90,6 +91,7 @@ public sealed record ResourceSample
 
         IReadOnlyList<PrefixSourceUpdateHistoryEntry> history =
             await environment.PrefixHistoryService.GetRecentAsync(
+                environment.Country,
                 cancellationToken: cancellationToken);
 
         Process process = Process.GetCurrentProcess();

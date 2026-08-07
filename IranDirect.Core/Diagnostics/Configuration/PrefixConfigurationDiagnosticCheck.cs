@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Prefixes;
 
@@ -6,12 +7,18 @@ namespace IranDirect.Core.Diagnostics.Configuration;
 public sealed class PrefixConfigurationDiagnosticCheck :
     IDiagnosticCheck
 {
-    private readonly PrefixFileRepository _prefixRepository;
+    private readonly CountryPrefixStore _prefixStore;
+    private readonly Func<DirectCountryCode> _countryResolver;
 
     public PrefixConfigurationDiagnosticCheck(
-        PrefixFileRepository prefixRepository)
+        CountryPrefixStore prefixStore,
+        Func<DirectCountryCode> countryResolver)
     {
-        _prefixRepository = prefixRepository;
+        ArgumentNullException.ThrowIfNull(prefixStore);
+        ArgumentNullException.ThrowIfNull(countryResolver);
+
+        _prefixStore = prefixStore;
+        _countryResolver = countryResolver;
     }
 
     public string Id => "prefix-configuration";
@@ -23,7 +30,8 @@ public sealed class PrefixConfigurationDiagnosticCheck :
         try
         {
             IReadOnlyList<string> prefixes =
-                await _prefixRepository.LoadAsync(
+                await _prefixStore.LoadPrefixesAsync(
+                    _countryResolver(),
                     cancellationToken);
 
             if (prefixes.Count == 0)

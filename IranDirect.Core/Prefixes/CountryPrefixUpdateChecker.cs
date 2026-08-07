@@ -1,37 +1,64 @@
 using System.Net;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Observability.Telemetry;
 using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Prefixes;
 
-public sealed class OfficialIranPrefixUpdateChecker :
+/// <summary>
+/// Generic country-prefix update checker. Replaces the Iran-specific checker.
+/// Probes the per-country RIPEstat resource URL and compares ETag /
+/// Last-Modified / Content-Length against the country-scoped local metadata,
+/// so an IR update can never suppress an IQ update (and vice versa).
+///
+/// Implements both <see cref="ICountryPrefixUpdateChecker"/> (explicit country)
+/// and <see cref="IPrefixUpdateChecker"/> (monitor path, where the country is
+/// resolved via the configured provider).
+/// </summary>
+public sealed class CountryPrefixUpdateChecker :
+    ICountryPrefixUpdateChecker,
     IPrefixUpdateChecker
 {
     private const int MaxReasonLength = 300;
 
-    private readonly HttpClient _httpClient;
+    private readonly ICountryPrefixSource _source;
     private readonly IPrefixSourceMetadataService _metadataService;
     private readonly PrefixUpdateCheckOptions _options;
+    private readonly Func<DirectCountryCode>? _countryProvider;
+    private readonly HttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
     private readonly IFaultInjectionPolicy _faultPolicy;
 
-    public OfficialIranPrefixUpdateChecker(
-        HttpClient httpClient,
+    public CountryPrefixUpdateChecker(
+        ICountryPrefixSource source,
         IPrefixSourceMetadataService metadataService,
         PrefixUpdateCheckOptions options,
+        HttpClient httpClient,
+        Func<DirectCountryCode>? countryProvider = null,
         TimeProvider? timeProvider = null,
         IFaultInjectionPolicy? faultPolicy = null)
     {
-        _httpClient = httpClient;
+        _source = source;
         _metadataService = metadataService;
         _options = options;
+        _countryProvider = countryProvider;
+        _httpClient = httpClient;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
+    public Task<PrefixUpdateCheckResult> CheckAsync(
+        CancellationToken cancellationToken) =>
+        CheckAsync(
+            ResolveCountry(),
+            cancellationToken);
+
     public async Task<PrefixUpdateCheckResult> CheckAsync(
-        CancellationToken cancellationToken)
+        DirectCountryCode country,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(country);
+
         DateTimeOffset checkedAt = _timeProvider.GetUtcNow();
 
         PrefixUpdateCheckResult result;
@@ -41,7 +68,7 @@ public sealed class OfficialIranPrefixUpdateChecker :
         try
         {
             current = await _metadataService.GetCurrentAsync(
-                cancellationToken);
+                country, cancellationToken);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -82,7 +109,8 @@ public sealed class OfficialIranPrefixUpdateChecker :
             timeout.CancelAfter(_options.Timeout);
 
             PrefixUpdateCheckRemoteMetadata remote =
-                await ProbeRemoteAsync(scope, timeout.Token);
+                await ProbeRemoteAsync(
+                    country, scope, timeout.Token);
 
             bool canCompare = remote.ETag is not null
                 || remote.LastModified is not null
@@ -130,8 +158,22 @@ public sealed class OfficialIranPrefixUpdateChecker :
         return result;
     }
 
+    private DirectCountryCode ResolveCountry()
+    {
+        if (_countryProvider is null)
+        {
+            throw new InvalidOperationException(
+                "CountryPrefixUpdateChecker was created without a country " +
+                "provider; use CheckAsync(DirectCountryCode, ...) for an " +
+                "explicit country.");
+        }
+
+        return _countryProvider();
+    }
+
     private async Task<PrefixUpdateCheckRemoteMetadata>
         ProbeRemoteAsync(
+            DirectCountryCode country,
             PrefixUpdateTelemetry.PrefixCheckScope scope,
             CancellationToken cancellationToken)
     {
@@ -144,13 +186,14 @@ public sealed class OfficialIranPrefixUpdateChecker :
         }
 
         using HttpResponseMessage headResponse =
-            await SendHeadAsync(scope, cancellationToken);
+            await SendHeadAsync(
+                country, scope, cancellationToken);
 
         if (headResponse.StatusCode == HttpStatusCode.MethodNotAllowed
             || headResponse.StatusCode == HttpStatusCode.NotImplemented)
         {
             return await FetchRemoteMetadataAsync(
-                scope, cancellationToken);
+                country, scope, cancellationToken);
         }
 
         headResponse.EnsureSuccessStatusCode();
@@ -159,12 +202,13 @@ public sealed class OfficialIranPrefixUpdateChecker :
     }
 
     private async Task<HttpResponseMessage> SendHeadAsync(
+        DirectCountryCode country,
         PrefixUpdateTelemetry.PrefixCheckScope scope,
         CancellationToken cancellationToken)
     {
         using HttpRequestMessage headRequest = new(
             HttpMethod.Head,
-            OfficialIranPrefixSource.Descriptor.Uri);
+            _source.GetDescriptor(country).Uri);
 
         using var headScope = scope.StartHead();
         try
@@ -185,6 +229,7 @@ public sealed class OfficialIranPrefixUpdateChecker :
 
     private async Task<PrefixUpdateCheckRemoteMetadata>
         FetchRemoteMetadataAsync(
+            DirectCountryCode country,
             PrefixUpdateTelemetry.PrefixCheckScope scope,
             CancellationToken cancellationToken)
     {
@@ -201,7 +246,7 @@ public sealed class OfficialIranPrefixUpdateChecker :
         {
             using HttpResponseMessage response =
                 await _httpClient.GetAsync(
-                    OfficialIranPrefixSource.Descriptor.Uri,
+                    _source.GetDescriptor(country).Uri,
                     HttpCompletionOption.ResponseHeadersRead,
                     cancellationToken);
 
@@ -252,30 +297,21 @@ public sealed class OfficialIranPrefixUpdateChecker :
                 remote.ETag,
                 StringComparison.Ordinal))
         {
-            return UpdateAvailable(
-                current,
-                remote,
-                checkedAt);
+            return UpdateAvailable(current, remote, checkedAt);
         }
 
         if (hasLastModified
             && current.SourceLastModified is { } localModified
             && remote.LastModified > localModified)
         {
-            return UpdateAvailable(
-                current,
-                remote,
-                checkedAt);
+            return UpdateAvailable(current, remote, checkedAt);
         }
 
         if (hasContentLength
             && current.ContentLength is { } localLength
             && remote.ContentLength != localLength)
         {
-            return UpdateAvailable(
-                current,
-                remote,
-                checkedAt);
+            return UpdateAvailable(current, remote, checkedAt);
         }
 
         return new PrefixUpdateCheckResult

@@ -624,25 +624,30 @@ internal sealed class NoopPrefixMetadataService :
     IPrefixSourceMetadataService
 {
     public Task<PrefixSourceMetadata?> GetCurrentAsync(
+        DirectCountryCode country,
         CancellationToken cancellationToken = default) =>
         Task.FromResult<PrefixSourceMetadata?>(null);
 
     public Task<PrefixSourceChangeSummary?> GetLatestChangeSummaryAsync(
+        DirectCountryCode country,
         CancellationToken cancellationToken = default) =>
         Task.FromResult<PrefixSourceChangeSummary?>(null);
 
     public Task RecordSuccessAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         IReadOnlyList<string>? previousPrefixes = null,
         CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
     public Task RecordNotModifiedAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
     public Task RecordFailureAsync(
+        DirectCountryCode country,
         PrefixSourceDescriptor source,
         string error,
         CancellationToken cancellationToken = default) =>
@@ -654,12 +659,14 @@ internal sealed class NoopPrefixHistoryService :
 {
     public Task<IReadOnlyList<PrefixSourceUpdateHistoryEntry>>
         GetRecentAsync(
+            DirectCountryCode country,
             int? limit = null,
             CancellationToken cancellationToken = default) =>
         Task.FromResult(
             (IReadOnlyList<PrefixSourceUpdateHistoryEntry>)Array.Empty<PrefixSourceUpdateHistoryEntry>());
 
     public Task RecordSuccessAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         PrefixSourceChangeSummary? changeSummary = null,
         IReadOnlyList<string>? previousPrefixes = null,
@@ -667,6 +674,7 @@ internal sealed class NoopPrefixHistoryService :
         Task.CompletedTask;
 
     public Task RecordNotModifiedAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         int currentPrefixCount = 0,
         string? currentContentHash = null,
@@ -674,12 +682,14 @@ internal sealed class NoopPrefixHistoryService :
         Task.CompletedTask;
 
     public Task RecordFailureAsync(
+        DirectCountryCode country,
         PrefixSourceDescriptor source,
         string error,
         CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
     public Task ClearAsync(
+        DirectCountryCode country,
         CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }

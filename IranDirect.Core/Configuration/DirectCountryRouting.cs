@@ -1,28 +1,26 @@
 namespace IranDirect.Core.Configuration;
 
 /// <summary>
-/// Temporary transitional gate for Phase 35.2.
+/// Country-routing support policy.
 ///
-/// The prefix data source is still Iran-only until Phase 35.3 generalizes it.
-/// A configuration may now carry an explicit non-IR <see
-/// cref="DirectCountryCode"/> (e.g. IQ/RO), which is valid and representable,
-/// but the runtime must NOT route through the Iran-only source as if that
-/// country's prefixes belonged to it.
+/// Phase 35.2 introduced a temporary transitional gate that only permitted the
+/// legacy/default country (IR) until the prefix data source was generalized.
 ///
-/// Until Phase 35.3, only the legacy/default country (IR, including a null
-/// legacy value) is supported. Any other recognized country is valid
-/// configuration yet intentionally unsupported for routing, so reconciliation
-/// is skipped safely (no route mutation) and the host stays alive.
+/// Phase 35.3 replaced the Iran-only source with a generic country-prefix
+/// pipeline driven by <see cref="DesiredConfiguration.DirectCountryCode"/>. The
+/// RIPEstat country-resource-list endpoint is global (ISO 3166-1 alpha-2), so a
+/// valid ISO country is routable whenever the generic source can provide a
+/// valid dataset for it. There is no hand-written whitelist.
 ///
-/// REMOVAL POINT (Phase 35.3): replace the body of
-/// <see cref="IsDirectCountrySupported"/> with a real check against the
-/// generalized country-prefix source (e.g. is a source configured/available for
-/// this code?). Once the source supports the selected country, the gate opens
-/// and normal reconciliation resumes without further code changes here.
+/// Country validity is therefore enforced by the <see cref="DirectCountryCode"/>
+/// value object itself: an unparseable or non-ISO code throws at parse/conversion
+/// time, and a legacy-absent (null) configuration code defaults to IR at the
+/// configuration layer. The dedicated <c>IsDirectCountrySupported</c> gate that
+/// existed during the 35.2 transition was removed in 35.3 because no code path
+/// needed it — the source-level contract (a valid fetch requires the selected
+/// country's dataset to be obtainable and validated) is enforced where the
+/// dataset is acquired, not behind a redundant boolean.
 /// </summary>
 public static class DirectCountryRouting
 {
-    public static bool IsDirectCountrySupported(
-        DirectCountryCode? code) =>
-        code is null || code == DirectCountryCode.IR;
 }

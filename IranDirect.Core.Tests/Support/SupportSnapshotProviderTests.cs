@@ -784,6 +784,7 @@ public sealed class SupportSnapshotProviderTests
         public PrefixSourceMetadata? Metadata { get; }
 
         public Task<PrefixSourceMetadata?> GetCurrentAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken = default)
         {
             _callCount++;
@@ -792,6 +793,7 @@ public sealed class SupportSnapshotProviderTests
 
         public Task<PrefixSourceChangeSummary?>
             GetLatestChangeSummaryAsync(
+                DirectCountryCode country,
                 CancellationToken cancellationToken = default)
         {
             return Task.FromResult<PrefixSourceChangeSummary?>(
@@ -799,6 +801,7 @@ public sealed class SupportSnapshotProviderTests
         }
 
         public Task RecordSuccessAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             IReadOnlyList<string>? previousPrefixes = null,
             CancellationToken cancellationToken = default)
@@ -807,6 +810,7 @@ public sealed class SupportSnapshotProviderTests
         }
 
         public Task RecordNotModifiedAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             CancellationToken cancellationToken = default)
         {
@@ -814,6 +818,7 @@ public sealed class SupportSnapshotProviderTests
         }
 
         public Task RecordFailureAsync(
+            DirectCountryCode country,
             PrefixSourceDescriptor source,
             string error,
             CancellationToken cancellationToken = default)
@@ -842,6 +847,7 @@ public sealed class SupportSnapshotProviderTests
 
         public Task<IReadOnlyList<PrefixSourceUpdateHistoryEntry>>
             GetRecentAsync(
+                DirectCountryCode country,
                 int? limit = null,
                 CancellationToken cancellationToken = default)
         {
@@ -850,6 +856,7 @@ public sealed class SupportSnapshotProviderTests
         }
 
         public Task RecordSuccessAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             PrefixSourceChangeSummary? changeSummary = null,
             IReadOnlyList<string>? previousPrefixes = null,
@@ -859,6 +866,7 @@ public sealed class SupportSnapshotProviderTests
         }
 
         public Task RecordNotModifiedAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             int currentPrefixCount = 0,
             string? currentContentHash = null,
@@ -868,6 +876,7 @@ public sealed class SupportSnapshotProviderTests
         }
 
         public Task RecordFailureAsync(
+            DirectCountryCode country,
             PrefixSourceDescriptor source,
             string error,
             CancellationToken cancellationToken = default)
@@ -876,6 +885,7 @@ public sealed class SupportSnapshotProviderTests
         }
 
         public Task ClearAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;

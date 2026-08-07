@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Prefixes;
 
@@ -6,15 +7,20 @@ namespace IranDirect.Core.Diagnostics.Configuration;
 public sealed class PrefixHistoryDiagnosticCheck :
     IDiagnosticCheck
 {
-    private readonly IPrefixSourceUpdateHistoryRepository
-        _historyRepository;
+    private readonly CountryPrefixStore _prefixStore;
+    private readonly Func<DirectCountryCode> _countryResolver;
     private readonly PrefixSourceHistoryOptions _historyOptions;
 
     public PrefixHistoryDiagnosticCheck(
-        IPrefixSourceUpdateHistoryRepository historyRepository,
+        CountryPrefixStore prefixStore,
+        Func<DirectCountryCode> countryResolver,
         PrefixSourceHistoryOptions historyOptions)
     {
-        _historyRepository = historyRepository;
+        ArgumentNullException.ThrowIfNull(prefixStore);
+        ArgumentNullException.ThrowIfNull(countryResolver);
+
+        _prefixStore = prefixStore;
+        _countryResolver = countryResolver;
         _historyOptions = historyOptions;
     }
 
@@ -27,8 +33,10 @@ public sealed class PrefixHistoryDiagnosticCheck :
         try
         {
             PrefixSourceUpdateHistoryDocument document =
-                await _historyRepository.LoadAsync(
-                    cancellationToken);
+                await _prefixStore
+                    .GetUpdateHistoryRepository(
+                        _countryResolver())
+                    .LoadAsync(cancellationToken);
 
             if (document.SchemaVersion != 1)
             {

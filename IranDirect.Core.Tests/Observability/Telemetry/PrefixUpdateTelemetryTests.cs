@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
@@ -69,22 +70,24 @@ public sealed class PrefixUpdateTelemetryTests
         return listener;
     }
 
-    private static OfficialIranPrefixUpdateChecker CreateChecker(
+    private static CountryPrefixUpdateChecker CreateChecker(
         HttpMessageHandler handler,
         IPrefixSourceMetadataService metadataService,
         TimeSpan? timeout = null,
         TimeProvider? timeProvider = null,
         IFaultInjectionPolicy? faultPolicy = null) =>
         new(
-            new HttpClient(handler)
-            {
-                Timeout = Timeout.InfiniteTimeSpan
-            },
+            new StubCountryPrefixSource(),
             metadataService,
             new PrefixUpdateCheckOptions
             {
                 Timeout = timeout ?? TimeSpan.FromSeconds(5)
             },
+            new HttpClient(handler)
+            {
+                Timeout = Timeout.InfiniteTimeSpan
+            },
+            () => DirectCountryCode.IR,
             timeProvider,
             faultPolicy);
 
@@ -125,26 +128,31 @@ public sealed class PrefixUpdateTelemetryTests
         public PrefixSourceMetadata? Current { get; set; }
 
         public Task<PrefixSourceMetadata?> GetCurrentAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(Current);
 
         public Task<PrefixSourceChangeSummary?>
             GetLatestChangeSummaryAsync(
+                DirectCountryCode country,
                 CancellationToken cancellationToken = default) =>
             Task.FromResult<PrefixSourceChangeSummary?>(null);
 
         public Task RecordSuccessAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             IReadOnlyList<string>? previousPrefixes = null,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
         public Task RecordNotModifiedAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
         public Task RecordFailureAsync(
+            DirectCountryCode country,
             PrefixSourceDescriptor source,
             string error,
             CancellationToken cancellationToken = default) =>
@@ -192,7 +200,7 @@ public sealed class PrefixUpdateTelemetryTests
                 contentLength: 512));
         StubMetadataService metadata = new() { Current = CreateMetadata() };
 
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         PrefixUpdateCheckResult result =
@@ -279,7 +287,7 @@ public sealed class PrefixUpdateTelemetryTests
             });
         StubMetadataService metadata = new() { Current = CreateMetadata() };
 
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         checker.CheckAsync(CancellationToken.None).GetAwaiter()
@@ -319,7 +327,7 @@ public sealed class PrefixUpdateTelemetryTests
                 contentLength: 512));
         StubMetadataService metadata = new() { Current = CreateMetadata() };
 
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         PrefixUpdateCheckResult result =
@@ -367,7 +375,7 @@ public sealed class PrefixUpdateTelemetryTests
             _ => throw new InvalidOperationException("must not run"));
         StubMetadataService metadata = new() { Current = null };
 
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         PrefixUpdateCheckResult result =
@@ -409,7 +417,7 @@ public sealed class PrefixUpdateTelemetryTests
             _ => throw new HttpRequestException("connection refused"));
         StubMetadataService metadata = new() { Current = CreateMetadata() };
 
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         PrefixUpdateCheckResult result =
@@ -456,7 +464,7 @@ public sealed class PrefixUpdateTelemetryTests
             _ => throw new InvalidOperationException("must not run"));
         StubMetadataService metadata = new() { Current = CreateMetadata() };
 
-        OfficialIranPrefixUpdateChecker checker = CreateChecker(
+        CountryPrefixUpdateChecker checker = CreateChecker(
             handler,
             metadata,
             faultPolicy: FaultInjectionPolicy.For(
@@ -496,7 +504,7 @@ public sealed class PrefixUpdateTelemetryTests
                 contentLength: 512));
         StubMetadataService metadata = new() { Current = CreateMetadata() };
 
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         PrefixUpdateCheckResult result =
@@ -523,7 +531,7 @@ public sealed class PrefixUpdateTelemetryTests
                 contentLength: 512));
         StubMetadataService metadata = new() { Current = CreateMetadata() };
 
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         checker.CheckAsync(CancellationToken.None).GetAwaiter()
@@ -553,11 +561,30 @@ public sealed class PrefixUpdateTelemetryTests
                     "file",
                     tag.Key,
                     StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain(
+                                Assert.DoesNotContain(
                     "exception",
                     tag.Key,
                     StringComparison.OrdinalIgnoreCase);
             }
         }
+    }
+
+    private sealed class StubCountryPrefixSource : ICountryPrefixSource
+    {
+        public PrefixSourceDescriptor GetDescriptor(
+            DirectCountryCode country) =>
+            new()
+            {
+                Id = "stub",
+                DisplayName = "Stub",
+                Format = "ipv4-prefix-list",
+                ParserVersion = "1.0",
+                Uri = $"https://example.test/{country.Code}"
+            };
+
+        public Task<PrefixSourceFetchResult> FetchAsync(
+            DirectCountryCode country,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

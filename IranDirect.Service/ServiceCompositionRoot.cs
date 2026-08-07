@@ -57,44 +57,57 @@ public static class ServiceCompositionRoot
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
 
-        services.AddHttpClient<OfficialIranPrefixSource>(client =>
+        services.AddHttpClient<OfficialCountryPrefixSource>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "IranDirect/1.0");
         });
-        services.AddSingleton<IPrefixSource>(
+        services.AddSingleton<ICountryPrefixSource>(
             serviceProvider =>
                 serviceProvider.GetRequiredService<
-                    OfficialIranPrefixSource>());
-
+                    OfficialCountryPrefixSource>());
         services.AddSingleton(
-            new PrefixFileRepository(
-                Path.Combine(
-                    dataDirectory,
-                    "iran-ipv4-prefixes.txt")));
-
-        services.AddSingleton(
-            new PrefixSourceMetadataStore(
-                Path.Combine(
-                    dataDirectory,
-                    "prefix-source-metadata.json")));
-        services.AddSingleton<
-            PrefixSourceMetadataValidator>();
-        services.AddSingleton<
-            IPrefixSourceMetadataRepository>(
             serviceProvider =>
-                new PrefixSourceMetadataRepository(
+                new CountryPrefixProvider(
                     serviceProvider.GetRequiredService<
-                        PrefixSourceMetadataStore>(),
+                        ICountryPrefixSource>()));
+
+        // Country-scoped prefix persistence. Legacy Iran root files are
+        // migrated into the IR-scoped location on first read.
+        services.AddSingleton(
+            new CountryPrefixStore(dataDirectory));
+
+        // Resolves the currently selected direct country from the
+        // authoritative desired configuration.
+        services.AddSingleton<Func<DirectCountryCode>>(
+            serviceProvider => () =>
+            {
+                DesiredConfigurationService configurationService =
                     serviceProvider.GetRequiredService<
-                        PrefixSourceMetadataValidator>()));
+                        DesiredConfigurationService>();
+
+                try
+                {
+                    return configurationService
+                        .GetAsync(CancellationToken.None)
+                        .GetAwaiter()
+                        .GetResult()
+                        .DirectCountryCode
+                        ?? DirectCountryCode.IR;
+                }
+                catch (DesiredConfigurationException)
+                {
+                    return DirectCountryCode.IR;
+                }
+            });
+
         services.AddSingleton<
             IPrefixSourceMetadataService>(
             serviceProvider =>
                 new PrefixSourceMetadataService(
                     serviceProvider.GetRequiredService<
-                        IPrefixSourceMetadataRepository>(),
+                        CountryPrefixStore>(),
                     serviceProvider.GetRequiredService<
                         TimeProvider>()));
 
@@ -104,17 +117,36 @@ public static class ServiceCompositionRoot
         PrefixUpdateCheckOptions.Validate(prefixUpdateCheckOptions);
         services.AddSingleton(prefixUpdateCheckOptions);
 
-        services.AddHttpClient<
-            OfficialIranPrefixUpdateChecker>(client =>
+        services.AddHttpClient("prefix-update-check", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "IranDirect/1.0");
         });
+        services.AddSingleton(
+            serviceProvider =>
+                new CountryPrefixUpdateChecker(
+                    serviceProvider.GetRequiredService<
+                        ICountryPrefixSource>(),
+                    serviceProvider.GetRequiredService<
+                        IPrefixSourceMetadataService>(),
+                    serviceProvider.GetRequiredService<
+                        PrefixUpdateCheckOptions>(),
+                    serviceProvider
+                        .GetRequiredService<IHttpClientFactory>()
+                        .CreateClient("prefix-update-check"),
+                    serviceProvider.GetRequiredService<
+                        Func<DirectCountryCode>>(),
+                    serviceProvider.GetRequiredService<
+                        TimeProvider>()));
+        services.AddSingleton<ICountryPrefixUpdateChecker>(
+            serviceProvider =>
+                serviceProvider.GetRequiredService<
+                    CountryPrefixUpdateChecker>());
         services.AddSingleton<IPrefixUpdateChecker>(
             serviceProvider =>
                 serviceProvider.GetRequiredService<
-                    OfficialIranPrefixUpdateChecker>());
+                    CountryPrefixUpdateChecker>());
 
         PrefixUpdateMonitorOptions prefixUpdateMonitorOptions =
             new();
@@ -139,29 +171,12 @@ public static class ServiceCompositionRoot
         PrefixSourceHistoryOptions.Validate(historyOptions);
         services.AddSingleton(historyOptions);
 
-        services.AddSingleton(
-            new PrefixSourceUpdateHistoryStore(
-                Path.Combine(
-                    dataDirectory,
-                    "prefix-source-update-history.json")));
-        services.AddSingleton<
-            PrefixSourceUpdateHistoryValidator>();
-        services.AddSingleton<
-            IPrefixSourceUpdateHistoryRepository>(
-            serviceProvider =>
-                new PrefixSourceUpdateHistoryRepository(
-                    serviceProvider.GetRequiredService<
-                        PrefixSourceUpdateHistoryStore>(),
-                    serviceProvider.GetRequiredService<
-                        PrefixSourceUpdateHistoryValidator>(),
-                    serviceProvider.GetRequiredService<
-                        PrefixSourceHistoryOptions>()));
         services.AddSingleton<
             IPrefixSourceUpdateHistoryService>(
             serviceProvider =>
                 new PrefixSourceUpdateHistoryService(
                     serviceProvider.GetRequiredService<
-                        IPrefixSourceUpdateHistoryRepository>(),
+                        CountryPrefixStore>(),
                     serviceProvider.GetRequiredService<
                         PrefixSourceHistoryOptions>(),
                     serviceProvider.GetRequiredService<
@@ -354,7 +369,9 @@ public static class ServiceCompositionRoot
                         dataDirectory,
                         "vpn-profile.ovpn"),
                     serviceProvider.GetRequiredService<
-                        PrefixFileRepository>(),
+                        CountryPrefixStore>(),
+                    serviceProvider.GetRequiredService<
+                        Func<DirectCountryCode>>(),
                     serviceProvider.GetRequiredService<
                         StateRepository>(),
                     serviceProvider.GetRequiredService<
@@ -378,7 +395,9 @@ public static class ServiceCompositionRoot
                     serviceProvider.GetRequiredService<
                         GatewayDetector>(),
                     serviceProvider.GetRequiredService<
-                        PrefixFileRepository>(),
+                        CountryPrefixStore>(),
+                    serviceProvider.GetRequiredService<
+                        Func<DirectCountryCode>>(),
                     serviceProvider.GetRequiredService<
                         IRouteManager>(),
                     customRouteResolver:

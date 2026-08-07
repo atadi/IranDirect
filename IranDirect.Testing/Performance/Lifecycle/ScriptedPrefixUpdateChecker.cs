@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Prefixes;
 
 namespace IranDirect.Testing.Performance.Lifecycle;
@@ -18,7 +19,9 @@ public sealed record ScriptedPrefixCheck(
 /// once the queue is exhausted. Checked timestamps come from an
 /// injected (simulated) time provider.
 /// </summary>
-public sealed class ScriptedPrefixUpdateChecker : IPrefixUpdateChecker
+public sealed class ScriptedPrefixUpdateChecker :
+    IPrefixUpdateChecker,
+    ICountryPrefixUpdateChecker
 {
     private readonly TimeProvider _timeProvider;
     private readonly object _gate = new();
@@ -75,6 +78,11 @@ public sealed class ScriptedPrefixUpdateChecker : IPrefixUpdateChecker
         Enqueue(new ScriptedPrefixCheck(
             PrefixUpdateCheckStatus.Unknown,
             ExceptionMessage: message));
+
+    public Task<PrefixUpdateCheckResult> CheckAsync(
+        DirectCountryCode country,
+        CancellationToken cancellationToken = default) =>
+        CheckAsync(cancellationToken);
 
     public Task<PrefixUpdateCheckResult> CheckAsync(
         CancellationToken cancellationToken)

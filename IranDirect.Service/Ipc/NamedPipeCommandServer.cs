@@ -364,6 +364,7 @@ public class NamedPipeCommandServer
     {
         int count =
             await _controller.UpdatePrefixesAsync(
+                country: null,
                 cancellationToken);
 
         return new ServiceResponse

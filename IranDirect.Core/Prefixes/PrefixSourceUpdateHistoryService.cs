@@ -1,3 +1,5 @@
+using IranDirect.Core.Configuration;
+
 namespace IranDirect.Core.Prefixes;
 
 public sealed class PrefixSourceUpdateHistoryService :
@@ -5,17 +7,16 @@ public sealed class PrefixSourceUpdateHistoryService :
 {
     private const int MaxErrorLength = 512;
 
-    private readonly IPrefixSourceUpdateHistoryRepository
-        _repository;
+    private readonly CountryPrefixStore _store;
     private readonly PrefixSourceHistoryOptions _options;
     private readonly TimeProvider _timeProvider;
 
     public PrefixSourceUpdateHistoryService(
-        IPrefixSourceUpdateHistoryRepository repository,
+        CountryPrefixStore store,
         PrefixSourceHistoryOptions? options = null,
         TimeProvider? timeProvider = null)
     {
-        _repository = repository;
+        _store = store;
         _options = options ?? new PrefixSourceHistoryOptions();
 
         PrefixSourceHistoryOptions.Validate(_options);
@@ -25,6 +26,7 @@ public sealed class PrefixSourceUpdateHistoryService :
 
     public async Task<IReadOnlyList<PrefixSourceUpdateHistoryEntry>>
         GetRecentAsync(
+            DirectCountryCode country,
             int? limit = null,
             CancellationToken cancellationToken = default)
     {
@@ -32,17 +34,18 @@ public sealed class PrefixSourceUpdateHistoryService :
             ? _options.RetentionCount
             : Math.Min(limit.Value, _options.RetentionCount);
 
-        return await _repository.GetRecentAsync(
-            take,
-            cancellationToken);
+        return await _store.GetUpdateHistoryRepository(country)
+            .GetRecentAsync(take, cancellationToken);
     }
 
     public async Task RecordSuccessAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         PrefixSourceChangeSummary? changeSummary = null,
         IReadOnlyList<string>? previousPrefixes = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(country);
         ArgumentNullException.ThrowIfNull(result);
 
         PrefixSourceDescriptor.Validate(result.Source);
@@ -50,9 +53,7 @@ public sealed class PrefixSourceUpdateHistoryService :
         DateTimeOffset now = _timeProvider.GetUtcNow();
 
         PrefixSourceChangeSummary summary = changeSummary
-            ?? BuildFallbackSummary(
-                result,
-                previousPrefixes);
+            ?? BuildFallbackSummary(result, previousPrefixes);
 
         PrefixSourceUpdateHistoryEntry entry = new()
         {
@@ -82,17 +83,18 @@ public sealed class PrefixSourceUpdateHistoryService :
             Error = null
         };
 
-        await _repository.AppendAsync(
-            entry,
-            cancellationToken);
+        await _store.GetUpdateHistoryRepository(country)
+            .AppendAsync(entry, cancellationToken);
     }
 
     public async Task RecordNotModifiedAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         int currentPrefixCount = 0,
         string? currentContentHash = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(country);
         ArgumentNullException.ThrowIfNull(result);
 
         PrefixSourceDescriptor.Validate(result.Source);
@@ -125,16 +127,17 @@ public sealed class PrefixSourceUpdateHistoryService :
             Error = null
         };
 
-        await _repository.AppendAsync(
-            entry,
-            cancellationToken);
+        await _store.GetUpdateHistoryRepository(country)
+            .AppendAsync(entry, cancellationToken);
     }
 
     public async Task RecordFailureAsync(
+        DirectCountryCode country,
         PrefixSourceDescriptor source,
         string error,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(country);
         ArgumentNullException.ThrowIfNull(source);
 
         PrefixSourceDescriptor.Validate(source);
@@ -177,14 +180,15 @@ public sealed class PrefixSourceUpdateHistoryService :
             Error = conciseError
         };
 
-        await _repository.AppendAsync(
-            entry,
-            cancellationToken);
+        await _store.GetUpdateHistoryRepository(country)
+            .AppendAsync(entry, cancellationToken);
     }
 
     public async Task ClearAsync(
+        DirectCountryCode country,
         CancellationToken cancellationToken = default) =>
-        await _repository.ClearAsync(cancellationToken);
+        await _store.GetUpdateHistoryRepository(country)
+            .ClearAsync(cancellationToken);
 
     private PrefixSourceChangeSummary BuildFallbackSummary(
         PrefixSourceFetchResult result,

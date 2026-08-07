@@ -1,3 +1,5 @@
+using IranDirect.Core.Configuration;
+
 namespace IranDirect.Core.Prefixes;
 
 public sealed class PrefixSourceMetadataService :
@@ -5,43 +7,46 @@ public sealed class PrefixSourceMetadataService :
 {
     private const int MaxErrorLength = 500;
 
-    private readonly IPrefixSourceMetadataRepository
-        _repository;
+    private readonly CountryPrefixStore _store;
     private readonly TimeProvider _timeProvider;
 
     public PrefixSourceMetadataService(
-        IPrefixSourceMetadataRepository repository,
+        CountryPrefixStore store,
         TimeProvider? timeProvider = null)
     {
-        _repository = repository;
+        _store = store;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<PrefixSourceMetadata?> GetCurrentAsync(
+        DirectCountryCode country,
         CancellationToken cancellationToken = default)
     {
         PrefixSourceMetadataDocument document =
-            await _repository.LoadAsync(
-                cancellationToken);
+            await _store.GetMetadataRepository(country)
+                .LoadAsync(cancellationToken);
 
         return document.Current;
     }
 
     public async Task<PrefixSourceChangeSummary?>
         GetLatestChangeSummaryAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken = default)
     {
         PrefixSourceMetadata? metadata =
-            await GetCurrentAsync(cancellationToken);
+            await GetCurrentAsync(country, cancellationToken);
 
         return metadata?.ChangeSummary;
     }
 
     public async Task RecordSuccessAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         IReadOnlyList<string>? previousPrefixes = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(country);
         ArgumentNullException.ThrowIfNull(result);
 
         PrefixSourceDescriptor.Validate(result.Source);
@@ -49,8 +54,8 @@ public sealed class PrefixSourceMetadataService :
         DateTimeOffset now = _timeProvider.GetUtcNow();
 
         PrefixSourceMetadataDocument document =
-            await _repository.LoadAsync(
-                cancellationToken);
+            await _store.GetMetadataRepository(country)
+                .LoadAsync(cancellationToken);
 
         PrefixSourceChangeSummary? changeSummary =
             BuildChangeSummary(
@@ -79,15 +84,17 @@ public sealed class PrefixSourceMetadataService :
             ChangeSummary = changeSummary
         };
 
-        await _repository.SaveAsync(
+        await _store.GetMetadataRepository(country).SaveAsync(
             document with { Current = metadata },
             cancellationToken);
     }
 
     public async Task RecordNotModifiedAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult result,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(country);
         ArgumentNullException.ThrowIfNull(result);
 
         PrefixSourceDescriptor.Validate(result.Source);
@@ -95,8 +102,8 @@ public sealed class PrefixSourceMetadataService :
         DateTimeOffset now = _timeProvider.GetUtcNow();
 
         PrefixSourceMetadataDocument document =
-            await _repository.LoadAsync(
-                cancellationToken);
+            await _store.GetMetadataRepository(country)
+                .LoadAsync(cancellationToken);
 
         PrefixSourceMetadata updated = WithSource(
                 result.Source,
@@ -113,16 +120,18 @@ public sealed class PrefixSourceMetadataService :
                 LastError = null
             };
 
-        await _repository.SaveAsync(
+        await _store.GetMetadataRepository(country).SaveAsync(
             document with { Current = updated },
             cancellationToken);
     }
 
     public async Task RecordFailureAsync(
+        DirectCountryCode country,
         PrefixSourceDescriptor source,
         string error,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(country);
         ArgumentNullException.ThrowIfNull(source);
 
         PrefixSourceDescriptor.Validate(source);
@@ -132,8 +141,8 @@ public sealed class PrefixSourceMetadataService :
         string? conciseError = Truncate(error);
 
         PrefixSourceMetadataDocument document =
-            await _repository.LoadAsync(
-                cancellationToken);
+            await _store.GetMetadataRepository(country)
+                .LoadAsync(cancellationToken);
 
         PrefixSourceMetadata updated = WithSource(
                 source,
@@ -145,7 +154,7 @@ public sealed class PrefixSourceMetadataService :
                 LastError = conciseError
             };
 
-        await _repository.SaveAsync(
+        await _store.GetMetadataRepository(country).SaveAsync(
             document with { Current = updated },
             cancellationToken);
     }

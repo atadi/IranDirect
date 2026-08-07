@@ -1,3 +1,5 @@
+using System.Net.Http;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Prefixes;
 
 namespace IranDirect.Core.Tests.Prefixes;
@@ -43,12 +45,13 @@ public sealed class PrefixSourceModelTests
     }
 
     [Fact]
-    public void OfficialIranPrefixSource_Descriptor_IsStable()
+    public void OfficialCountryPrefixSource_Descriptor_IsStable()
     {
+        OfficialCountryPrefixSource source = new(new HttpClient());
         PrefixSourceDescriptor first =
-            OfficialIranPrefixSource.Descriptor;
+            source.GetDescriptor(DirectCountryCode.IR);
         PrefixSourceDescriptor second =
-            OfficialIranPrefixSource.Descriptor;
+            source.GetDescriptor(DirectCountryCode.IR);
 
         Assert.Equal(first, second);
         Assert.False(string.IsNullOrWhiteSpace(first.Id));
@@ -59,10 +62,11 @@ public sealed class PrefixSourceModelTests
     }
 
     [Fact]
-    public void OfficialIranPrefixSource_Descriptor_HasNoSecrets()
+    public void OfficialCountryPrefixSource_Descriptor_HasNoSecrets()
     {
+        OfficialCountryPrefixSource source = new(new HttpClient());
         PrefixSourceDescriptor descriptor =
-            OfficialIranPrefixSource.Descriptor;
+            source.GetDescriptor(DirectCountryCode.IR);
 
         foreach (string secret in new[]
                  {

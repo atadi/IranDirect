@@ -1073,11 +1073,11 @@ public sealed class IranDirectControllerTests
             VpnEndpointInventoryStore endpointInventory = new(
                 Path.Combine(_tempDir, "endpoint-inventory.json"));
 
-            PrefixFileRepository prefixRepo = new(
-                Path.Combine(_tempDir, "prefixes.txt"));
-            File.WriteAllText(
-                Path.Combine(_tempDir, "prefixes.txt"),
-                "203.0.113.0/24" + Environment.NewLine);
+            CountryPrefixStore prefixStore = new(
+                Path.Combine(_tempDir, "prefixes"));
+            prefixStore.SavePrefixesAsync(
+                DirectCountryCode.IR,
+                ["203.0.113.0/24"]).Wait();
 
             DesiredConfigurationStore configStore = new(
                 Path.Combine(_tempDir, "config.json"),
@@ -1098,8 +1098,8 @@ public sealed class IranDirectControllerTests
             VpnEndpointRouteManager vpnRouteManager = new(routeManager);
 
             Controller = new IranDirectController(
-                null!, // IPrefixSource - not called
-                prefixRepo,
+                null!, // ICountryPrefixSource - not called in these tests
+                prefixStore,
                 gatewayDetector,
                 routeManager,
                 StateRepository,

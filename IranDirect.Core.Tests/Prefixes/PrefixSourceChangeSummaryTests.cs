@@ -1,4 +1,5 @@
 using IranDirect.Core.Prefixes;
+using IranDirect.Core.Configuration;
 
 namespace IranDirect.Core.Tests.Prefixes;
 
@@ -11,10 +12,10 @@ public sealed class PrefixSourceChangeSummaryTests
     public async Task GetLatestChangeSummaryAsync_NoPriorState_ReturnsNull()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _);
+            CreateService();
 
         Assert.Null(
-            await service.GetLatestChangeSummaryAsync());
+            await service.GetLatestChangeSummaryAsync(DirectCountryCode.IR));
     }
 
     [Fact]
@@ -22,7 +23,7 @@ public sealed class PrefixSourceChangeSummaryTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
         clock.Now = BaseTime;
 
         string[] prefixes =
@@ -31,11 +32,11 @@ public sealed class PrefixSourceChangeSummaryTests
             "10.0.0.0/8"
         ];
 
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(prefixes));
 
         PrefixSourceChangeSummary? summary =
-            await service.GetLatestChangeSummaryAsync();
+            await service.GetLatestChangeSummaryAsync(DirectCountryCode.IR);
 
         Assert.NotNull(summary);
         Assert.True(summary.HasChanges);
@@ -54,7 +55,7 @@ public sealed class PrefixSourceChangeSummaryTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
 
         string[] prefixes =
         [
@@ -63,17 +64,17 @@ public sealed class PrefixSourceChangeSummaryTests
         ];
 
         clock.Now = BaseTime;
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(prefixes),
             previousPrefixes: []);
 
         clock.Now = BaseTime.AddHours(1);
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(prefixes),
             previousPrefixes: null);
 
         PrefixSourceChangeSummary? summary =
-            await service.GetLatestChangeSummaryAsync();
+            await service.GetLatestChangeSummaryAsync(DirectCountryCode.IR);
 
         Assert.NotNull(summary);
         Assert.False(summary.HasChanges);
@@ -93,7 +94,7 @@ public sealed class PrefixSourceChangeSummaryTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
 
         string[] first =
         [
@@ -107,17 +108,17 @@ public sealed class PrefixSourceChangeSummaryTests
         ];
 
         clock.Now = BaseTime;
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(first),
             previousPrefixes: []);
 
         clock.Now = BaseTime.AddHours(1);
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(second),
             previousPrefixes: first);
 
         PrefixSourceChangeSummary? summary =
-            await service.GetLatestChangeSummaryAsync();
+            await service.GetLatestChangeSummaryAsync(DirectCountryCode.IR);
 
         Assert.NotNull(summary);
         Assert.True(summary.HasChanges);
@@ -137,21 +138,21 @@ public sealed class PrefixSourceChangeSummaryTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
 
         clock.Now = BaseTime;
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(["1.2.3.0/24"]),
             previousPrefixes: null);
 
         clock.Now = BaseTime.AddHours(1);
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(
                 ["1.2.3.0/24", "10.0.0.0/8"]),
             previousPrefixes: null);
 
         PrefixSourceChangeSummary? summary =
-            await service.GetLatestChangeSummaryAsync();
+            await service.GetLatestChangeSummaryAsync(DirectCountryCode.IR);
 
         Assert.NotNull(summary);
         Assert.True(summary.HasChanges);
@@ -165,19 +166,19 @@ public sealed class PrefixSourceChangeSummaryTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
 
         clock.Now = BaseTime;
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(
                 ["1.2.3.0/24", "10.0.0.0/8"]));
 
         clock.Now = BaseTime.AddHours(1);
-        await service.RecordNotModifiedAsync(
+        await service.RecordNotModifiedAsync(DirectCountryCode.IR, 
             CreateFetchResult(notModified: true));
 
         PrefixSourceChangeSummary? summary =
-            await service.GetLatestChangeSummaryAsync();
+            await service.GetLatestChangeSummaryAsync(DirectCountryCode.IR);
 
         Assert.NotNull(summary);
         Assert.True(summary.HasChanges);
@@ -190,19 +191,19 @@ public sealed class PrefixSourceChangeSummaryTests
     [Fact]
     public async Task Summary_PersistsAcrossServiceInstances()
     {
-        string path = CreatePath();
+        string path = CreateDir();
 
         PrefixSourceMetadataService first =
-            CreateServiceAt(path, out _);
-        await first.RecordSuccessAsync(
+            CreateServiceAt(path);
+        await first.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(
                 ["1.2.3.0/24", "10.0.0.0/8"]));
 
         PrefixSourceMetadataService second =
-            CreateServiceAt(path, out _);
+            CreateServiceAt(path);
 
         PrefixSourceChangeSummary? summary =
-            await second.GetLatestChangeSummaryAsync();
+            await second.GetLatestChangeSummaryAsync(DirectCountryCode.IR);
 
         Assert.NotNull(summary);
         Assert.True(summary.HasChanges);
@@ -212,13 +213,13 @@ public sealed class PrefixSourceChangeSummaryTests
     [Fact]
     public async Task ConcurrentRecordSuccess_DoesNotCorruptDocument()
     {
-        PrefixSourceMetadataService service =
-            CreateService(out PrefixSourceMetadataRepository repository);
+        CountryPrefixStore store = new(CreateDir());
+        PrefixSourceMetadataService service = new(store);
 
         int[] sizes = [1, 2, 3, 4, 5];
 
         Task[] tasks = sizes
-            .Select(size => service.RecordSuccessAsync(
+            .Select(size => service.RecordSuccessAsync(DirectCountryCode.IR, 
                 CreateFetchResult(
                     Enumerable.Range(0, size)
                         .Select(i => $"10.{i}.0.0/16")
@@ -228,7 +229,8 @@ public sealed class PrefixSourceChangeSummaryTests
         await Task.WhenAll(tasks);
 
         PrefixSourceMetadataDocument document =
-            await repository.LoadAsync();
+            await store.GetMetadataRepository(DirectCountryCode.IR)
+                .LoadAsync();
 
         Assert.NotNull(document.Current);
         Assert.NotNull(document.Current.ChangeSummary);
@@ -389,38 +391,24 @@ public sealed class PrefixSourceChangeSummaryTests
             ParserVersion = "1"
         };
 
-    private static string CreatePath() =>
+    private static string CreateDir() =>
         Path.Combine(
             Path.GetTempPath(),
             "IranDirect.Tests",
-            Guid.NewGuid().ToString("N"),
-            "prefix-source-metadata.json");
+            Guid.NewGuid().ToString("N"));
 
     private static PrefixSourceMetadataService CreateService(
-        out PrefixSourceMetadataRepository repository,
-        TimeProvider? timeProvider = null)
-    {
-        string path = CreatePath();
-        return CreateServiceAt(path, out repository, timeProvider);
-    }
+        TimeProvider? timeProvider = null) =>
+        new(new CountryPrefixStore(CreateDir()), timeProvider);
 
     private static PrefixSourceMetadataService CreateServiceAt(
-        string path,
-        out PrefixSourceMetadataRepository repository,
-        TimeProvider? timeProvider = null)
-    {
-        repository = new PrefixSourceMetadataRepository(
-            new PrefixSourceMetadataStore(path),
-            new PrefixSourceMetadataValidator());
-
-        return new PrefixSourceMetadataService(
-            repository,
-            timeProvider);
-    }
+        string dir,
+        TimeProvider? timeProvider = null) =>
+        new(new CountryPrefixStore(dir), timeProvider);
 
     private static PrefixSourceMetadataRepository CreateRepository() =>
         new(
-            new PrefixSourceMetadataStore(CreatePath()),
+            new PrefixSourceMetadataStore(CreateDir()),
             new PrefixSourceMetadataValidator());
 
     private sealed class FakeTimeProvider : TimeProvider

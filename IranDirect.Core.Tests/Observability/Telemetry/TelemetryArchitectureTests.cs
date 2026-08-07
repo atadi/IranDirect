@@ -745,7 +745,7 @@ public sealed class TelemetryArchitectureTests
         // The owner may call the dedicated telemetry helpers but must not
         // create activities/instruments itself.
         string path = Path.Combine(
-            RepoRoot(), "IranDirect.Core/Prefixes/OfficialIranPrefixUpdateChecker.cs");
+            RepoRoot(), "IranDirect.Core/Prefixes/CountryPrefixUpdateChecker.cs");
         string content = File.ReadAllText(path);
 
         Assert.Contains("PrefixUpdateTelemetry.StartCheck", content);

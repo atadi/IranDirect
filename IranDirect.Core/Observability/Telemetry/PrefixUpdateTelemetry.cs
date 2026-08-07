@@ -6,7 +6,7 @@ namespace IranDirect.Core.Observability.Telemetry;
 
 /// <summary>
 /// Prefix update-check telemetry: one <c>IranDirect.PrefixUpdateCheck</c>
-/// root Activity per <see cref="OfficialIranPrefixUpdateChecker.CheckAsync"/>
+/// root Activity per <see cref="CountryPrefixUpdateChecker.CheckAsync"/>
 /// attempt, with optional <c>Prefix.HttpHead</c>, <c>Prefix.HttpGet</c>,
 /// <c>Prefix.Compare</c> child Activities. Exactly one
 /// <c>irandirect.prefix.checks</c> counter increment and one

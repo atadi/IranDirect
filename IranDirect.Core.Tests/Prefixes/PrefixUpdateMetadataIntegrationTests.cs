@@ -15,6 +15,9 @@ public sealed class PrefixUpdateMetadataIntegrationTests
     private static readonly DateTimeOffset BaseTime =
         new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
+    private static readonly DirectCountryCode Country =
+        DirectCountryCode.IR;
+
     [Fact]
     public async Task UpdatePrefixes_Success_RecordsMetadata()
     {
@@ -26,19 +29,19 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         ];
         fixture.Clock.Now = BaseTime;
 
-        int count = await fixture.Controller.UpdatePrefixesAsync();
+        int count = await fixture.Controller.UpdatePrefixesAsync(Country);
 
         Assert.Equal(2, count);
 
         PrefixSourceMetadata? metadata =
-            await fixture.MetadataService.GetCurrentAsync();
+            await fixture.MetadataService.GetCurrentAsync(Country);
 
         Assert.NotNull(metadata);
         Assert.Equal(
             PrefixSourceUpdateStatus.Succeeded,
             metadata.LastStatus);
         Assert.Equal(
-            OfficialIranPrefixSource.Descriptor.Id,
+            fixture.Source.GetDescriptor(Country).Id,
             metadata.SourceId);
         Assert.Equal(2, metadata.PrefixCount);
         Assert.Equal(
@@ -63,10 +66,10 @@ public sealed class PrefixUpdateMetadataIntegrationTests
             new InvalidOperationException("network down");
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => fixture.Controller.UpdatePrefixesAsync());
+            () => fixture.Controller.UpdatePrefixesAsync(Country));
 
         PrefixSourceMetadata? metadata =
-            await fixture.MetadataService.GetCurrentAsync();
+            await fixture.MetadataService.GetCurrentAsync(Country);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -94,7 +97,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
                 throwing);
 
         int count =
-            await controller.UpdatePrefixesAsync();
+            await controller.UpdatePrefixesAsync(Country);
 
         Assert.Equal(2, count);
         Assert.True(File.Exists(fixture.PrefixFilePath));
@@ -111,7 +114,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
             "10.0.0.0/8"
         ];
 
-        await fixture.Controller.UpdatePrefixesAsync();
+        await fixture.Controller.UpdatePrefixesAsync(Country);
 
         string content =
             await File.ReadAllTextAsync(fixture.PrefixFilePath);
@@ -131,12 +134,12 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         await using Fixture fixture = new();
         fixture.Source.NotModified = true;
 
-        int count = await fixture.Controller.UpdatePrefixesAsync();
+        int count = await fixture.Controller.UpdatePrefixesAsync(Country);
 
         Assert.Equal(0, count);
 
         PrefixSourceMetadata? metadata =
-            await fixture.MetadataService.GetCurrentAsync();
+            await fixture.MetadataService.GetCurrentAsync(Country);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -150,15 +153,18 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         public List<int> RecordSuccessCalls { get; } = [];
 
         public Task<PrefixSourceMetadata?> GetCurrentAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<PrefixSourceMetadata?>(null);
 
         public Task<PrefixSourceChangeSummary?>
             GetLatestChangeSummaryAsync(
+                DirectCountryCode country,
                 CancellationToken cancellationToken = default) =>
             Task.FromResult<PrefixSourceChangeSummary?>(null);
 
         public Task RecordSuccessAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             IReadOnlyList<string>? previousPrefixes = null,
             CancellationToken cancellationToken = default)
@@ -169,28 +175,42 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         }
 
         public Task RecordNotModifiedAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
         public Task RecordFailureAsync(
+            DirectCountryCode country,
             PrefixSourceDescriptor source,
             string error,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
 
-    private sealed class FakePrefixSource : IPrefixSource
+    private sealed class FakePrefixSource : ICountryPrefixSource
     {
-        public PrefixSourceDescriptor Descriptor =>
-            OfficialIranPrefixSource.Descriptor;
-
         public IReadOnlyList<string> Prefixes { get; set; } = [];
         public Exception? ExceptionToThrow { get; set; }
         public bool NotModified { get; set; }
 
+        public PrefixSourceDescriptor GetDescriptor(
+            DirectCountryCode country) =>
+            new()
+            {
+                Id = "ripe-stat-country-resource-list-ipv4",
+                DisplayName =
+                    "RIPEstat country resource list (IPv4)",
+                Uri = 
+                    "https://stat.ripe.net/data/" +
+                    "country-resource-list/data.json" +
+                    $"?resource={country.Code}",
+                Format = "ripestat-country-resource-list-json",
+                ParserVersion = "1"
+            };
+
         public Task<PrefixSourceFetchResult> FetchAsync(
-            PrefixSourceRequest request,
+            DirectCountryCode country,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -200,12 +220,15 @@ public sealed class PrefixUpdateMetadataIntegrationTests
                 throw ExceptionToThrow;
             }
 
+            PrefixSourceDescriptor descriptor = GetDescriptor(country);
+
             if (NotModified)
             {
                 return Task.FromResult(
                     new PrefixSourceFetchResult
                     {
-                        Source = Descriptor,
+                        Source = descriptor,
+                        CountryCode = country,
                         Prefixes = [],
                         StartedAt = BaseTime,
                         CompletedAt = BaseTime.AddSeconds(1),
@@ -217,7 +240,8 @@ public sealed class PrefixUpdateMetadataIntegrationTests
             return Task.FromResult(
                 new PrefixSourceFetchResult
                 {
-                    Source = Descriptor,
+                    Source = descriptor,
+                    CountryCode = country,
                     Prefixes = Prefixes,
                     StartedAt = BaseTime,
                     CompletedAt = BaseTime.AddSeconds(3),
@@ -238,7 +262,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
             _endpointInventory;
 
         public string PrefixFilePath { get; }
-        public PrefixFileRepository PrefixRepository { get; }
+        public CountryPrefixStore PrefixStore { get; }
         public StateRepository StateRepository { get; }
         public PrefixSourceMetadataService MetadataService { get; }
         public FakeTimeProvider Clock { get; } = new();
@@ -253,9 +277,8 @@ public sealed class PrefixUpdateMetadataIntegrationTests
             Directory.CreateDirectory(_tempDir);
 
             PrefixFilePath = Path.Combine(
-                _tempDir, "prefixes.txt");
-            PrefixRepository =
-                new PrefixFileRepository(PrefixFilePath);
+                _tempDir, "prefixes", "IR", "ipv4-prefixes.txt");
+            PrefixStore = new CountryPrefixStore(_tempDir);
             StateRepository = new StateRepository(
                 Path.Combine(_tempDir, "state.json"));
             _routeInventory = new RouteInventoryStore(
@@ -266,13 +289,8 @@ public sealed class PrefixUpdateMetadataIntegrationTests
                     Path.Combine(
                         _tempDir, "endpoint-inventory.json"));
 
-            PrefixSourceMetadataStore metadataStore = new(
-                Path.Combine(
-                    _tempDir, "prefix-source-metadata.json"));
             MetadataService = new PrefixSourceMetadataService(
-                new PrefixSourceMetadataRepository(
-                    metadataStore,
-                    new PrefixSourceMetadataValidator()),
+                PrefixStore,
                 Clock);
 
             Controller = CreateController(
@@ -281,7 +299,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         }
 
         public IranDirectController CreateController(
-            IPrefixSource source,
+            ICountryPrefixSource source,
             IPrefixSourceMetadataService? metadataService = null)
         {
             FakeRouteManager routeManager = new();
@@ -302,7 +320,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
 
             return new IranDirectController(
                 source,
-                PrefixRepository,
+                PrefixStore,
                 gatewayDetector,
                 routeManager,
                 StateRepository,

@@ -53,8 +53,11 @@ public sealed class RuntimeCycleTelemetryTests
             _tempDir = Path.Combine(
                 Path.GetTempPath(), $"IranDirectTele_{Guid.NewGuid()}");
             Directory.CreateDirectory(_tempDir);
+            Directory.CreateDirectory(
+                Path.Combine(_tempDir, "prefixes", "IR"));
             File.WriteAllText(
-                Path.Combine(_tempDir, "p.txt"),
+                Path.Combine(
+                    _tempDir, "prefixes", "IR", "ipv4-prefixes.txt"),
                 "203.0.113.0/24" + Environment.NewLine);
 
             Profiler = new RuntimeCycleProfiler(
@@ -89,7 +92,7 @@ public sealed class RuntimeCycleTelemetryTests
 
             Controller = new IranDirectController(
                 null!,
-                new PrefixFileRepository(Path.Combine(_tempDir, "p.txt")),
+                new CountryPrefixStore(_tempDir),
                 gatewayDetector,
                 routeManager,
                 StateRepository,

@@ -1,4 +1,5 @@
 using System.Reflection;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Networking;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Routing;
@@ -10,7 +11,8 @@ namespace IranDirect.Core.Diagnostics;
 public sealed class IranDirectDiagnosticsService
 {
     private readonly string _profilePath;
-    private readonly PrefixFileRepository _prefixRepository;
+    private readonly CountryPrefixStore _prefixStore;
+    private readonly Func<DirectCountryCode> _countryResolver;
     private readonly StateRepository _stateRepository;
     private readonly RouteInventoryStore _routeInventoryStore;
     private readonly VpnEndpointInventoryStore
@@ -23,7 +25,8 @@ public sealed class IranDirectDiagnosticsService
 
     public IranDirectDiagnosticsService(
         string profilePath,
-        PrefixFileRepository prefixRepository,
+        CountryPrefixStore prefixStore,
+        Func<DirectCountryCode> countryResolver,
         StateRepository stateRepository,
         RouteInventoryStore routeInventoryStore,
         VpnEndpointInventoryStore endpointInventoryStore,
@@ -32,7 +35,8 @@ public sealed class IranDirectDiagnosticsService
         VpnEndpointRouteManager endpointRouteManager)
     {
         _profilePath = profilePath;
-        _prefixRepository = prefixRepository;
+        _prefixStore = prefixStore;
+        _countryResolver = countryResolver;
         _stateRepository = stateRepository;
         _routeInventoryStore = routeInventoryStore;
         _endpointInventoryStore = endpointInventoryStore;
@@ -116,7 +120,8 @@ public sealed class IranDirectDiagnosticsService
         try
         {
             IReadOnlyList<string> prefixes =
-                await _prefixRepository.LoadAsync(
+                await _prefixStore.LoadPrefixesAsync(
+                    _countryResolver(),
                     cancellationToken);
 
             checks.Add(

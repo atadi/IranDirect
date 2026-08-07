@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.CustomRoutes;
 using IranDirect.Core.Models;
 using IranDirect.Core.Networking;
@@ -14,7 +15,8 @@ public sealed class IranDirectRuntimeObservationSource :
     private readonly string _profilePath;
     private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
     private readonly GatewayDetector _gatewayDetector;
-    private readonly PrefixFileRepository _prefixRepository;
+    private readonly CountryPrefixStore _prefixStore;
+    private readonly Func<DirectCountryCode> _countryResolver;
     private readonly IRouteManager _routeManager;
     private readonly RuntimeCycleProfiler _profiler;
     private readonly ICustomRouteResolver? _customRouteResolver;
@@ -23,7 +25,8 @@ public sealed class IranDirectRuntimeObservationSource :
         string profilePath,
         OpenVpnEndpointProvider vpnEndpointProvider,
         GatewayDetector gatewayDetector,
-        PrefixFileRepository prefixRepository,
+        CountryPrefixStore prefixStore,
+        Func<DirectCountryCode> countryResolver,
         IRouteManager routeManager,
         RuntimeCycleProfiler? profiler = null,
         ICustomRouteResolver? customRouteResolver = null)
@@ -31,7 +34,8 @@ public sealed class IranDirectRuntimeObservationSource :
         _profilePath = profilePath;
         _vpnEndpointProvider = vpnEndpointProvider;
         _gatewayDetector = gatewayDetector;
-        _prefixRepository = prefixRepository;
+        _prefixStore = prefixStore;
+        _countryResolver = countryResolver;
         _routeManager = routeManager;
         _profiler = profiler ?? RuntimeCycleProfiler.Noop;
         _customRouteResolver = customRouteResolver;
@@ -130,8 +134,10 @@ public sealed class IranDirectRuntimeObservationSource :
         using (_profiler.Measure(
             RuntimePerfCategory.ObservationPrefixLoad))
         {
+            DirectCountryCode country = _countryResolver();
             IReadOnlyList<string> prefixes =
-                await _prefixRepository.LoadAsync(
+                await _prefixStore.LoadPrefixesAsync(
+                    country,
                     cancellationToken);
 
             if (_customRouteResolver is null)

@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Prefixes;
 
@@ -6,13 +7,18 @@ namespace IranDirect.Core.Diagnostics.Configuration;
 public sealed class PrefixMetadataDiagnosticCheck :
     IDiagnosticCheck
 {
-    private readonly IPrefixSourceMetadataRepository
-        _metadataRepository;
+    private readonly CountryPrefixStore _prefixStore;
+    private readonly Func<DirectCountryCode> _countryResolver;
 
     public PrefixMetadataDiagnosticCheck(
-        IPrefixSourceMetadataRepository metadataRepository)
+        CountryPrefixStore prefixStore,
+        Func<DirectCountryCode> countryResolver)
     {
-        _metadataRepository = metadataRepository;
+        ArgumentNullException.ThrowIfNull(prefixStore);
+        ArgumentNullException.ThrowIfNull(countryResolver);
+
+        _prefixStore = prefixStore;
+        _countryResolver = countryResolver;
     }
 
     public string Id => "prefix-metadata";
@@ -24,8 +30,9 @@ public sealed class PrefixMetadataDiagnosticCheck :
         try
         {
             PrefixSourceMetadataDocument document =
-                await _metadataRepository.LoadAsync(
-                    cancellationToken);
+                await _prefixStore
+                    .GetMetadataRepository(_countryResolver())
+                    .LoadAsync(cancellationToken);
 
             if (document.SchemaVersion != 1)
             {

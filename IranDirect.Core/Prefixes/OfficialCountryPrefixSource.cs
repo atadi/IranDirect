@@ -1,33 +1,37 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Prefixes;
 
-public sealed class OfficialIranPrefixSource :
-    IPrefixSource
+/// <summary>
+/// Generic RIPEstat country-resource-list prefix source. One implementation
+/// parameterized by <see cref="DirectCountryCode"/>; the requested country is
+/// the only thing that varies (the resource parameter in the URL). No country
+/// is hard-coded.
+/// </summary>
+public sealed class OfficialCountryPrefixSource :
+    ICountryPrefixSource
 {
-    public static PrefixSourceDescriptor Descriptor { get; } =
-        new()
-        {
-            Id = "ripe-stat-country-resource-list-ipv4",
-            DisplayName =
-                "RIPEstat Iran IPv4 country resource list",
-            Uri =
-                "https://stat.ripe.net/data/country-resource-list/data.json?resource=IR",
-            Format = "ripestat-country-resource-list-json",
-            ParserVersion = "1"
-        };
+    public const string SourceId =
+        "ripe-stat-country-resource-list-ipv4";
+    public const string SourceFormat =
+        "ripestat-country-resource-list-json";
+    public const string ParserVersion = "1";
 
-    PrefixSourceDescriptor IPrefixSource.Descriptor =>
-        Descriptor;
+    private const string BaseUri =
+        "https://stat.ripe.net/data/country-resource-list/data.json";
+
+    private const int MaxPrefixCount = 2_000_000;
+    private const long MaxContentLength = 512L * 1024 * 1024;
 
     private readonly HttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
     private readonly IFaultInjectionPolicy _faultPolicy;
 
-    public OfficialIranPrefixSource(
+    public OfficialCountryPrefixSource(
         HttpClient httpClient,
         TimeProvider? timeProvider = null,
         IFaultInjectionPolicy? faultPolicy = null)
@@ -37,11 +41,29 @@ public sealed class OfficialIranPrefixSource :
         _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 
+    public PrefixSourceDescriptor GetDescriptor(
+        DirectCountryCode country)
+    {
+        ArgumentNullException.ThrowIfNull(country);
+
+        return new PrefixSourceDescriptor
+        {
+            Id = SourceId,
+            DisplayName =
+                $"RIPEstat {country.Code} IPv4 country resource list",
+            Uri = BuildUri(country),
+            Format = SourceFormat,
+            ParserVersion = ParserVersion
+        };
+    }
+
     public async Task<PrefixSourceFetchResult> FetchAsync(
-        PrefixSourceRequest request,
+        DirectCountryCode country,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(country);
+
+        PrefixSourceDescriptor descriptor = GetDescriptor(country);
 
         if (FaultInjectionResolver.ShouldFail(
                 _faultPolicy,
@@ -54,7 +76,7 @@ public sealed class OfficialIranPrefixSource :
         DateTimeOffset startedAt = _timeProvider.GetUtcNow();
 
         using HttpResponseMessage response = await _httpClient.GetAsync(
-            Descriptor.Uri,
+            descriptor.Uri,
             cancellationToken);
 
         if (response.StatusCode == HttpStatusCode.NotModified)
@@ -64,7 +86,8 @@ public sealed class OfficialIranPrefixSource :
 
             return new PrefixSourceFetchResult
             {
-                Source = Descriptor,
+                Source = descriptor,
+                CountryCode = country,
                 Prefixes = [],
                 StartedAt = startedAt,
                 CompletedAt = notModifiedCompletedAt,
@@ -81,10 +104,27 @@ public sealed class OfficialIranPrefixSource :
             await response.Content.ReadFromJsonAsync<CountryResourceResponse>(
                 cancellationToken: cancellationToken);
 
+        long? contentLength =
+            response.Content.Headers.ContentLength;
+        if (contentLength is > MaxContentLength)
+        {
+            throw new InvalidOperationException(
+                $"RIPEstat response for {country.Code} exceeded the " +
+                $"maximum allowed size of {MaxContentLength} bytes.");
+        }
+
         if (result?.Data?.Resources?.Ipv4 is not { Count: > 0 } prefixes)
         {
             throw new InvalidOperationException(
-                "RIPEstat returned no Iranian IPv4 prefixes.");
+                $"RIPEstat returned no {country.Code} IPv4 prefixes.");
+        }
+
+        if (prefixes.Count > MaxPrefixCount)
+        {
+            throw new InvalidOperationException(
+                $"RIPEstat returned {prefixes.Count} prefixes for " +
+                $"{country.Code}, exceeding the safety limit of " +
+                $"{MaxPrefixCount}.");
         }
 
         IReadOnlyList<string> normalized = prefixes
@@ -94,11 +134,18 @@ public sealed class OfficialIranPrefixSource :
             .ThenBy(ParsePrefixLength)
             .ToArray();
 
+        if (normalized.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"RIPEstat returned no valid {country.Code} IPv4 prefixes.");
+        }
+
         DateTimeOffset completedAt = _timeProvider.GetUtcNow();
 
         return new PrefixSourceFetchResult
         {
-            Source = Descriptor,
+            Source = descriptor,
+            CountryCode = country,
             Prefixes = normalized,
             StartedAt = startedAt,
             CompletedAt = completedAt,
@@ -107,10 +154,12 @@ public sealed class OfficialIranPrefixSource :
             LastModified = ReadLastModified(response),
             ContentHash =
                 PrefixContentHasher.ComputeHash(normalized),
-            ContentLength =
-                response.Content.Headers.ContentLength
+            ContentLength = contentLength
         };
     }
+
+    private static string BuildUri(DirectCountryCode country) =>
+        $"{BaseUri}?resource={country.Code}";
 
     private static string? ReadETag(
         HttpResponseMessage response) =>

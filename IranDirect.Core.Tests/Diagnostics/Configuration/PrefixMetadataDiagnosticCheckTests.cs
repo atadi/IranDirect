@@ -1,3 +1,7 @@
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Diagnostics;
 using IranDirect.Core.Diagnostics.Configuration;
 using IranDirect.Core.Prefixes;
@@ -6,8 +10,26 @@ namespace IranDirect.Core.Tests.Diagnostics.Configuration;
 
 public sealed class PrefixMetadataDiagnosticCheckTests
 {
-    private static PrefixSourceMetadataDocument ValidDocument() =>
-        new()
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true
+    };
+
+    private static readonly JsonSerializerOptions SeedOptions = new()
+    {
+        WriteIndented = true
+    };
+
+    static PrefixMetadataDiagnosticCheckTests()
+    {
+        JsonOptions.Converters.Add(new JsonStringEnumConverter());
+        SeedOptions.Converters.Add(new JsonStringEnumConverter());
+    }
+
+    private static PrefixSourceMetadataDocument ValidDocument()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        return new()
         {
             SchemaVersion = 1,
             Current = new PrefixSourceMetadata
@@ -16,43 +38,38 @@ public sealed class PrefixMetadataDiagnosticCheckTests
                 SourceDisplayName = "Official Iran Prefixes",
                 Format = "text",
                 ParserVersion = "1.0",
-                LastAttemptedAt = DateTimeOffset.UtcNow,
-                LastSucceededAt = DateTimeOffset.UtcNow,
+                LastAttemptedAt = now,
+                LastSucceededAt = now,
                 LastStatus = PrefixSourceUpdateStatus.Succeeded,
-                ContentHash = "a".PadRight(64, '0')
+                ContentHash = new string('0', 64)
             }
         };
+    }
 
-    private sealed class FakeMetadataRepository :
-        IPrefixSourceMetadataRepository
+    private static CountryPrefixStore SeedStore(
+        PrefixSourceMetadataDocument document)
     {
-        private readonly PrefixSourceMetadataDocument _document;
+        string dir = Path.Combine(
+            Path.GetTempPath(),
+            "IranDirect.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
 
-        public FakeMetadataRepository(
-            PrefixSourceMetadataDocument document)
-        {
-            _document = document;
-        }
-
-        public Task<PrefixSourceMetadataDocument> LoadAsync(
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(_document);
-        }
-
-        public Task SaveAsync(
-            PrefixSourceMetadataDocument document,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
-        }
+        CountryPrefixStore store = new(dir);
+        string metadataFile = store.MetadataFileFor(DirectCountryCode.IR);
+        Directory.CreateDirectory(Path.GetDirectoryName(metadataFile)!);
+        File.WriteAllText(
+            metadataFile,
+            JsonSerializer.Serialize(document, SeedOptions));
+        return store;
     }
 
     [Fact]
     public async Task CheckAsync_ValidMetadata_ReturnsPassed()
     {
         var check = new PrefixMetadataDiagnosticCheck(
-            new FakeMetadataRepository(ValidDocument()));
+            SeedStore(ValidDocument()),
+            () => DirectCountryCode.IR);
 
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
@@ -66,7 +83,8 @@ public sealed class PrefixMetadataDiagnosticCheckTests
         var doc = ValidDocument() with { SchemaVersion = 2 };
 
         var check = new PrefixMetadataDiagnosticCheck(
-            new FakeMetadataRepository(doc));
+            SeedStore(doc),
+            () => DirectCountryCode.IR);
 
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
@@ -81,7 +99,8 @@ public sealed class PrefixMetadataDiagnosticCheckTests
         var doc = ValidDocument() with { Current = null };
 
         var check = new PrefixMetadataDiagnosticCheck(
-            new FakeMetadataRepository(doc));
+            SeedStore(doc),
+            () => DirectCountryCode.IR);
 
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
@@ -100,7 +119,8 @@ public sealed class PrefixMetadataDiagnosticCheckTests
         };
 
         var check = new PrefixMetadataDiagnosticCheck(
-            new FakeMetadataRepository(doc));
+            SeedStore(doc),
+            () => DirectCountryCode.IR);
 
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
@@ -123,7 +143,8 @@ public sealed class PrefixMetadataDiagnosticCheckTests
         };
 
         var check = new PrefixMetadataDiagnosticCheck(
-            new FakeMetadataRepository(doc));
+            SeedStore(doc),
+            () => DirectCountryCode.IR);
 
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
@@ -135,8 +156,15 @@ public sealed class PrefixMetadataDiagnosticCheckTests
     [Fact]
     public async Task CheckAsync_RepoThrows_ReturnsFailed()
     {
+        string dir = Path.Combine(
+            Path.GetTempPath(),
+            "IranDirect.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+
         var check = new PrefixMetadataDiagnosticCheck(
-            new ThrowingMetadataRepository());
+            new CountryPrefixStore(dir),
+            () => DirectCountryCode.IR);
 
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
@@ -144,22 +172,5 @@ public sealed class PrefixMetadataDiagnosticCheckTests
         Assert.Equal(DiagnosticStatus.Failed, result.Status);
         Assert.Equal(DiagnosticSeverity.Error, result.Severity);
         Assert.NotNull(result.SuggestedAction);
-    }
-
-    private sealed class ThrowingMetadataRepository :
-        IPrefixSourceMetadataRepository
-    {
-        public Task<PrefixSourceMetadataDocument> LoadAsync(
-            CancellationToken cancellationToken = default)
-        {
-            throw new IOException("file not found");
-        }
-
-        public Task SaveAsync(
-            PrefixSourceMetadataDocument document,
-            CancellationToken cancellationToken = default)
-        {
-            throw new IOException("file not found");
-        }
     }
 }

@@ -1,10 +1,11 @@
+using IranDirect.Core.Configuration;
 using System.Net;
 using System.Net.Http.Headers;
 using IranDirect.Core.Prefixes;
 
 namespace IranDirect.Core.Tests.Prefixes;
 
-public sealed class OfficialIranPrefixUpdateCheckerTests
+public sealed class CountryPrefixUpdateCheckerTests
 {
     private static readonly DateTimeOffset BaseTime =
         new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -22,7 +23,7 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         {
             Current = CreateMetadata()
         };
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(
                 handler,
                 metadata,
@@ -67,7 +68,7 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         {
             Current = CreateMetadata()
         };
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         PrefixUpdateCheckResult result =
@@ -256,7 +257,7 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         {
             Current = null
         };
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         PrefixUpdateCheckResult result =
@@ -371,7 +372,7 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         {
             Current = CreateMetadata()
         };
-        OfficialIranPrefixUpdateChecker checker =
+        CountryPrefixUpdateChecker checker =
             CreateChecker(handler, metadata);
 
         using CancellationTokenSource cts = new();
@@ -443,21 +444,24 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         {
             string metadataPath = Path.Combine(
                 tempDir,
-                "prefix-source-metadata.json");
+                "prefixes",
+                "IR",
+                "metadata.json");
             string prefixPath = Path.Combine(
                 tempDir,
-                "prefixes.txt");
+                "prefixes",
+                "IR",
+                "ipv4-prefixes.txt");
 
             FakeTimeProvider clock = new();
             PrefixSourceMetadataService metadataService =
                 new(
-                    new PrefixSourceMetadataRepository(
-                        new PrefixSourceMetadataStore(metadataPath),
-                        new PrefixSourceMetadataValidator()),
+                    new CountryPrefixStore(tempDir),
                     clock);
 
             clock.Now = BaseTime;
             await metadataService.RecordSuccessAsync(
+                DirectCountryCode.IR,
                 CreateFetchResult());
 
             byte[] metadataBefore =
@@ -470,7 +474,7 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
                     lastModified: BaseTime,
                     contentLength: 512));
 
-            OfficialIranPrefixUpdateChecker checker =
+            CountryPrefixUpdateChecker checker =
                 CreateChecker(handler, metadataService);
 
             PrefixUpdateCheckResult result =
@@ -486,7 +490,7 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
             Assert.Equal(metadataBefore, metadataAfter);
             Assert.False(File.Exists(prefixPath));
             Assert.Single(
-                Directory.EnumerateFiles(tempDir));
+                Directory.EnumerateFiles(tempDir, "*", SearchOption.AllDirectories));
         }
         finally
         {
@@ -501,21 +505,24 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         }
     }
 
-    private static OfficialIranPrefixUpdateChecker CreateChecker(
+    private static CountryPrefixUpdateChecker CreateChecker(
         HttpMessageHandler handler,
         IPrefixSourceMetadataService metadataService,
         TimeSpan? timeout = null,
-        TimeProvider? timeProvider = null) =>
+        TimeProvider? timeProvider = null,
+        ICountryPrefixSource? source = null) =>
         new(
-            new HttpClient(handler)
-            {
-                Timeout = Timeout.InfiniteTimeSpan
-            },
+            source ?? new StubCountryPrefixSource(),
             metadataService,
             new PrefixUpdateCheckOptions
             {
                 Timeout = timeout ?? TimeSpan.FromSeconds(5)
             },
+            new HttpClient(handler)
+            {
+                Timeout = Timeout.InfiniteTimeSpan
+            },
+            () => DirectCountryCode.IR,
             timeProvider);
 
     private static PrefixSourceMetadata CreateMetadata() =>
@@ -600,6 +607,7 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         public Exception? ExceptionToThrow { get; set; }
 
         public Task<PrefixSourceMetadata?> GetCurrentAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -614,21 +622,25 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
 
         public Task<PrefixSourceChangeSummary?>
             GetLatestChangeSummaryAsync(
+                DirectCountryCode country,
                 CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task RecordSuccessAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             IReadOnlyList<string>? previousPrefixes = null,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task RecordNotModifiedAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task RecordFailureAsync(
+            DirectCountryCode country,
             PrefixSourceDescriptor source,
             string error,
             CancellationToken cancellationToken = default) =>
@@ -676,5 +688,24 @@ public sealed class OfficialIranPrefixUpdateCheckerTests
         public DateTimeOffset Now { get; set; } = BaseTime;
 
         public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private sealed class StubCountryPrefixSource : ICountryPrefixSource
+    {
+        public PrefixSourceDescriptor GetDescriptor(
+            DirectCountryCode country) =>
+            new()
+            {
+                Id = "stub",
+                DisplayName = "Stub",
+                Format = "ipv4-prefix-list",
+                ParserVersion = "1.0",
+                Uri = $"https://example.test/{country.Code}"
+            };
+
+        public Task<PrefixSourceFetchResult> FetchAsync(
+            DirectCountryCode country,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

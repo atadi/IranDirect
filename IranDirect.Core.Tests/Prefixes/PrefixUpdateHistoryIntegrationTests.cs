@@ -15,6 +15,9 @@ public sealed class PrefixUpdateHistoryIntegrationTests
     private static readonly DateTimeOffset BaseTime =
         new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
+    private static readonly DirectCountryCode Country =
+        DirectCountryCode.IR;
+
     [Fact]
     public async Task UpdatePrefixes_Success_AppendsSucceededHistoryEntry()
     {
@@ -26,18 +29,18 @@ public sealed class PrefixUpdateHistoryIntegrationTests
         ];
         fixture.Clock.Now = BaseTime;
 
-        int count = await fixture.Controller.UpdatePrefixesAsync();
+        int count = await fixture.Controller.UpdatePrefixesAsync(Country);
 
         Assert.Equal(2, count);
 
         PrefixSourceUpdateHistoryEntry entry =
-            Assert.Single(await fixture.HistoryService.GetRecentAsync());
+            Assert.Single(await fixture.HistoryService.GetRecentAsync(Country));
 
         Assert.Equal(
             PrefixSourceUpdateStatus.Succeeded,
             entry.Status);
         Assert.Equal(
-            OfficialIranPrefixSource.Descriptor.Id,
+            fixture.Source.GetDescriptor(Country).Id,
             entry.SourceId);
         Assert.Equal(2, entry.PrefixCount);
         Assert.Equal(2, entry.AddedCount);
@@ -63,15 +66,15 @@ public sealed class PrefixUpdateHistoryIntegrationTests
         ];
         fixture.Clock.Now = BaseTime;
 
-        await fixture.Controller.UpdatePrefixesAsync();
+        await fixture.Controller.UpdatePrefixesAsync(Country);
 
         fixture.Source.NotModified = true;
         fixture.Clock.Now = BaseTime.AddHours(1);
 
-        await fixture.Controller.UpdatePrefixesAsync();
+        await fixture.Controller.UpdatePrefixesAsync(Country);
 
         IReadOnlyList<PrefixSourceUpdateHistoryEntry> recent =
-            await fixture.HistoryService.GetRecentAsync();
+            await fixture.HistoryService.GetRecentAsync(Country);
 
         Assert.Equal(2, recent.Count);
 
@@ -105,10 +108,10 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             new InvalidOperationException("network down");
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => fixture.Controller.UpdatePrefixesAsync());
+            () => fixture.Controller.UpdatePrefixesAsync(Country));
 
         PrefixSourceUpdateHistoryEntry entry =
-            Assert.Single(await fixture.HistoryService.GetRecentAsync());
+            Assert.Single(await fixture.HistoryService.GetRecentAsync(Country));
 
         Assert.Equal(
             PrefixSourceUpdateStatus.Failed,
@@ -137,7 +140,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
                 throwing);
 
         int count =
-            await controller.UpdatePrefixesAsync();
+            await controller.UpdatePrefixesAsync(Country);
 
         Assert.Equal(2, count);
         Assert.True(File.Exists(fixture.PrefixFilePath));
@@ -154,7 +157,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             "10.0.0.0/8"
         ];
 
-        await fixture.Controller.UpdatePrefixesAsync();
+        await fixture.Controller.UpdatePrefixesAsync(Country);
 
         fixture.Source.Prefixes =
         [
@@ -163,10 +166,10 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             "5.6.7.0/24"
         ];
 
-        await fixture.Controller.UpdatePrefixesAsync();
+        await fixture.Controller.UpdatePrefixesAsync(Country);
 
         IReadOnlyList<PrefixSourceUpdateHistoryEntry> recent =
-            await fixture.HistoryService.GetRecentAsync();
+            await fixture.HistoryService.GetRecentAsync(Country);
 
         Assert.Equal(2, recent.Count);
         Assert.Equal(
@@ -186,7 +189,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             "10.0.0.0/8"
         ];
 
-        await fixture.Controller.UpdatePrefixesAsync();
+        await fixture.Controller.UpdatePrefixesAsync(Country);
 
         string content =
             await File.ReadAllTextAsync(fixture.HistoryFilePath);
@@ -202,12 +205,14 @@ public sealed class PrefixUpdateHistoryIntegrationTests
 
         public Task<IReadOnlyList<PrefixSourceUpdateHistoryEntry>>
             GetRecentAsync(
+                DirectCountryCode country,
                 int? limit = null,
                 CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<
                 PrefixSourceUpdateHistoryEntry>>([]);
 
         public Task RecordSuccessAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             PrefixSourceChangeSummary? changeSummary = null,
             IReadOnlyList<string>? previousPrefixes = null,
@@ -219,6 +224,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
         }
 
         public Task RecordNotModifiedAsync(
+            DirectCountryCode country,
             PrefixSourceFetchResult result,
             int currentPrefixCount = 0,
             string? currentContentHash = null,
@@ -226,27 +232,41 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             Task.CompletedTask;
 
         public Task RecordFailureAsync(
+            DirectCountryCode country,
             PrefixSourceDescriptor source,
             string error,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
         public Task ClearAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
 
-    private sealed class FakePrefixSource : IPrefixSource
+    private sealed class FakePrefixSource : ICountryPrefixSource
     {
-        public PrefixSourceDescriptor Descriptor =>
-            OfficialIranPrefixSource.Descriptor;
-
         public IReadOnlyList<string> Prefixes { get; set; } = [];
         public Exception? ExceptionToThrow { get; set; }
         public bool NotModified { get; set; }
 
+        public PrefixSourceDescriptor GetDescriptor(
+            DirectCountryCode country) =>
+            new()
+            {
+                Id = "ripe-stat-country-resource-list-ipv4",
+                DisplayName =
+                    "RIPEstat country resource list (IPv4)",
+                Uri = 
+                    "https://stat.ripe.net/data/" +
+                    "country-resource-list/data.json" +
+                    $"?resource={country.Code}",
+                Format = "ripestat-country-resource-list-json",
+                ParserVersion = "1"
+            };
+
         public Task<PrefixSourceFetchResult> FetchAsync(
-            PrefixSourceRequest request,
+            DirectCountryCode country,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -256,12 +276,15 @@ public sealed class PrefixUpdateHistoryIntegrationTests
                 throw ExceptionToThrow;
             }
 
+            PrefixSourceDescriptor descriptor = GetDescriptor(country);
+
             if (NotModified)
             {
                 return Task.FromResult(
                     new PrefixSourceFetchResult
                     {
-                        Source = Descriptor,
+                        Source = descriptor,
+                        CountryCode = country,
                         Prefixes = [],
                         StartedAt = BaseTime,
                         CompletedAt = BaseTime.AddSeconds(1),
@@ -273,7 +296,8 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             return Task.FromResult(
                 new PrefixSourceFetchResult
                 {
-                    Source = Descriptor,
+                    Source = descriptor,
+                    CountryCode = country,
                     Prefixes = Prefixes,
                     StartedAt = BaseTime,
                     CompletedAt = BaseTime.AddSeconds(3),
@@ -295,7 +319,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
 
         public string PrefixFilePath { get; }
         public string HistoryFilePath { get; }
-        public PrefixFileRepository PrefixRepository { get; }
+        public CountryPrefixStore PrefixStore { get; }
         public StateRepository StateRepository { get; }
         public PrefixSourceMetadataService MetadataService { get; }
         public PrefixSourceUpdateHistoryService HistoryService { get; }
@@ -311,11 +335,10 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             Directory.CreateDirectory(_tempDir);
 
             PrefixFilePath = Path.Combine(
-                _tempDir, "prefixes.txt");
+                _tempDir, "prefixes", "IR", "ipv4-prefixes.txt");
             HistoryFilePath = Path.Combine(
-                _tempDir, "prefix-source-update-history.json");
-            PrefixRepository =
-                new PrefixFileRepository(PrefixFilePath);
+                _tempDir, "prefixes", "IR", "update-history.json");
+            PrefixStore = new CountryPrefixStore(_tempDir);
             StateRepository = new StateRepository(
                 Path.Combine(_tempDir, "state.json"));
             _routeInventory = new RouteInventoryStore(
@@ -326,20 +349,11 @@ public sealed class PrefixUpdateHistoryIntegrationTests
                     Path.Combine(
                         _tempDir, "endpoint-inventory.json"));
 
-            PrefixSourceMetadataStore metadataStore = new(
-                Path.Combine(
-                    _tempDir, "prefix-source-metadata.json"));
             MetadataService = new PrefixSourceMetadataService(
-                new PrefixSourceMetadataRepository(
-                    metadataStore,
-                    new PrefixSourceMetadataValidator()),
+                PrefixStore,
                 Clock);
-
             HistoryService = new PrefixSourceUpdateHistoryService(
-                new PrefixSourceUpdateHistoryRepository(
-                    new PrefixSourceUpdateHistoryStore(
-                        HistoryFilePath),
-                    new PrefixSourceUpdateHistoryValidator()),
+                PrefixStore,
                 options: null,
                 Clock);
 
@@ -350,7 +364,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
         }
 
         public IranDirectController CreateController(
-            IPrefixSource source,
+            ICountryPrefixSource source,
             IPrefixSourceMetadataService? metadataService = null,
             IPrefixSourceUpdateHistoryService? historyService = null)
         {
@@ -372,7 +386,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
 
             return new IranDirectController(
                 source,
-                PrefixRepository,
+                PrefixStore,
                 gatewayDetector,
                 routeManager,
                 StateRepository,

@@ -259,7 +259,7 @@ public sealed class RuntimeSnapshotProviderTests
     {
         await using Fixture fixture = Fixture.Create();
 
-        await fixture.MetadataService.RecordSuccessAsync(
+        await fixture.MetadataService.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult());
 
         RuntimeSnapshot snapshot =
@@ -285,7 +285,7 @@ public sealed class RuntimeSnapshotProviderTests
     {
         await using Fixture fixture = Fixture.Create();
 
-        await fixture.MetadataService.RecordFailureAsync(
+        await fixture.MetadataService.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             "network down");
 
@@ -306,9 +306,9 @@ public sealed class RuntimeSnapshotProviderTests
     {
         await using Fixture fixture = Fixture.Create();
 
-        await fixture.MetadataService.RecordSuccessAsync(
+        await fixture.MetadataService.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult());
-        await fixture.MetadataService.RecordNotModifiedAsync(
+        await fixture.MetadataService.RecordNotModifiedAsync(DirectCountryCode.IR, 
             CreateFetchResult(notModified: true));
 
         RuntimeSnapshot snapshot =
@@ -639,10 +639,12 @@ public sealed class RuntimeSnapshotProviderTests
                 Path.Combine(directory, "route-inventory.json"));
             VpnEndpointInventoryStore endpointInventory = new(
                 Path.Combine(directory, "endpoint-inventory.json"));
-            PrefixFileRepository prefixRepo = new(
-                Path.Combine(directory, "prefixes.txt"));
+            CountryPrefixStore prefixStore = new(directory);
+            Directory.CreateDirectory(
+                Path.Combine(directory, "prefixes", "IR"));
             File.WriteAllText(
-                Path.Combine(directory, "prefixes.txt"),
+                Path.Combine(
+                    directory, "prefixes", "IR", "ipv4-prefixes.txt"),
                 "203.0.113.0/24" + Environment.NewLine);
 
             DesiredConfigurationStore configStore = new(
@@ -668,7 +670,7 @@ public sealed class RuntimeSnapshotProviderTests
 
             IranDirectController controller = new(
                 null!,
-                prefixRepo,
+                prefixStore,
                 gatewayDetector,
                 routeManager,
                 stateRepository,
@@ -699,12 +701,7 @@ public sealed class RuntimeSnapshotProviderTests
 
             PrefixSourceMetadataService metadataService =
                 new(
-                    new PrefixSourceMetadataRepository(
-                        new PrefixSourceMetadataStore(
-                            Path.Combine(
-                                directory,
-                                "prefix-source-metadata.json")),
-                        new PrefixSourceMetadataValidator()),
+                    new CountryPrefixStore(directory),
                     clock);
 
             FakePrefixUpdateChecker updateChecker = new();

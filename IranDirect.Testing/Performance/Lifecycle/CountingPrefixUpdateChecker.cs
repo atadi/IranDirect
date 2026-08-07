@@ -1,3 +1,4 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Prefixes;
 
 namespace IranDirect.Testing.Performance.Lifecycle;
@@ -8,7 +9,9 @@ namespace IranDirect.Testing.Performance.Lifecycle;
 /// harness can assert that scheduled and forced monitor checks never
 /// overlap (production guarantee is one check at a time).
 /// </summary>
-public sealed class CountingPrefixUpdateChecker : IPrefixUpdateChecker
+public sealed class CountingPrefixUpdateChecker :
+    IPrefixUpdateChecker,
+    ICountryPrefixUpdateChecker
 {
     private readonly IPrefixUpdateChecker _inner;
     private int _active;
@@ -25,6 +28,11 @@ public sealed class CountingPrefixUpdateChecker : IPrefixUpdateChecker
     public int PeakActiveChecks => Volatile.Read(ref _peak);
 
     public long TotalChecks => Interlocked.Read(ref _total);
+
+    public Task<PrefixUpdateCheckResult> CheckAsync(
+        DirectCountryCode country,
+        CancellationToken cancellationToken = default) =>
+        CheckAsync(cancellationToken);
 
     public async Task<PrefixUpdateCheckResult> CheckAsync(
         CancellationToken cancellationToken)

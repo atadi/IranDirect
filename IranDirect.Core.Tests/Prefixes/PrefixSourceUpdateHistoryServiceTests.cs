@@ -1,4 +1,5 @@
 using IranDirect.Core.Prefixes;
+using IranDirect.Core.Configuration;
 
 namespace IranDirect.Core.Tests.Prefixes;
 
@@ -11,9 +12,9 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     public async Task GetRecentAsync_NoPriorState_ReturnsEmpty()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _);
+            CreateService();
 
-        Assert.Empty(await service.GetRecentAsync());
+        Assert.Empty(await service.GetRecentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
@@ -21,17 +22,17 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, retention: 5, timeProvider: clock);
+            CreateService(retention: 5, timeProvider: clock);
         clock.Now = BaseTime;
 
         for (int attempt = 0; attempt < 8; attempt++)
         {
-            await service.RecordSuccessAsync(
+            await service.RecordSuccessAsync(DirectCountryCode.IR, 
                 CreateFetchResult(attempt: attempt));
         }
 
         IReadOnlyList<PrefixSourceUpdateHistoryEntry> recent =
-            await service.GetRecentAsync();
+            await service.GetRecentAsync(DirectCountryCode.IR);
 
         Assert.Equal(5, recent.Count);
         Assert.Equal(
@@ -46,16 +47,16 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     public async Task GetRecentAsync_LimitClampedToRetention()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, retention: 3);
+            CreateService(retention: 3);
 
         for (int attempt = 0; attempt < 5; attempt++)
         {
-            await service.RecordSuccessAsync(
+            await service.RecordSuccessAsync(DirectCountryCode.IR, 
                 CreateFetchResult(attempt: attempt));
         }
 
         IReadOnlyList<PrefixSourceUpdateHistoryEntry> recent =
-            await service.GetRecentAsync(100);
+            await service.GetRecentAsync(DirectCountryCode.IR, 100);
 
         Assert.Equal(3, recent.Count);
     }
@@ -65,17 +66,17 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, timeProvider: clock);
+            CreateService(timeProvider: clock);
         clock.Now = BaseTime;
 
         PrefixSourceChangeSummary summary = CreateChangeSummary();
 
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(),
             summary);
 
         IReadOnlyList<PrefixSourceUpdateHistoryEntry> recent =
-            await service.GetRecentAsync();
+            await service.GetRecentAsync(DirectCountryCode.IR);
 
         PrefixSourceUpdateHistoryEntry entry =
             Assert.Single(recent);
@@ -107,15 +108,15 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     public async Task RecordSuccessAsync_FirstImportWithoutSummary_BuildsFallback()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, timeProvider: new FakeTimeProvider());
+            CreateService(timeProvider: new FakeTimeProvider());
 
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(),
             changeSummary: null,
             previousPrefixes: null);
 
         PrefixSourceUpdateHistoryEntry entry =
-            Assert.Single(await service.GetRecentAsync());
+            Assert.Single(await service.GetRecentAsync(DirectCountryCode.IR));
 
         Assert.Equal(2, entry.AddedCount);
         Assert.Equal(0, entry.RemovedCount);
@@ -131,7 +132,7 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     public async Task RecordSuccessAsync_FallbackWithPreviousPrefixes_ComputesDiff()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, timeProvider: new FakeTimeProvider());
+            CreateService(timeProvider: new FakeTimeProvider());
 
         string[] previous =
         [
@@ -144,13 +145,13 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
             "5.6.7.0/24"
         ];
 
-        await service.RecordSuccessAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, 
             CreateFetchResult(prefixes: current),
             changeSummary: null,
             previousPrefixes: previous);
 
         PrefixSourceUpdateHistoryEntry entry =
-            Assert.Single(await service.GetRecentAsync());
+            Assert.Single(await service.GetRecentAsync(DirectCountryCode.IR));
 
         Assert.Equal(1, entry.AddedCount);
         Assert.Equal(1, entry.RemovedCount);
@@ -166,20 +167,20 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, timeProvider: clock);
+            CreateService(timeProvider: clock);
         clock.Now = BaseTime;
 
         string hash =
             PrefixContentHasher.ComputeHash(
                 CreateFetchResult().Prefixes);
 
-        await service.RecordNotModifiedAsync(
+        await service.RecordNotModifiedAsync(DirectCountryCode.IR, 
             CreateFetchResult(notModified: true),
             currentPrefixCount: 2,
             currentContentHash: hash);
 
         PrefixSourceUpdateHistoryEntry entry =
-            Assert.Single(await service.GetRecentAsync());
+            Assert.Single(await service.GetRecentAsync(DirectCountryCode.IR));
 
         Assert.Equal(
             PrefixSourceUpdateStatus.NotModified,
@@ -199,15 +200,15 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, timeProvider: clock);
+            CreateService(timeProvider: clock);
         clock.Now = BaseTime;
 
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             "network down");
 
         PrefixSourceUpdateHistoryEntry entry =
-            Assert.Single(await service.GetRecentAsync());
+            Assert.Single(await service.GetRecentAsync(DirectCountryCode.IR));
 
         Assert.Equal(
             PrefixSourceUpdateStatus.Failed,
@@ -225,17 +226,17 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     public async Task RecordFailureAsync_SanitizesAndTruncatesError()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _, timeProvider: new FakeTimeProvider());
+            CreateService(timeProvider: new FakeTimeProvider());
 
         string error =
             "line1\r\n  line2\tline3 " + new string('x', 600);
 
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             error);
 
         PrefixSourceUpdateHistoryEntry entry =
-            Assert.Single(await service.GetRecentAsync());
+            Assert.Single(await service.GetRecentAsync(DirectCountryCode.IR));
 
         Assert.Equal(512, entry.Error!.Length);
         Assert.DoesNotContain('\r', entry.Error);
@@ -247,77 +248,77 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     public async Task RecordFailureAsync_EmptyError_Throws()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _);
+            CreateService();
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => service.RecordFailureAsync(
+            () => service.RecordFailureAsync(DirectCountryCode.IR, 
                 CreateDescriptor(),
                 "   "));
 
-        Assert.Empty(await service.GetRecentAsync());
+        Assert.Empty(await service.GetRecentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
     public async Task RecordSuccessAsync_InvalidSource_ThrowsAndPersistsNothing()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _);
+            CreateService();
 
         PrefixSourceFetchResult result = CreateFetchResult()
             with { Source = CreateDescriptor() with { Id = "" } };
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.RecordSuccessAsync(result));
+            () => service.RecordSuccessAsync(DirectCountryCode.IR, result));
 
-        Assert.Empty(await service.GetRecentAsync());
+        Assert.Empty(await service.GetRecentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
     public async Task RecordNotModifiedAsync_InvalidSource_ThrowsAndPersistsNothing()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _);
+            CreateService();
 
         PrefixSourceFetchResult result = CreateFetchResult(
             notModified: true)
             with { Source = CreateDescriptor() with { Id = "" } };
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.RecordNotModifiedAsync(result));
+            () => service.RecordNotModifiedAsync(DirectCountryCode.IR, result));
 
-        Assert.Empty(await service.GetRecentAsync());
+        Assert.Empty(await service.GetRecentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
     public async Task RecordFailureAsync_InvalidSource_ThrowsAndPersistsNothing()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _);
+            CreateService();
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.RecordFailureAsync(
+            () => service.RecordFailureAsync(DirectCountryCode.IR, 
                 CreateDescriptor() with { DisplayName = "" },
                 "boom"));
 
-        Assert.Empty(await service.GetRecentAsync());
+        Assert.Empty(await service.GetRecentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
     public async Task ClearAsync_RemovesAllEntries()
     {
         PrefixSourceUpdateHistoryService service =
-            CreateService(out _);
+            CreateService();
 
-        await service.RecordSuccessAsync(CreateFetchResult());
-        await service.RecordNotModifiedAsync(
+        await service.RecordSuccessAsync(DirectCountryCode.IR, CreateFetchResult());
+        await service.RecordNotModifiedAsync(DirectCountryCode.IR, 
             CreateFetchResult(notModified: true));
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             "boom");
 
-        await service.ClearAsync();
+        await service.ClearAsync(DirectCountryCode.IR);
 
-        Assert.Empty(await service.GetRecentAsync());
+        Assert.Empty(await service.GetRecentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
@@ -332,28 +333,21 @@ public sealed class PrefixSourceUpdateHistoryServiceTests
     }
 
     private static PrefixSourceUpdateHistoryService CreateService(
-        out PrefixSourceUpdateHistoryRepository repository,
         int retention = 100,
         TimeProvider? timeProvider = null)
     {
-        string path = Path.Combine(
+        string tempDir = Path.Combine(
             Path.GetTempPath(),
             "IranDirect.Tests",
-            Guid.NewGuid().ToString("N"),
-            "prefix-source-update-history.json");
+            Guid.NewGuid().ToString("N"));
 
         PrefixSourceHistoryOptions options = new()
         {
             RetentionCount = retention
         };
 
-        repository = new PrefixSourceUpdateHistoryRepository(
-            new PrefixSourceUpdateHistoryStore(path),
-            new PrefixSourceUpdateHistoryValidator(),
-            options);
-
         return new PrefixSourceUpdateHistoryService(
-            repository,
+            new CountryPrefixStore(tempDir),
             options,
             timeProvider);
     }

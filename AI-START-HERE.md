@@ -481,6 +481,7 @@ Verify the repository before assuming this work remains outstanding.
 - DesiredConfiguration missing/corrupt load contract (Phase 34.4): `docs/reliability/phase-34.4-desired-configuration-load-safety.md` (fail closed; missing/corrupt distinguished from a saved disabled config)
 - Country-agnostic routing audit (Phase 35.1): `docs/globalization/phase-35.1-country-routing-audit.md` (engine is geography-neutral; only the prefix source binds IR; roadmap Phase 35.2–35.7; brand rename deferred to Phase 36)
 - Country identity/configuration contract (Phase 35.2): `docs/globalization/phase-35.2-country-configuration.md` (`DirectCountryCode` ISO alpha-2 value object; legacy→IR; non-IR temporary safety gate in worker; source still IR-only until 35.3)
+- Generic country prefix source & persistence (Phase 35.3): `docs/globalization/phase-35.3-country-prefix-source.md` (RIPEstat global source; `ICountryPrefixSource`/`OfficialCountryPrefixSource`/`CountryPrefixStore`; per-country cache+metadata+history; legacy-IR migration; removed worker gate; IR/IQ/RO switch)
 
 ---
 

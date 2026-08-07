@@ -10,8 +10,8 @@ public sealed class FaultInjectionArchitectureTests
     private static readonly string[] AllowedConsumerSuffixes =
     [
         "IranDirect.Core\\Persistence\\JsonStore.cs",
-        "IranDirect.Core\\Prefixes\\OfficialIranPrefixSource.cs",
-        "IranDirect.Core\\Prefixes\\OfficialIranPrefixUpdateChecker.cs",
+        "IranDirect.Core\\Prefixes\\OfficialCountryPrefixSource.cs",
+        "IranDirect.Core\\Prefixes\\CountryPrefixUpdateChecker.cs",
         "IranDirect.Core\\CustomRoutes\\CustomRouteResolver.cs",
         "IranDirect.Core\\Routing\\WindowsRouteManager.cs",
         "IranDirect.Core\\Routing\\WindowsRouteApi.cs",

@@ -106,6 +106,8 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
                 ? null
                 : await _prefixSourceMetadataService
                     .GetCurrentAsync(
+                        configuration?.DirectCountryCode
+                            ?? DirectCountryCode.IR,
                         cancellationToken);
 
         // When the monitor is registered, snapshot reads are

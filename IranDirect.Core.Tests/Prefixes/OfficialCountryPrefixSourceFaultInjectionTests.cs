@@ -1,11 +1,12 @@
 using System.Net;
 using System.Text;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Core.Tests.Prefixes;
 
-public sealed class OfficialIranPrefixSourceFaultInjectionTests
+public sealed class OfficialCountryPrefixSourceFaultInjectionTests
 {
     private const string ValidPayload = """
         {
@@ -21,7 +22,7 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
     public async Task FetchAsync_InjectedHttpFault_ThrowsCorrectException()
     {
         RecordingHandler handler = new();
-        OfficialIranPrefixSource source = CreateSource(
+        OfficialCountryPrefixSource source = CreateSource(
             handler,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.HttpRequest]));
@@ -29,7 +30,7 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
         FaultInjectionException exception =
             await Assert.ThrowsAsync<FaultInjectionException>(
                 () => source.FetchAsync(
-                    new PrefixSourceRequest()));
+                    DirectCountryCode.IR));
 
         Assert.Equal(
             FaultInjectionPoint.HttpRequest,
@@ -41,13 +42,13 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
     public async Task FetchAsync_InjectedHttpFault_ZeroHandlerRequests()
     {
         RecordingHandler handler = new();
-        OfficialIranPrefixSource source = CreateSource(
+        OfficialCountryPrefixSource source = CreateSource(
             handler,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.HttpRequest]));
 
         await Assert.ThrowsAsync<FaultInjectionException>(
-            () => source.FetchAsync(new PrefixSourceRequest()));
+            () => source.FetchAsync(DirectCountryCode.IR));
 
         Assert.Equal(0, handler.RequestCount);
     }
@@ -56,13 +57,13 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
     public async Task FetchAsync_InjectedHttpFault_IsNotRetried()
     {
         RecordingHandler handler = new();
-        OfficialIranPrefixSource source = CreateSource(
+        OfficialCountryPrefixSource source = CreateSource(
             handler,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.HttpRequest]));
 
         await Assert.ThrowsAsync<FaultInjectionException>(
-            () => source.FetchAsync(new PrefixSourceRequest()));
+            () => source.FetchAsync(DirectCountryCode.IR));
 
         Assert.Equal(0, handler.RequestCount);
     }
@@ -71,18 +72,18 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
     public async Task FetchAsync_NextCall_SucceedsAfterFault()
     {
         RecordingHandler handler = new(ValidPayload);
-        OfficialIranPrefixSource faulted = CreateSource(
+        OfficialCountryPrefixSource faulted = CreateSource(
             handler,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.HttpRequest]));
 
         await Assert.ThrowsAsync<FaultInjectionException>(
-            () => faulted.FetchAsync(new PrefixSourceRequest()));
+            () => faulted.FetchAsync(DirectCountryCode.IR));
 
-        OfficialIranPrefixSource source = CreateSource(handler);
+        OfficialCountryPrefixSource source = CreateSource(handler);
 
         PrefixSourceFetchResult result =
-            await source.FetchAsync(new PrefixSourceRequest());
+            await source.FetchAsync(DirectCountryCode.IR);
 
         Assert.Equal(2, result.Prefixes.Count);
         Assert.Equal(1, handler.RequestCount);
@@ -99,24 +100,24 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
             using (FaultInjectionScope inner =
                 FaultInjectionScope.Fail(FaultInjectionPoint.FileRead))
             {
-                OfficialIranPrefixSource nestedSource =
+                OfficialCountryPrefixSource nestedSource =
                     CreateSource(handler);
 
                 PrefixSourceFetchResult result =
                     await nestedSource.FetchAsync(
-                        new PrefixSourceRequest());
+                        DirectCountryCode.IR);
 
                 Assert.Equal(2, result.Prefixes.Count);
                 Assert.Equal(1, handler.RequestCount);
             }
 
-            OfficialIranPrefixSource source =
+            OfficialCountryPrefixSource source =
                 CreateSource(handler);
 
             FaultInjectionException exception =
                 await Assert.ThrowsAsync<FaultInjectionException>(
                     () => source.FetchAsync(
-                        new PrefixSourceRequest()));
+                        DirectCountryCode.IR));
 
             Assert.Equal(
                 FaultInjectionPoint.HttpRequest,
@@ -129,7 +130,7 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
     public async Task FetchAsync_InjectedPolicy_WorksWithoutAmbientScope()
     {
         RecordingHandler handler = new();
-        OfficialIranPrefixSource source = CreateSource(
+        OfficialCountryPrefixSource source = CreateSource(
             handler,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.HttpRequest]));
@@ -137,7 +138,7 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
         Assert.False(FaultInjectionScope.IsActive);
 
         await Assert.ThrowsAsync<FaultInjectionException>(
-            () => source.FetchAsync(new PrefixSourceRequest()));
+            () => source.FetchAsync(DirectCountryCode.IR));
 
         Assert.Equal(0, handler.RequestCount);
     }
@@ -146,7 +147,7 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
     public async Task FetchAsync_AmbientScope_TakesPrecedenceOverInjectedPolicy()
     {
         RecordingHandler handler = new();
-        OfficialIranPrefixSource source = CreateSource(
+        OfficialCountryPrefixSource source = CreateSource(
             handler,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.FileRead]));
@@ -154,17 +155,17 @@ public sealed class OfficialIranPrefixSourceFaultInjectionTests
         using (FaultInjectionScope.Fail(FaultInjectionPoint.HttpRequest))
         {
             await Assert.ThrowsAsync<FaultInjectionException>(
-                () => source.FetchAsync(new PrefixSourceRequest()));
+                () => source.FetchAsync(DirectCountryCode.IR));
         }
 
         Assert.Equal(0, handler.RequestCount);
     }
 
-    private static OfficialIranPrefixSource CreateSource(
+    private static OfficialCountryPrefixSource CreateSource(
         RecordingHandler handler,
         IFaultInjectionPolicy? faultPolicy = null)
     {
-        return new OfficialIranPrefixSource(
+        return new OfficialCountryPrefixSource(
             new HttpClient(handler),
             faultPolicy: faultPolicy);
     }

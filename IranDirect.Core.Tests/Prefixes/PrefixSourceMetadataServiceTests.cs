@@ -1,4 +1,5 @@
 using IranDirect.Core.Prefixes;
+using IranDirect.Core.Configuration;
 
 namespace IranDirect.Core.Tests.Prefixes;
 
@@ -11,10 +12,10 @@ public sealed class PrefixSourceMetadataServiceTests
     public async Task GetCurrentAsync_NoPriorState_ReturnsNull()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _);
+            CreateService();
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.Null(metadata);
     }
@@ -24,13 +25,13 @@ public sealed class PrefixSourceMetadataServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
         clock.Now = BaseTime;
 
-        await service.RecordSuccessAsync(CreateFetchResult());
+        await service.RecordSuccessAsync(DirectCountryCode.IR, CreateFetchResult());
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -53,17 +54,17 @@ public sealed class PrefixSourceMetadataServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
 
         clock.Now = BaseTime;
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             "first failure");
         clock.Now = BaseTime.AddHours(1);
-        await service.RecordSuccessAsync(CreateFetchResult());
+        await service.RecordSuccessAsync(DirectCountryCode.IR, CreateFetchResult());
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -81,13 +82,13 @@ public sealed class PrefixSourceMetadataServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
         clock.Now = BaseTime.AddHours(2);
 
-        await service.RecordSuccessAsync(CreateFetchResult());
+        await service.RecordSuccessAsync(DirectCountryCode.IR, CreateFetchResult());
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -103,19 +104,19 @@ public sealed class PrefixSourceMetadataServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
 
         clock.Now = BaseTime;
-        await service.RecordSuccessAsync(CreateFetchResult());
+        await service.RecordSuccessAsync(DirectCountryCode.IR, CreateFetchResult());
 
         clock.Now = BaseTime.AddDays(1);
-        await service.RecordNotModifiedAsync(
+        await service.RecordNotModifiedAsync(DirectCountryCode.IR, 
             CreateFetchResult(
                 notModified: true,
                 etag: "\"etag2\""));
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -139,13 +140,13 @@ public sealed class PrefixSourceMetadataServiceTests
     public async Task RecordNotModifiedAsync_NoPriorState_CreatesNotModified()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _, new FakeTimeProvider());
+            CreateService(new FakeTimeProvider());
 
-        await service.RecordNotModifiedAsync(
+        await service.RecordNotModifiedAsync(DirectCountryCode.IR, 
             CreateFetchResult(notModified: true));
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -160,18 +161,18 @@ public sealed class PrefixSourceMetadataServiceTests
     {
         FakeTimeProvider clock = new();
         PrefixSourceMetadataService service =
-            CreateService(out _, clock);
+            CreateService(clock);
 
         clock.Now = BaseTime;
-        await service.RecordSuccessAsync(CreateFetchResult());
+        await service.RecordSuccessAsync(DirectCountryCode.IR, CreateFetchResult());
 
         clock.Now = BaseTime.AddDays(1);
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             "download failed");
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -191,14 +192,14 @@ public sealed class PrefixSourceMetadataServiceTests
     public async Task RecordFailureAsync_NoPriorState_CreatesFailed()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _, new FakeTimeProvider());
+            CreateService(new FakeTimeProvider());
 
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             "boom");
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -212,16 +213,16 @@ public sealed class PrefixSourceMetadataServiceTests
     public async Task RecordFailureAsync_TruncatesLongError()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _, new FakeTimeProvider());
+            CreateService(new FakeTimeProvider());
 
         string longError = new('x', 1000);
 
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             longError);
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(500, metadata.LastError!.Length);
@@ -231,14 +232,14 @@ public sealed class PrefixSourceMetadataServiceTests
     public async Task RecordFailureAsync_EmptyError_StoresNull()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _, new FakeTimeProvider());
+            CreateService(new FakeTimeProvider());
 
-        await service.RecordFailureAsync(
+        await service.RecordFailureAsync(DirectCountryCode.IR, 
             CreateDescriptor(),
             "   ");
 
         PrefixSourceMetadata? metadata =
-            await service.GetCurrentAsync();
+            await service.GetCurrentAsync(DirectCountryCode.IR);
 
         Assert.NotNull(metadata);
         Assert.Equal(
@@ -251,60 +252,54 @@ public sealed class PrefixSourceMetadataServiceTests
     public async Task RecordSuccessAsync_InvalidSource_ThrowsAndPersistsNothing()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _);
+            CreateService();
 
         PrefixSourceFetchResult result = CreateFetchResult()
             with { Source = CreateDescriptor() with { Id = "" } };
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.RecordSuccessAsync(result));
+            () => service.RecordSuccessAsync(DirectCountryCode.IR, result));
 
-        Assert.Null(await service.GetCurrentAsync());
+        Assert.Null(await service.GetCurrentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
     public async Task RecordFailureAsync_InvalidSource_ThrowsAndPersistsNothing()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _);
+            CreateService();
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.RecordFailureAsync(
+            () => service.RecordFailureAsync(DirectCountryCode.IR, 
                 CreateDescriptor() with { DisplayName = "" },
                 "boom"));
 
-        Assert.Null(await service.GetCurrentAsync());
+        Assert.Null(await service.GetCurrentAsync(DirectCountryCode.IR));
     }
 
     [Fact]
     public async Task RecordSuccessAsync_NegativeContentLength_Throws()
     {
         PrefixSourceMetadataService service =
-            CreateService(out _);
+            CreateService();
 
         PrefixSourceFetchResult result = CreateFetchResult()
             with { ContentLength = -1 };
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.RecordSuccessAsync(result));
+            () => service.RecordSuccessAsync(DirectCountryCode.IR, result));
     }
 
     private static PrefixSourceMetadataService CreateService(
-        out PrefixSourceMetadataRepository repository,
         TimeProvider? timeProvider = null)
     {
-        string path = Path.Combine(
+        string tempDir = Path.Combine(
             Path.GetTempPath(),
             "IranDirect.Tests",
-            Guid.NewGuid().ToString("N"),
-            "prefix-source-metadata.json");
-
-        repository = new PrefixSourceMetadataRepository(
-            new PrefixSourceMetadataStore(path),
-            new PrefixSourceMetadataValidator());
+            Guid.NewGuid().ToString("N"));
 
         return new PrefixSourceMetadataService(
-            repository,
+            new CountryPrefixStore(tempDir),
             timeProvider);
     }
 

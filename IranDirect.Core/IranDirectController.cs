@@ -21,8 +21,8 @@ public sealed class IranDirectController :
 {
     private const int RouteMetric = 5;
 
-    private readonly IPrefixSource _prefixSource;
-    private readonly PrefixFileRepository _prefixRepository;
+    private readonly ICountryPrefixSource _prefixSource;
+    private readonly CountryPrefixStore _prefixStore;
     private readonly GatewayDetector _gatewayDetector;
     private readonly StateRepository _stateRepository;
     private readonly RouteInventoryStore _routeInventoryStore;
@@ -45,8 +45,8 @@ public sealed class IranDirectController :
     private readonly ILogger<IranDirectController>? _logger;
 
     public IranDirectController(
-        IPrefixSource prefixSource,
-        PrefixFileRepository prefixRepository,
+        ICountryPrefixSource prefixSource,
+        CountryPrefixStore prefixStore,
         GatewayDetector gatewayDetector,
         IRouteManager routeManager,
         StateRepository stateRepository,
@@ -66,7 +66,7 @@ public sealed class IranDirectController :
         ILogger<IranDirectController>? logger = null)
     {
         _prefixSource = prefixSource;
-        _prefixRepository = prefixRepository;
+        _prefixStore = prefixStore;
         _gatewayDetector = gatewayDetector;
         _stateRepository = stateRepository;
         _routeInventoryStore = routeInventoryStore;
@@ -88,23 +88,29 @@ public sealed class IranDirectController :
     }
 
     public async Task<int> UpdatePrefixesAsync(
+        DirectCountryCode? country = null,
         CancellationToken cancellationToken = default)
     {
+        DirectCountryCode selected = await ResolveCountryAsync(
+            country, cancellationToken);
+
         PrefixSourceFetchResult fetch;
 
         try
         {
             fetch = await _prefixSource.FetchAsync(
-                new PrefixSourceRequest(),
+                selected,
                 cancellationToken);
         }
         catch (Exception exception)
         {
             await TryRecordMetadataFailureAsync(
+                selected,
                 exception,
                 cancellationToken);
 
             await TryRecordHistoryFailureAsync(
+                selected,
                 exception,
                 cancellationToken);
 
@@ -112,22 +118,26 @@ public sealed class IranDirectController :
         }
 
         IReadOnlyList<string> previousPrefixes =
-            await _prefixRepository.LoadAsync(
+            await _prefixStore.LoadPrefixesAsync(
+                selected,
                 cancellationToken);
 
         if (!fetch.NotModified)
         {
-            await _prefixRepository.SaveAsync(
+            await _prefixStore.SavePrefixesAsync(
+                selected,
                 fetch.Prefixes,
                 cancellationToken);
         }
 
         await TryRecordMetadataSuccessAsync(
+            selected,
             fetch,
             previousPrefixes,
             cancellationToken);
 
         await TryRecordHistorySuccessAsync(
+            selected,
             fetch,
             previousPrefixes,
             cancellationToken);
@@ -149,7 +159,41 @@ public sealed class IranDirectController :
         return fetch.Prefixes.Count;
     }
 
+    private async Task<DirectCountryCode> ResolveCountryAsync(
+        DirectCountryCode? country,
+        CancellationToken cancellationToken)
+    {
+        if (country is not null)
+        {
+            return country;
+        }
+
+        DesiredConfiguration config =
+            await _configurationService.GetAsync(
+                cancellationToken);
+
+        return config.DirectCountryCode!;
+    }
+
+    private async Task<DirectCountryCode> ResolveCountryOrDefaultAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            DesiredConfiguration config =
+                await _configurationService.GetAsync(
+                    cancellationToken);
+
+            return config.DirectCountryCode!;
+        }
+        catch (DesiredConfigurationException)
+        {
+            return DirectCountryCode.IR;
+        }
+    }
+
     private async Task TryRecordMetadataSuccessAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult fetch,
         IReadOnlyList<string> previousPrefixes,
         CancellationToken cancellationToken)
@@ -165,6 +209,7 @@ public sealed class IranDirectController :
             {
                 await _prefixSourceMetadataService
                     .RecordNotModifiedAsync(
+                        country,
                         fetch,
                         cancellationToken);
             }
@@ -172,6 +217,7 @@ public sealed class IranDirectController :
             {
                 await _prefixSourceMetadataService
                     .RecordSuccessAsync(
+                        country,
                         fetch,
                         previousPrefixes,
                         cancellationToken);
@@ -187,6 +233,7 @@ public sealed class IranDirectController :
     }
 
     private async Task TryRecordMetadataFailureAsync(
+        DirectCountryCode country,
         Exception exception,
         CancellationToken cancellationToken)
     {
@@ -199,7 +246,8 @@ public sealed class IranDirectController :
         {
             await _prefixSourceMetadataService
                 .RecordFailureAsync(
-                    _prefixSource.Descriptor,
+                    country,
+                    _prefixSource.GetDescriptor(country),
                     exception.Message,
                     cancellationToken);
         }
@@ -213,6 +261,7 @@ public sealed class IranDirectController :
     }
 
     private async Task TryRecordHistorySuccessAsync(
+        DirectCountryCode country,
         PrefixSourceFetchResult fetch,
         IReadOnlyList<string> previousPrefixes,
         CancellationToken cancellationToken)
@@ -230,10 +279,13 @@ public sealed class IranDirectController :
                     _prefixSourceMetadataService is null
                         ? null
                         : await _prefixSourceMetadataService
-                            .GetCurrentAsync(cancellationToken);
+                            .GetCurrentAsync(
+                                country,
+                                cancellationToken);
 
                 await _prefixSourceUpdateHistoryService
                     .RecordNotModifiedAsync(
+                        country,
                         fetch,
                         current?.PrefixCount
                             ?? previousPrefixes.Count,
@@ -247,10 +299,12 @@ public sealed class IranDirectController :
                         ? null
                         : await _prefixSourceMetadataService
                             .GetLatestChangeSummaryAsync(
+                                country,
                                 cancellationToken);
 
                 await _prefixSourceUpdateHistoryService
                     .RecordSuccessAsync(
+                        country,
                         fetch,
                         changeSummary,
                         previousPrefixes,
@@ -267,6 +321,7 @@ public sealed class IranDirectController :
     }
 
     private async Task TryRecordHistoryFailureAsync(
+        DirectCountryCode country,
         Exception exception,
         CancellationToken cancellationToken)
     {
@@ -279,7 +334,8 @@ public sealed class IranDirectController :
         {
             await _prefixSourceUpdateHistoryService
                 .RecordFailureAsync(
-                    _prefixSource.Descriptor,
+                    country,
+                    _prefixSource.GetDescriptor(country),
                     exception.Message,
                     cancellationToken);
         }
@@ -303,7 +359,9 @@ public sealed class IranDirectController :
 
         try
         {
-            await EnsurePrefixesAsync(cancellationToken);
+            await EnsurePrefixesAsync(
+                await ResolveCountryAsync(null, cancellationToken),
+                cancellationToken);
 
             await _configurationService.SetEnabledAsync(
                 true, cancellationToken);
@@ -521,7 +579,8 @@ public sealed class IranDirectController :
                 cancellationToken);
 
         IReadOnlyList<string> prefixes =
-            await _prefixRepository.LoadAsync(
+            await _prefixStore.LoadPrefixesAsync(
+                await ResolveCountryOrDefaultAsync(cancellationToken),
                 cancellationToken);
 
         RouteInventory inventory =
@@ -631,7 +690,9 @@ public sealed class IranDirectController :
                     decision.Plan.Observed.DirectGateway;
 
                 IReadOnlyList<string> prefixes =
-                    await _prefixRepository.LoadAsync(
+                    await _prefixStore.LoadPrefixesAsync(
+                        await ResolveCountryOrDefaultAsync(
+                            cancellationToken),
                         cancellationToken);
 
                 using (_profiler.Measure(
@@ -651,7 +712,9 @@ public sealed class IranDirectController :
                             EnabledAt = state.EnabledAt
                                 ?? DateTimeOffset.UtcNow,
                             PrefixesUpdatedAt =
-                                _prefixRepository.GetLastModified(),
+                                _prefixStore.GetPrefixLastModified(
+                                    await ResolveCountryOrDefaultAsync(
+                                        cancellationToken)),
                             LastError = null
                         },
                         cancellationToken);
@@ -793,10 +856,12 @@ public sealed class IranDirectController :
 
     private async Task<IReadOnlyList<string>>
         EnsurePrefixesAsync(
+            DirectCountryCode country,
             CancellationToken cancellationToken)
     {
         IReadOnlyList<string> prefixes =
-            await _prefixRepository.LoadAsync(
+            await _prefixStore.LoadPrefixesAsync(
+                country,
                 cancellationToken);
 
         if (prefixes.Count > 0)
@@ -805,16 +870,18 @@ public sealed class IranDirectController :
         }
 
         await UpdatePrefixesAsync(
+            country,
             cancellationToken);
 
         prefixes =
-            await _prefixRepository.LoadAsync(
+            await _prefixStore.LoadPrefixesAsync(
+                country,
                 cancellationToken);
 
         if (prefixes.Count == 0)
         {
             throw new InvalidOperationException(
-                "No Iranian IPv4 prefixes are available.");
+                $"No {country.Code} IPv4 prefixes are available.");
         }
 
         return prefixes;

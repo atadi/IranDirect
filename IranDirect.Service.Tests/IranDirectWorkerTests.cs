@@ -117,12 +117,12 @@ public sealed class IranDirectWorkerTests : IDisposable
     }
 
     [Fact]
-    public async Task NonIRDirectCountry_EnabledButUnsupported_SkipsReconciliation()
+    public async Task NonIRDirectCountry_EnabledAndSupported_Reconciles()
     {
-        // Valid, enabled configuration that selects a non-IR country. Until the
-        // prefix source is generalized (Phase 35.3) this is representable but
-        // unsupported for routing: the worker must NOT reconcile (no route
-        // mutation) and must stay alive.
+        // Phase 35.3 generalized the prefix source: a valid ISO country
+        // (here IQ) is supported for routing through the same generic
+        // pipeline. When a valid IQ dataset is available the worker must
+        // reconcile (route mutation proceeds), not skip.
         await _configStore.SaveAsync(ConfigurationDefaults.Create() with
         {
             Enabled = true,
@@ -136,7 +136,8 @@ public sealed class IranDirectWorkerTests : IDisposable
 
         await RunUntilCanceled(harness.Worker, cts);
 
-        Assert.Equal(0, executor.CallCount);
+        Assert.True(executor.CallCount >= 1,
+            $"Expected IQ-enabled reconciliation to run; calls={executor.CallCount}");
     }
 
     // ---- harness construction (mirrors IranDirectControllerTests.TestContext) ----
@@ -152,11 +153,15 @@ public sealed class IranDirectWorkerTests : IDisposable
         VpnEndpointInventoryStore endpointInventory = new(
             Path.Combine(_tempDir, "endpoint-inventory.json"));
 
-        PrefixFileRepository prefixRepo = new(
-            Path.Combine(_tempDir, "prefixes.txt"));
-        File.WriteAllText(
-            Path.Combine(_tempDir, "prefixes.txt"),
-            "203.0.113.0/24" + Environment.NewLine);
+        CountryPrefixStore prefixStore = new(
+            Path.Combine(_tempDir, "prefixes"));
+        // Seed the selected country's last-known-good dataset so the worker
+        // cycle can reconcile without hitting the network.
+        IReadOnlyList<string> seed = ["203.0.113.0/24"];
+        prefixStore.SavePrefixesAsync(
+            DirectCountryCode.Parse("IQ"), seed).Wait();
+        prefixStore.SavePrefixesAsync(
+            DirectCountryCode.IR, seed).Wait();
 
         FakeRouteManager routeManager = new();
         GatewayDetector gatewayDetector = new();
@@ -169,9 +174,11 @@ public sealed class IranDirectWorkerTests : IDisposable
         FakeDecisionBuilder decisionBuilder = new();
         RuntimeCycleCoordinator coordinator = new(decisionBuilder);
 
+        FakeCountryPrefixSource prefixSource = new(seed);
+
         IranDirectController controller = new(
-            null!, // IPrefixSource - not exercised by the worker loop
-            prefixRepo,
+            prefixSource,
+            prefixStore,
             gatewayDetector,
             routeManager,
             stateRepository,
@@ -352,6 +359,38 @@ public sealed class IranDirectWorkerTests : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(Decision!);
         }
+    }
+
+    private sealed class FakeCountryPrefixSource : ICountryPrefixSource
+    {
+        private readonly IReadOnlyList<string> _prefixes;
+
+        public FakeCountryPrefixSource(IReadOnlyList<string> prefixes)
+        {
+            _prefixes = prefixes;
+        }
+
+        public PrefixSourceDescriptor GetDescriptor(
+            DirectCountryCode country) =>
+            new()
+            {
+                Id = $"fake-{country.Code}",
+                DisplayName = $"Fake {country.Code} source",
+                Format = "ipv4-prefix-list",
+                ParserVersion = "1.0",
+                Uri = $"https://example.test/{country.Code}"
+            };
+
+        public Task<PrefixSourceFetchResult> FetchAsync(
+            DirectCountryCode country,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PrefixSourceFetchResult
+            {
+                Source = GetDescriptor(country),
+                Prefixes = _prefixes,
+                ContentHash = "fake-hash",
+                CountryCode = country
+            });
     }
 
     private sealed class NoopPipeServer : NamedPipeCommandServer

@@ -68,26 +68,10 @@ public sealed class DirectCountryCodeTests
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
     }
 
-    [Fact]
-    public void IR_IsTheLegacyDefault()
-    {
-        Assert.True(
-            DirectCountryRouting.IsDirectCountrySupported(null));
-        Assert.True(
-            DirectCountryRouting.IsDirectCountrySupported(
-                DirectCountryCode.IR));
-    }
-
-    [Theory]
-    [InlineData("IQ")]
-    [InlineData("RO")]
-    [InlineData("DE")]
-    [InlineData("US")]
-    public void NonIR_IsNotYetSupportedUntilSourceGeneralized(
-        string code)
-    {
-        Assert.False(
-            DirectCountryRouting.IsDirectCountrySupported(
-                DirectCountryCode.Parse(code)));
-    }
+    // NOTE (Phase 35.3): the former `DirectCountryRouting.IsDirectCountrySupported`
+    // gate was removed. Country validity is now enforced by the DirectCountryCode
+    // value object (invalid ISO alpha-2 codes are rejected by TryParse/Parse, see
+    // TryParse_RejectsInvalid) and the legacy null -> IR default is applied at the
+    // DesiredConfiguration layer. No boolean support gate is needed because the
+    // generic RIPEstat source validates each country's dataset at acquisition time.
 }

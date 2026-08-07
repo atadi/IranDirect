@@ -1,17 +1,18 @@
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Prefixes;
 using IranDirect.Core.Testing.FaultInjection;
 
 namespace IranDirect.Testing.Performance.Lifecycle;
 
 /// <summary>
-/// Scripted <see cref="IPrefixSource"/> used by the lifecycle
+/// Scripted <see cref="ICountryPrefixSource"/> used by the lifecycle
 /// harness. Never performs a real download: it replays enqueued
 /// outcomes (with content hashes computed through the production
 /// <see cref="PrefixContentHasher"/>) and repeats the last outcome
 /// when the queue is exhausted. The production
 /// <see cref="FaultInjectionPoint.HttpRequest"/> fault is honoured.
 /// </summary>
-public sealed class ScriptedPrefixSource : IPrefixSource
+public sealed class ScriptedPrefixSource : ICountryPrefixSource
 {
     private readonly IFaultInjectionPolicy _faultPolicy;
     private readonly object _gate = new();
@@ -23,6 +24,8 @@ public sealed class ScriptedPrefixSource : IPrefixSource
     {
         _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
+
+    public DirectCountryCode? LastRequestedCountry { get; private set; }
 
     public PrefixSourceDescriptor Descriptor { get; } =
         new()
@@ -53,11 +56,16 @@ public sealed class ScriptedPrefixSource : IPrefixSource
     public void EnqueueFailure(string message) =>
         _script.Add(_ => throw new InvalidOperationException(message));
 
+    public PrefixSourceDescriptor GetDescriptor(
+        DirectCountryCode country) => Descriptor;
+
     public Task<PrefixSourceFetchResult> FetchAsync(
-        PrefixSourceRequest request,
+        DirectCountryCode country,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(country);
+
+        LastRequestedCountry = country;
 
         cancellationToken.ThrowIfCancellationRequested();
 

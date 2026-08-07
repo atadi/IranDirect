@@ -96,10 +96,14 @@ public sealed class SupportSnapshotProvider :
 
         PrefixSourceMetadata? prefixMetadata =
             await _prefixSourceMetadataService.GetCurrentAsync(
+                configuration?.DirectCountryCode
+                    ?? DirectCountryCode.IR,
                 cancellationToken);
 
         IReadOnlyList<PrefixSourceUpdateHistoryEntry> history =
             await _prefixSourceUpdateHistoryService.GetRecentAsync(
+                configuration?.DirectCountryCode
+                    ?? DirectCountryCode.IR,
                 limit: null,
                 cancellationToken: cancellationToken);
 

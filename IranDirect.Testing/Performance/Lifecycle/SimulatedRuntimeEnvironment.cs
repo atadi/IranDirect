@@ -72,7 +72,9 @@ public sealed class SimulatedRuntimeEnvironment : IDisposable
 
     public VpnEndpointInventoryStore VpnEndpointInventoryStore { get; }
 
-    public PrefixFileRepository PrefixRepository { get; }
+    public CountryPrefixStore PrefixStore { get; }
+
+    public DirectCountryCode Country { get; } = DirectCountryCode.IR;
 
     public DesiredConfigurationService ConfigurationService { get; }
 
@@ -168,7 +170,7 @@ public sealed class SimulatedRuntimeEnvironment : IDisposable
         RouteInventoryStore = new RouteInventoryStore(routeInventoryPath);
         VpnEndpointInventoryStore = new VpnEndpointInventoryStore(
             vpnEndpointInventoryPath);
-        PrefixRepository = new PrefixFileRepository(prefixFilePath);
+        PrefixStore = new CountryPrefixStore(root);
 
         DesiredConfigurationValidator configurationValidator = new();
         DesiredConfigurationStore configurationStore = new(
@@ -177,22 +179,12 @@ public sealed class SimulatedRuntimeEnvironment : IDisposable
         ConfigurationService = new DesiredConfigurationService(
             configurationStore);
 
-        PrefixSourceMetadataStore metadataStore = new(prefixMetadataPath);
-        PrefixSourceMetadataValidator metadataValidator = new();
-        PrefixSourceMetadataRepository metadataRepository = new(
-            metadataStore,
-            metadataValidator);
         PrefixMetadataService = new PrefixSourceMetadataService(
-            metadataRepository,
+            PrefixStore,
             Time);
 
-        PrefixSourceUpdateHistoryStore historyStore = new(prefixHistoryPath);
-        PrefixSourceUpdateHistoryValidator historyValidator = new();
-        PrefixSourceUpdateHistoryRepository historyRepository = new(
-            historyStore,
-            historyValidator);
         PrefixHistoryService = new PrefixSourceUpdateHistoryService(
-            historyRepository,
+            PrefixStore,
             timeProvider: Time);
 
         DesiredConfiguration defaults = new()
@@ -267,7 +259,7 @@ public sealed class SimulatedRuntimeEnvironment : IDisposable
 
         Controller = new IranDirectController(
             PrefixSource,
-            PrefixRepository,
+            PrefixStore,
             new GatewayDetector(),
             RouteManager,
             StateRepository,
@@ -324,7 +316,9 @@ public sealed class SimulatedRuntimeEnvironment : IDisposable
             new RuntimeOperationDiagnosticCheck(OperationStatus),
             new RuntimeStateDiagnosticCheck(Controller),
             new DesiredConfigurationDiagnosticCheck(ConfigurationService),
-            new PrefixConfigurationDiagnosticCheck(PrefixRepository)
+            new PrefixConfigurationDiagnosticCheck(
+                PrefixStore,
+                () => Country)
         ];
 
         DiagnosticRunner = new DiagnosticRunner(

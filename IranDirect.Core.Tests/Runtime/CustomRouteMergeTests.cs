@@ -144,7 +144,8 @@ public sealed class CustomRouteMergeTests
         Directory.CreateDirectory(directory);
 
         string prefixFile =
-            Path.Combine(directory, "prefixes.txt");
+            Path.Combine(directory, "prefixes", "IR", "ipv4-prefixes.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(prefixFile)!);
         File.WriteAllLines(
             prefixFile,
             prefixFileLines);
@@ -152,8 +153,7 @@ public sealed class CustomRouteMergeTests
         string profilePath =
             Path.Combine(directory, "vpn-profile.ovpn");
 
-        PrefixFileRepository prefixRepository =
-            new(prefixFile);
+        CountryPrefixStore prefixStore = new(directory);
 
         OpenVpnEndpointProvider endpointProvider =
             new(
@@ -166,7 +166,8 @@ public sealed class CustomRouteMergeTests
                 profilePath,
                 endpointProvider,
                 new GatewayDetector(),
-                prefixRepository,
+                prefixStore,
+                () => DirectCountryCode.IR,
                 new FakeRouteManager(),
                 customRouteResolver: resolver);
 
