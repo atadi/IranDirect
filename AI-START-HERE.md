@@ -482,6 +482,7 @@ Verify the repository before assuming this work remains outstanding.
 - Country-agnostic routing audit (Phase 35.1): `docs/globalization/phase-35.1-country-routing-audit.md` (engine is geography-neutral; only the prefix source binds IR; roadmap Phase 35.2–35.7; brand rename deferred to Phase 36)
 - Country identity/configuration contract (Phase 35.2): `docs/globalization/phase-35.2-country-configuration.md` (`DirectCountryCode` ISO alpha-2 value object; legacy→IR; non-IR temporary safety gate in worker; source still IR-only until 35.3)
 - Generic country prefix source & persistence (Phase 35.3): `docs/globalization/phase-35.3-country-prefix-source.md` (RIPEstat global source; `ICountryPrefixSource`/`OfficialCountryPrefixSource`/`CountryPrefixStore`; per-country cache+metadata+history; legacy-IR migration; removed worker gate; IR/IQ/RO switch)
+- Country switching & offline-state acceptance (Phase 35.4): `docs/globalization/phase-35.4-country-switching-validation.md` (requested/effective model; IR→IQ/IQ→RO/RO→IR online; offline/last-known-good/no-cache/wrong-country/empty-cache fail-closed; restart + crash-journal recovery; endpoint/custom/external preservation; metadata isolation; race/stale-response; idempotency; 19 new acceptance tests; no production change)
 
 ---
 
