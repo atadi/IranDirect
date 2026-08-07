@@ -44,23 +44,20 @@ public sealed class CrossStoreStateRecoveryTests
     }
 
     [Fact]
-    public async Task DesiredConfiguration_MissingFile_SilentlyDisabled_NotPermissive()
+    public async Task DesiredConfiguration_MissingFile_FailsClosed_NotPermissive()
     {
-        // Source behavior (JsonStore): a MISSING file returns new T() silently.
-        // For DesiredConfiguration new() is Enabled=false with a sentinel
-        // VpnProfilePath, so validation passes and the service runs DISABLED
-        // rather than permissive. Routing is unaffected (no destructive
-        // action). The missing-file asymmetry is tracked as an R3 follow-up;
-        // the key property proven here is that it never becomes permissive.
+        // After Phase 34.4 a MISSING authoritative configuration fails closed
+        // (it is never substituted with a fabricated disabled configuration),
+        // proving missing ≠ disabled and that no routing decision is inferred
+        // from file absence.
         using TempDir dir = new();
         string path = dir.File("desired.json"); // never written
 
         var store = new DesiredConfigurationStore(
             path, new DesiredConfigurationValidator());
 
-        DesiredConfiguration loaded = await store.LoadAsync();
-        Assert.False(loaded.Enabled);                 // not permissive
-        Assert.Equal("vpn-profile.ovpn", loaded.VpnProfilePath); // default sentinel
+        await Assert.ThrowsAsync<DesiredConfigurationMissingException>(
+            () => store.LoadAsync());
     }
 
     [Fact]

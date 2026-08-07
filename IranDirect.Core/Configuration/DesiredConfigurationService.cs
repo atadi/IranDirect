@@ -22,7 +22,7 @@ public sealed class DesiredConfigurationService :
         CancellationToken cancellationToken = default)
     {
         DesiredConfiguration current =
-            await _store.LoadAsync(cancellationToken);
+            await LoadOrDefaultAsync(cancellationToken);
 
         DesiredConfiguration updated =
             current with
@@ -45,7 +45,7 @@ public sealed class DesiredConfigurationService :
             profilePath);
 
         DesiredConfiguration current =
-            await _store.LoadAsync(cancellationToken);
+            await LoadOrDefaultAsync(cancellationToken);
 
         DesiredConfiguration updated =
             current with
@@ -58,5 +58,22 @@ public sealed class DesiredConfigurationService :
             cancellationToken);
 
         return updated;
+    }
+
+    // A write command (enable/disable/set-profile) is how the authoritative
+    // configuration is first created, so a MISSING file is treated as "start
+    // from a valid default and apply the change". A CORRUPT file must still
+    // fail closed and preserve the original (it is never silently reset).
+    private async Task<DesiredConfiguration> LoadOrDefaultAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _store.LoadAsync(cancellationToken);
+        }
+        catch (DesiredConfigurationMissingException)
+        {
+            return new DesiredConfiguration();
+        }
     }
 }

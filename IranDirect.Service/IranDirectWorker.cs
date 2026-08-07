@@ -12,6 +12,12 @@ namespace IranDirect.Service;
 
 public sealed class IranDirectWorker : BackgroundService
 {
+    // While the authoritative configuration is missing or corrupt the runtime
+    // must not reconcile, so it polls at a calm interval (rather than the
+    // configured RepairInterval, which is unavailable) until a valid
+    // configuration appears. This keeps the host alive without a crash-loop.
+    private static readonly TimeSpan UnconfiguredRetryInterval =
+        TimeSpan.FromSeconds(30);
     private readonly IranDirectController _controller;
     private readonly NamedPipeCommandServer _pipeServer;
     private readonly OperationCoordinator _operations;
@@ -51,11 +57,16 @@ public sealed class IranDirectWorker : BackgroundService
         await _operations.ExecuteAsync(
             _recovery.RecoverAsync, stoppingToken);
 
-        DesiredConfiguration desired =
-            await _configurationService.GetAsync(
-                stoppingToken);
+        // Load the authoritative configuration. A missing or corrupt file must
+        // NOT be substituted with a fabricated disabled configuration; it fails
+        // closed. While the configuration is unavailable the runtime must not
+        // reconcile (no route mutation), but the host stays alive so a valid
+        // configuration can be supplied (e.g. via a command) and picked up on
+        // the next poll without a restart.
+        DesiredConfiguration? desired =
+            await TryLoadConfigurationAsync(stoppingToken);
 
-        if (desired.Enabled)
+        if (desired is { Enabled: true })
         {
             _logger.LogInformation(
                 "Desired configuration is enabled. " +
@@ -64,7 +75,7 @@ public sealed class IranDirectWorker : BackgroundService
             await RunServiceCycleAsync(
                 "startup", stoppingToken);
         }
-        else
+        else if (desired is not null)
         {
             _logger.LogInformation(
                 "Desired configuration is disabled. " +
@@ -72,12 +83,16 @@ public sealed class IranDirectWorker : BackgroundService
         }
 
         while (!stoppingToken.IsCancellationRequested
-               && desired.AutoRepair)
+               && (desired is null || desired.AutoRepair))
         {
+            TimeSpan wait = desired is null
+                ? UnconfiguredRetryInterval
+                : desired.RepairInterval;
+
             try
             {
                 await Task.Delay(
-                    desired.RepairInterval,
+                    wait,
                     stoppingToken);
             }
             catch (OperationCanceledException)
@@ -86,15 +101,46 @@ public sealed class IranDirectWorker : BackgroundService
                 break;
             }
 
+            try
+            {
+                desired =
+                    await _configurationService.GetAsync(
+                        stoppingToken);
+            }
+            catch (DesiredConfigurationException exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Desired configuration is unavailable; reconciliation is " +
+                    "skipped until a valid configuration is present.");
+
+                continue;
+            }
+
             await RunServiceCycleAsync(
                 "periodic", stoppingToken);
-
-            desired =
-                await _configurationService.GetAsync(
-                    stoppingToken);
         }
 
         await pipeTask;
+    }
+
+    private async Task<DesiredConfiguration?> TryLoadConfigurationAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _configurationService.GetAsync(
+                cancellationToken);
+        }
+        catch (DesiredConfigurationException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Desired configuration is unavailable; reconciliation is " +
+                "skipped until a valid configuration is present.");
+
+            return null;
+        }
     }
 
     private async Task RunServiceCycleAsync(

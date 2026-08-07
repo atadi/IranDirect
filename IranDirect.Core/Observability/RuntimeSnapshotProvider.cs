@@ -73,9 +73,19 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
             await _controller.GetStatusAsync(
                 cancellationToken);
 
-        DesiredConfiguration configuration =
-            await _configurationService.GetAsync(
-                cancellationToken);
+        DesiredConfiguration? configuration;
+        try
+        {
+            configuration =
+                await _configurationService.GetAsync(
+                    cancellationToken);
+        }
+        catch (DesiredConfigurationException)
+        {
+            // A missing/corrupt configuration is surfaced truthfully as null
+            // rather than a fabricated disabled configuration.
+            configuration = null;
+        }
 
         RouteInventory inventory =
             await _routeInventory.LoadAsync(

@@ -144,9 +144,9 @@ public sealed class
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
 
-        // A missing file returns default config which passes
-        // validation with defaults (SchemaVersion=1, etc.)
-        Assert.Equal(DiagnosticStatus.Passed, result.Status);
+        // A missing file must fail closed: the diagnostic reports Failed
+        // rather than silently treating absence as a valid disabled config.
+        Assert.Equal(DiagnosticStatus.Failed, result.Status);
     }
 
     private static DesiredConfiguration ValidConfig() =>

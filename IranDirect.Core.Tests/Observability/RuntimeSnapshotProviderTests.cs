@@ -32,8 +32,9 @@ public sealed class RuntimeSnapshotProviderTests
 
         Assert.Equal(fixture.Clock.Now, snapshot.CapturedAt);
         Assert.Equal(1, snapshot.SchemaVersion);
-        Assert.NotNull(snapshot.Configuration);
-        Assert.False(snapshot.Configuration.Enabled);
+        // A missing authoritative configuration is surfaced truthfully as
+        // unconfigured (null) rather than a fabricated disabled config.
+        Assert.Null(snapshot.Configuration);
         Assert.NotNull(snapshot.Runtime);
         Assert.NotNull(snapshot.Operation);
         Assert.Equal(OperationState.Idle, snapshot.Operation.State);
@@ -431,7 +432,8 @@ public sealed class RuntimeSnapshotProviderTests
             snapshot.PrefixUpdate!.Status);
         Assert.Equal(fixture.Clock.Now, snapshot.CapturedAt);
         Assert.Equal(1, snapshot.SchemaVersion);
-        Assert.NotNull(snapshot.Configuration);
+        // Missing authoritative configuration is surfaced truthfully as null.
+        Assert.Null(snapshot.Configuration);
         Assert.NotNull(snapshot.Runtime);
         Assert.NotNull(snapshot.Operation);
         Assert.Equal(OperationState.Idle, snapshot.Operation.State);

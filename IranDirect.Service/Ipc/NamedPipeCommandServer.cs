@@ -15,7 +15,7 @@ using IranDirect.Core.Observability.Telemetry;
 
 namespace IranDirect.Service.Ipc;
 
-public sealed class NamedPipeCommandServer
+public class NamedPipeCommandServer
 {
     private readonly IranDirectController _controller;
     private readonly OperationCoordinator _operations;
@@ -64,7 +64,7 @@ public sealed class NamedPipeCommandServer
         _logger = logger;
     }
 
-    public async Task RunAsync(
+    public virtual async Task RunAsync(
         CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -486,9 +486,20 @@ public sealed class NamedPipeCommandServer
     private async Task<ServiceResponse> GetConfigurationAsync(
         CancellationToken cancellationToken)
     {
-        DesiredConfiguration configuration =
-            await _configurationService.GetAsync(
-                cancellationToken);
+        DesiredConfiguration configuration;
+
+        try
+        {
+            configuration =
+                await _configurationService.GetAsync(
+                    cancellationToken);
+        }
+        catch (DesiredConfigurationException exception)
+        {
+            return Failure(
+                "CONFIGURATION_UNAVAILABLE",
+                exception.Message);
+        }
 
         return new ServiceResponse
         {

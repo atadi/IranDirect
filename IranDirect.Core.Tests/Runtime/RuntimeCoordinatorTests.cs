@@ -62,11 +62,21 @@ public sealed class RuntimeCoordinatorTests
 
         DesiredConfigurationValidator validator = new();
 
+        DesiredConfigurationStore store = new(
+            path,
+            validator);
+
+        // An explicit disabled configuration must remain valid and load as
+        // disabled (distinguishable from a missing file).
+        await store.SaveAsync(
+            ConfigurationDefaults.Create() with
+            {
+                Enabled = false,
+                VpnProfilePath = @"C:\VPN\work.ovpn"
+            });
+
         DesiredConfigurationService configurationService =
-            new(
-                new DesiredConfigurationStore(
-                    path,
-                    validator));
+            new(store);
 
         RuntimeCoordinator coordinator = new(
             configurationService,

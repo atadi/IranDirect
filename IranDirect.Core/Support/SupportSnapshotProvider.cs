@@ -78,9 +78,21 @@ public sealed class SupportSnapshotProvider :
             await _previewPlanner.BuildPreviewAsync(
                 cancellationToken);
 
-        DesiredConfiguration configuration =
-            await _configurationService.GetAsync(
-                cancellationToken);
+        DesiredConfiguration? configuration;
+
+        try
+        {
+            configuration =
+                await _configurationService.GetAsync(
+                    cancellationToken);
+        }
+        catch (DesiredConfigurationException)
+        {
+            // The authoritative configuration is missing or corrupt. We must
+            // not substitute a fabricated disabled configuration; report the
+            // absence explicitly so the snapshot stays truthful.
+            configuration = null;
+        }
 
         PrefixSourceMetadata? prefixMetadata =
             await _prefixSourceMetadataService.GetCurrentAsync(

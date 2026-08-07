@@ -478,6 +478,7 @@ Verify the repository before assuming this work remains outstanding.
 - Reliability audit (Phase 34.1) + selected slice: `docs/reliability/phase-34.1-production-risk-audit.md`
 - Crash-consistent route reconciliation (Phase 34.2, committed): `docs/reliability/phase-34.2-crash-consistent-route-reconciliation.md`
 - Cross-store crash consistency (Phase 34.3, analysis + tests; no prod change): `docs/reliability/phase-34.3-cross-store-recovery.md` (decision: no general transaction mechanism needed)
+- DesiredConfiguration missing/corrupt load contract (Phase 34.4): `docs/reliability/phase-34.4-desired-configuration-load-safety.md` (fail closed; missing/corrupt distinguished from a saved disabled config)
 
 ---
 

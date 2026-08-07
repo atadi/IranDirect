@@ -545,14 +545,26 @@ public sealed class IranDirectController :
                 endpointInventory.Endpoints,
                 cancellationToken);
 
-        DesiredConfiguration config =
-            await _configurationService.GetAsync(
-                cancellationToken);
+        // A missing/corrupt authoritative configuration is not a routing
+        // fault: the runtime is still observable, but user intent is unknown,
+        // so report it as not enabled rather than throwing.
+        bool desiredEnabled = false;
+        try
+        {
+            DesiredConfiguration config =
+                await _configurationService.GetAsync(
+                    cancellationToken);
+            desiredEnabled = config.Enabled;
+        }
+        catch (DesiredConfigurationException)
+        {
+            desiredEnabled = false;
+        }
 
         return new IranDirectStatus
         {
             Enabled = state.Enabled,
-            DesiredEnabled = config.Enabled,
+            DesiredEnabled = desiredEnabled,
             Operation = _operationStatus.CreateSnapshot(),
             Gateway = state.Gateway,
             InterfaceIndex =
