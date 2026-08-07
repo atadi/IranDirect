@@ -116,6 +116,29 @@ public sealed class IranDirectWorkerTests : IDisposable
         Assert.Equal(0, executor.CallCount);
     }
 
+    [Fact]
+    public async Task NonIRDirectCountry_EnabledButUnsupported_SkipsReconciliation()
+    {
+        // Valid, enabled configuration that selects a non-IR country. Until the
+        // prefix source is generalized (Phase 35.3) this is representable but
+        // unsupported for routing: the worker must NOT reconcile (no route
+        // mutation) and must stay alive.
+        await _configStore.SaveAsync(ConfigurationDefaults.Create() with
+        {
+            Enabled = true,
+            VpnProfilePath = @"C:\VPN\work.ovpn",
+            DirectCountryCode = DirectCountryCode.Parse("IQ")
+        });
+
+        var harness = BuildHarness(out FakeExecutor executor);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+
+        await RunUntilCanceled(harness.Worker, cts);
+
+        Assert.Equal(0, executor.CallCount);
+    }
+
     // ---- harness construction (mirrors IranDirectControllerTests.TestContext) ----
 
     private Harness BuildHarness(out FakeExecutor executor)

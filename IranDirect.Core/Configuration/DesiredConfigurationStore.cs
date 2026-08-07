@@ -80,6 +80,9 @@ public sealed class DesiredConfigurationStore :
         options.Converters.Add(
             new JsonStringEnumConverter());
 
+        options.Converters.Add(
+            new DirectCountryCodeJsonConverter());
+
         return options;
     }
 }

@@ -480,6 +480,7 @@ Verify the repository before assuming this work remains outstanding.
 - Cross-store crash consistency (Phase 34.3, analysis + tests; no prod change): `docs/reliability/phase-34.3-cross-store-recovery.md` (decision: no general transaction mechanism needed)
 - DesiredConfiguration missing/corrupt load contract (Phase 34.4): `docs/reliability/phase-34.4-desired-configuration-load-safety.md` (fail closed; missing/corrupt distinguished from a saved disabled config)
 - Country-agnostic routing audit (Phase 35.1): `docs/globalization/phase-35.1-country-routing-audit.md` (engine is geography-neutral; only the prefix source binds IR; roadmap Phase 35.2–35.7; brand rename deferred to Phase 36)
+- Country identity/configuration contract (Phase 35.2): `docs/globalization/phase-35.2-country-configuration.md` (`DirectCountryCode` ISO alpha-2 value object; legacy→IR; non-IR temporary safety gate in worker; source still IR-only until 35.3)
 
 ---
 

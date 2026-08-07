@@ -66,20 +66,44 @@ public sealed class IranDirectWorker : BackgroundService
         DesiredConfiguration? desired =
             await TryLoadConfigurationAsync(stoppingToken);
 
-        if (desired is { Enabled: true })
+        // Until the prefix source is generalized (Phase 35.3), only the
+        // legacy/default country (IR, including a null legacy value) is
+        // supported for routing. A recognized non-IR country is valid
+        // configuration but must not reconcile through the Iran-only source,
+        // so reconciliation is skipped safely (no route mutation) while the
+        // host stays alive and continues to poll.
+        bool countrySupported =
+            DirectCountryRouting.IsDirectCountrySupported(
+                desired?.DirectCountryCode);
+        bool shouldReconcile =
+            desired is { Enabled: true } && countrySupported;
+
+        if (shouldReconcile)
         {
             _logger.LogInformation(
                 "Desired configuration is enabled. " +
                 "Running startup cycle.");
-
-            await RunServiceCycleAsync(
-                "startup", stoppingToken);
+        }
+        else if (desired is { Enabled: true })
+        {
+            _logger.LogWarning(
+                "Selected direct country '{DirectCountryCode}' is not yet " +
+                "supported by the prefix source; reconciliation is skipped " +
+                "until a supported configuration is supplied. The service " +
+                "remains running and will re-check on the next cycle.",
+                desired.DirectCountryCode?.Code ?? "IR");
         }
         else if (desired is not null)
         {
             _logger.LogInformation(
                 "Desired configuration is disabled. " +
                 "Skipping startup cycle.");
+        }
+
+        if (shouldReconcile)
+        {
+            await RunServiceCycleAsync(
+                "startup", stoppingToken);
         }
 
         while (!stoppingToken.IsCancellationRequested
@@ -117,8 +141,23 @@ public sealed class IranDirectWorker : BackgroundService
                 continue;
             }
 
-            await RunServiceCycleAsync(
-                "periodic", stoppingToken);
+            bool loopCountrySupported =
+                DirectCountryRouting.IsDirectCountrySupported(
+                    desired.DirectCountryCode);
+
+            if (desired.Enabled && loopCountrySupported)
+            {
+                await RunServiceCycleAsync(
+                    "periodic", stoppingToken);
+            }
+            else if (desired.Enabled)
+            {
+                _logger.LogWarning(
+                    "Selected direct country '{DirectCountryCode}' is not yet " +
+                    "supported by the prefix source; reconciliation is " +
+                    "skipped this cycle.",
+                    desired.DirectCountryCode?.Code ?? "IR");
+            }
         }
 
         await pipeTask;

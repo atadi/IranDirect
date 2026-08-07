@@ -43,6 +43,18 @@ public sealed class DesiredConfigurationValidator
                 "Prefix update interval must be at least 15 minutes.");
         }
 
+        if (configuration.DirectCountryCode is not null &&
+            !DirectCountryCode.TryParse(
+                configuration.DirectCountryCode.Code,
+                out _))
+        {
+            // The converter already rejects invalid codes at load time, so a
+            // non-null value here is always canonical; this is defensive.
+            errors.Add(
+                "DirectCountryCode must be a recognized ISO 3166-1 " +
+                "alpha-2 country code.");
+        }
+
         return new ConfigurationValidationResult
         {
             Errors = errors
