@@ -183,6 +183,17 @@ public static class ServiceCompositionRoot
         services.AddSingleton(endpointInventoryStore);
         services.AddSingleton<IEndpointInventoryPersistence>(endpointInventoryStore);
 
+        // Durable write-ahead journal for crash-consistent route-ownership
+        // recovery. Survives process death between a native mutation and the
+        // authoritative inventory persist, so recovery can prove IranDirect
+        // initiated an interrupted mutation instead of guessing from route shape.
+        RouteMutationJournalStore routeMutationJournalStore = new(
+            Path.Combine(dataDirectory, "route-mutation-journal.json"));
+        services.AddSingleton(routeMutationJournalStore);
+        services.AddSingleton<IRouteMutationJournal>(routeMutationJournalStore);
+
+        services.AddSingleton<RouteMutationRecovery>();
+
         services.AddSingleton<DesiredConfigurationValidator>();
         services.AddSingleton(
             serviceProvider =>
@@ -393,9 +404,14 @@ public static class ServiceCompositionRoot
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<
             IRuntimeDecisionBuilder, RuntimeDecisionBuilder>();
-        services.AddSingleton<
-            IRuntimeExecutionStepHandler,
-            WindowsRuntimeExecutionStepHandler>();
+        services.AddSingleton<IRuntimeExecutionStepHandler>(
+            serviceProvider =>
+                new WindowsRuntimeExecutionStepHandler(
+                    serviceProvider.GetRequiredService<IRouteManager>(),
+                    serviceProvider.GetRequiredService<IRouteInventoryPersistence>(),
+                    serviceProvider.GetRequiredService<IEndpointInventoryPersistence>(),
+                    serviceProvider.GetRequiredService<RuntimeCycleProfiler>(),
+                    serviceProvider.GetRequiredService<IRouteMutationJournal>()));
         services.AddSingleton<
             IRuntimeExecutor, RuntimeExecutor>();
         services.AddSingleton<RuntimeOperationStatus>();

@@ -12,13 +12,15 @@ public sealed class WindowsRuntimeExecutionStepHandler :
     private readonly IRouteManager _routeManager;
     private readonly IRouteInventoryPersistence _routeInventory;
     private readonly IEndpointInventoryPersistence _endpointInventory;
+    private readonly IRouteMutationJournal _journal;
     private readonly RuntimeCycleProfiler _profiler;
 
     public WindowsRuntimeExecutionStepHandler(
         IRouteManager routeManager,
         IRouteInventoryPersistence routeInventory,
         IEndpointInventoryPersistence endpointInventory,
-        RuntimeCycleProfiler? profiler = null)
+        RuntimeCycleProfiler? profiler = null,
+        IRouteMutationJournal? journal = null)
     {
         ArgumentNullException.ThrowIfNull(routeManager);
         ArgumentNullException.ThrowIfNull(routeInventory);
@@ -27,6 +29,7 @@ public sealed class WindowsRuntimeExecutionStepHandler :
         _routeManager = routeManager;
         _routeInventory = routeInventory;
         _endpointInventory = endpointInventory;
+        _journal = journal ?? NullRouteMutationJournal.Instance;
         _profiler = profiler ?? RuntimeCycleProfiler.Noop;
     }
 
@@ -169,6 +172,11 @@ public sealed class WindowsRuntimeExecutionStepHandler :
     {
         ManagedRoute managedRoute = ToManagedRoute(step);
 
+        await _journal.WriteIntentAsync(
+            CreateIntent(step, RouteMutationKind.Add,
+                RouteMutationInventoryKind.Prefix),
+            cancellationToken);
+
         try
         {
             using (_profiler.Measure(
@@ -230,6 +238,11 @@ public sealed class WindowsRuntimeExecutionStepHandler :
             using (_profiler.Measure(
                 RuntimePerfCategory.ExecutionPrefixRemoveMutation))
             {
+                await _journal.WriteIntentAsync(
+                    CreateIntent(step, RouteMutationKind.Delete,
+                        RouteMutationInventoryKind.Prefix),
+                    cancellationToken);
+
                 await _routeManager.DeleteRoutesAsync(
                     [managedRoute], cancellationToken);
             }
@@ -307,11 +320,17 @@ public sealed class WindowsRuntimeExecutionStepHandler :
             }
             catch (Exception ex) when (ex is not ArgumentNullException)
             {
+                // Journal intent intentionally NOT cleared: graceful
+                // compensation removes the route if it can; if compensation
+                // also fails, the durable intent lets next-startup recovery
+                // finish the operation. Clearing here on failure would strand
+                // an orphan with no proof of ownership.
                 string msg = await CompensatePrefixRouteCreationAsync(
                     ToManagedRoute(step), step, ex.Message);
                 return CreateFailedResult(step, msg);
             }
 
+            await _journal.ClearIntentAsync(step.Identity, cancellationToken);
             return CreateSucceededResult(step);
         }
 
@@ -364,6 +383,7 @@ public sealed class WindowsRuntimeExecutionStepHandler :
                 }
             }
 
+            await _journal.ClearIntentAsync(step.Identity, cancellationToken);
             return CreateSucceededResult(step);
         }
 
@@ -414,6 +434,11 @@ public sealed class WindowsRuntimeExecutionStepHandler :
 
         if (await RouteExistsAsync(step, cancellationToken))
             return await CheckExistingEndpointOwnershipAsync(step, cancellationToken);
+
+        await _journal.WriteIntentAsync(
+            CreateIntent(step, RouteMutationKind.Add,
+                RouteMutationInventoryKind.Endpoint),
+            cancellationToken);
 
         try
         {
@@ -495,6 +520,7 @@ public sealed class WindowsRuntimeExecutionStepHandler :
             return CreateFailedResult(step, msg);
         }
 
+        await _journal.ClearIntentAsync(step.Identity, cancellationToken);
         return CreateSucceededResult(step);
     }
 
@@ -577,6 +603,11 @@ public sealed class WindowsRuntimeExecutionStepHandler :
                 using (_profiler.Measure(
                     RuntimePerfCategory.ExecutionRouteDelete))
                 {
+                    await _journal.WriteIntentAsync(
+                        CreateIntent(step, RouteMutationKind.Delete,
+                            RouteMutationInventoryKind.Endpoint),
+                        cancellationToken);
+
                     await _routeManager.DeleteRoutesAsync(
                         [managedRoute], cancellationToken);
                 }
@@ -615,6 +646,7 @@ public sealed class WindowsRuntimeExecutionStepHandler :
                     $"persistence failed: {ex.Message}");
             }
 
+            await _journal.ClearIntentAsync(step.Identity, cancellationToken);
             return CreateSucceededResult(step);
         }
 
@@ -652,6 +684,7 @@ public sealed class WindowsRuntimeExecutionStepHandler :
                 $"cleanup failed: {ex.Message}");
         }
 
+        await _journal.ClearIntentAsync(step.Identity, cancellationToken);
         return CreateSucceededResult(step);
     }
 
@@ -759,6 +792,24 @@ public sealed class WindowsRuntimeExecutionStepHandler :
             Metric = step.Metric
         };
     }
+
+    private static RouteMutationJournalEntry CreateIntent(
+        RuntimeExecutionStep step,
+        RouteMutationKind kind,
+        RouteMutationInventoryKind inventoryKind) =>
+        new()
+        {
+            Kind = kind,
+            InventoryKind = inventoryKind,
+            RouteIdentity = step.Identity,
+            DestinationPrefix = step.DestinationPrefix,
+            Gateway = step.Gateway,
+            InterfaceIndex = step.InterfaceIndex,
+            Metric = step.Metric,
+            Description = step.Description,
+            MutationId = Guid.NewGuid(),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 
     private static RouteInventoryItem ToInventoryItem(
         RuntimeExecutionStep step)

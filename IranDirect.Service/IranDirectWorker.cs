@@ -16,6 +16,7 @@ public sealed class IranDirectWorker : BackgroundService
     private readonly NamedPipeCommandServer _pipeServer;
     private readonly OperationCoordinator _operations;
     private readonly DesiredConfigurationService _configurationService;
+    private readonly RouteMutationRecovery _recovery;
     private readonly ILogger<IranDirectWorker> _logger;
 
     public IranDirectWorker(
@@ -23,12 +24,14 @@ public sealed class IranDirectWorker : BackgroundService
         NamedPipeCommandServer pipeServer,
         OperationCoordinator operations,
         DesiredConfigurationService configurationService,
+        RouteMutationRecovery recovery,
         ILogger<IranDirectWorker> logger)
     {
         _controller = controller;
         _pipeServer = pipeServer;
         _operations = operations;
         _configurationService = configurationService;
+        _recovery = recovery;
         _logger = logger;
     }
 
@@ -40,6 +43,13 @@ public sealed class IranDirectWorker : BackgroundService
 
         Task pipeTask =
             _pipeServer.RunAsync(stoppingToken);
+
+        // Recover any route mutation interrupted by a previous process crash
+        // BEFORE normal planning reads ownership state. Runs through the
+        // OperationCoordinator gate so it cannot race a startup cycle or an
+        // early IPC command.
+        await _operations.ExecuteAsync(
+            _recovery.RecoverAsync, stoppingToken);
 
         DesiredConfiguration desired =
             await _configurationService.GetAsync(

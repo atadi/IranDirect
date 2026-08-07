@@ -475,7 +475,8 @@ The controller should not own:
 
 Verify the repository before assuming this work remains outstanding.
 
-- Latest reliability audit + selected next slice: `docs/reliability/phase-34.1-production-risk-audit.md` (next target: crash-consistent route ownership reconciliation / orphan self-heal).
+- Reliability audit (Phase 34.1) + selected slice: `docs/reliability/phase-34.1-production-risk-audit.md`
+- Crash-consistent route reconciliation (Phase 34.2, implemented): `docs/reliability/phase-34.2-crash-consistent-route-reconciliation.md`
 
 ---
 
