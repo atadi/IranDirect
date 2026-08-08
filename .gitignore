@@ -54,3 +54,6 @@ AI-EVIDENCE/
 AI-CONTEXT-BUNDLE.zip
 # Generated Graphify analysis output.
 graphify-out/
+
+# Local Claude/Agent settings (machine-specific, never committed).
+.claude/
