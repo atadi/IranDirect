@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="PathVeer.Benchmarks/PathVeer.Benchmarks.csproj" />
+  <Project Path="PathVeer.Cli/PathVeer.Cli.csproj" />
+  <Project Path="PathVeer.Core.Tests/PathVeer.Core.Tests.csproj" />
+  <Project Path="PathVeer.Core/PathVeer.Core.csproj" />
+  <Project Path="PathVeer.Service/PathVeer.Service.csproj" />
+  <Project Path="PathVeer.Service.Tests/PathVeer.Service.Tests.csproj" />
+  <Project Path="PathVeer.Testing/PathVeer.Testing.csproj" />
+  <Project Path="PathVeer.Tray/PathVeer.Tray.csproj" />
+</Solution>
