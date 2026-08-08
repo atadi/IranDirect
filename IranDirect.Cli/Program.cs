@@ -35,6 +35,13 @@ string commandText = args.Length == 0
         };
     }
 
+    if (commandText == "country")
+    {
+        return await CountryCliRunner.RunAsync(
+            args.Skip(1).ToArray(),
+            new IranDirectServiceClient());
+    }
+
     if (commandText == "custom-routes")
     {
         return await CustomRouteCliRunner.RunAsync(
@@ -84,7 +91,7 @@ if (!TryParseCommand(
 {
     Console.Error.WriteLine(
         "Usage: IranDirect.Cli " +
-        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|doctor|plan|profile|support-bundle]");
+        "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|doctor|plan|profile|support-bundle|country]");
 
     return 6;
 }
@@ -332,6 +339,9 @@ static void WriteConfiguration(
         $"VPN provider: {configuration.VpnProvider}");
     Console.WriteLine(
         $"VPN profile path: {configuration.VpnProfilePath}");
+    Console.WriteLine(
+        $"Direct country: " +
+        $"{configuration.DirectCountryCode?.Code ?? "IR"}");
     Console.WriteLine(
         $"Auto repair: {configuration.AutoRepair}");
     Console.WriteLine(

@@ -608,12 +608,15 @@ public sealed class IranDirectController :
         // fault: the runtime is still observable, but user intent is unknown,
         // so report it as not enabled rather than throwing.
         bool desiredEnabled = false;
+        string? requestedCountryCode = null;
         try
         {
             DesiredConfiguration config =
                 await _configurationService.GetAsync(
                     cancellationToken);
             desiredEnabled = config.Enabled;
+            requestedCountryCode =
+                config.DirectCountryCode?.Code;
         }
         catch (DesiredConfigurationException)
         {
@@ -624,6 +627,7 @@ public sealed class IranDirectController :
         {
             Enabled = state.Enabled,
             DesiredEnabled = desiredEnabled,
+            RequestedCountryCode = requestedCountryCode,
             Operation = _operationStatus.CreateSnapshot(),
             Gateway = state.Gateway,
             InterfaceIndex =

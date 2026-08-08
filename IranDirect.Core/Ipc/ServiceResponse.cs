@@ -59,4 +59,12 @@ public sealed record ServiceResponse
     public string? SupportBundlePath { get; init; }
 
     public long? SupportBundleBytesWritten { get; init; }
+
+    /// <summary>
+    /// When a country-set command also triggered a prefix refresh, reports
+    /// whether the dataset update succeeded. <c>null</c> when the response is
+    /// unrelated to a country set. Lets the CLI distinguish a partial set
+    /// (config accepted, dataset unavailable) from a full success.
+    /// </summary>
+    public bool? PrefixRefreshed { get; init; }
 }

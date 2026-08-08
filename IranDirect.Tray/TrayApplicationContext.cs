@@ -1,4 +1,5 @@
 using IranDirect.Core;
+using IranDirect.Core.Configuration;
 using IranDirect.Core.Ipc;
 using IranDirect.Core.ServiceLifecycle;
 using IranDirect.Core.Updates;
@@ -42,6 +43,7 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _diagnosticsItem;
     private readonly ToolStripMenuItem _supportBundleItem;
     private readonly ToolStripMenuItem _logsItem;
+    private readonly ToolStripMenuItem _countryItem;
 
     private readonly System.Windows.Forms.Timer _timer;
 
@@ -113,6 +115,24 @@ public sealed class TrayApplicationContext :
             SupportBundleMenuPolicy.MenuItemText);
         _logsItem = new ToolStripMenuItem(
             "Open Event Viewer");
+
+        _countryItem = new ToolStripMenuItem(
+            "Direct country: Iran (IR)");
+
+        foreach (DirectCountryCode code in
+                 DirectCountryCode.AllSupported)
+        {
+            ToolStripMenuItem item = new(
+                $"{code.DisplayName} ({code.Code})")
+            {
+                Tag = code.Code
+            };
+
+            item.Click += async (_, _) =>
+                await SetCountryAsync(code.Code);
+
+            _countryItem.DropDownItems.Add(item);
+        }
 
         ToolStripMenuItem exitItem = new("Exit");
 
@@ -208,6 +228,7 @@ public sealed class TrayApplicationContext :
         menu.Items.Add(_repairItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_configItem);
+        menu.Items.Add(_countryItem);
         menu.Items.Add(_customRoutesItem);
         menu.Items.Add(_runtimeSnapshotItem);
         menu.Items.Add(_executionPreviewItem);
@@ -604,6 +625,21 @@ finally
                 serviceRunning: true,
                 _busy);
 
+        if (status.RequestedCountryCode is { } requested)
+        {
+            DirectCountryCode.TryParse(
+                requested,
+                out DirectCountryCode? requestedCountry);
+
+            if (requestedCountry is not null)
+            {
+                _countryItem.Text =
+                    $"Direct country: " +
+                    $"{requestedCountry.DisplayName} " +
+                    $"({requestedCountry.Code})";
+            }
+        }
+
         _notifyIcon.Text =
             status.Enabled
                 ? "IranDirect — Enabled"
@@ -675,6 +711,63 @@ finally
         _uninstallServiceItem.Enabled = false;
     }
 
+    private async Task SetCountryAsync(string code)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        try
+        {
+            ServiceResponse response =
+                await _client.SendAsync(
+                    IranDirectCommand.SetConfigurationDirectCountry,
+                    code);
+
+            if (!response.Success)
+            {
+                MessageBox.Show(
+                    response.Message,
+                    "IranDirect — country change failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Refresh the menu label from the returned config so the new
+            // requested country is shown immediately. This does NOT enable the
+            // service; if the prefix dataset could not be fetched the request
+            // is still accepted (requested policy) but routing stays blocked.
+            if (response.Configuration?.DirectCountryCode is { } country)
+            {
+                _countryItem.Text =
+                    $"Direct country: {country.DisplayName} " +
+                    $"({country.Code})";
+            }
+
+            if (response.PrefixRefreshed == false)
+            {
+                MessageBox.Show(
+                    response.Message,
+                    "IranDirect — country set (dataset unavailable)",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            await RefreshStatusAsync(showMessage: false);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                exception.Message,
+                "IranDirect service unavailable",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
     private async Task ShowConfigurationAsync()
     {
         try
@@ -698,6 +791,7 @@ finally
 
             MessageBox.Show(
                 $"Enabled: {c.Enabled}\n" +
+                $"Direct country: {c.DirectCountryCode?.Code ?? "IR"}\n" +
                 $"VPN provider: {c.VpnProvider}\n" +
                 $"VPN profile: {c.VpnProfilePath}\n" +
                 $"Auto repair: {c.AutoRepair}\n" +

@@ -732,7 +732,7 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
     // Harness
     // ==================================================================
 
-    private sealed class SwitchHarness : IAsyncDisposable
+    public sealed class SwitchHarness : IAsyncDisposable
     {
         private readonly string _root;
         private readonly string _prefixRoot;
@@ -910,6 +910,16 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
                 DirectCountryCode = country
             });
 
+        /// <summary>
+        /// Persists ONLY the requested country (the new 35.5 country-set
+        /// contract) without triggering a prefix fetch. This lets integration
+        /// tests drive the refresh step explicitly via
+        /// <see cref="IranDirectController.UpdatePrefixesAsync"/>, mirroring
+        /// how the IPC command handler orders persist -> refresh -> reconcile.
+        /// </summary>
+        public Task SetCountryAsync(DirectCountryCode country) =>
+            ConfigurationService.SetDirectCountryAsync(country);
+
         public Task SeedCacheAsync(
             DirectCountryCode country,
             IReadOnlyList<string> prefixes)
@@ -990,7 +1000,7 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
     // Fakes
     // ------------------------------------------------------------------
 
-    private sealed class ControllablePrefixSource : ICountryPrefixSource
+    public sealed class ControllablePrefixSource : ICountryPrefixSource
     {
         private readonly Dictionary<string, IReadOnlyList<string>> _data =
             new(StringComparer.OrdinalIgnoreCase);
@@ -1053,7 +1063,7 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
         }
     }
 
-    private sealed class InMemoryRouteManager : IRouteManager
+    public sealed class InMemoryRouteManager : IRouteManager
     {
         // Identity is "prefix|gateway|ifIndex"; metric is carried in a
         // parallel map so MatchesExact (which checks RouteMetric) can verify.

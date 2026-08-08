@@ -113,6 +113,8 @@ public static class TelemetryOutcomeMapper
             nameof(IranDirectCommand.SetConfigurationEnabled),
         IranDirectCommand.SetConfigurationProfilePath =>
             nameof(IranDirectCommand.SetConfigurationProfilePath),
+        IranDirectCommand.SetConfigurationDirectCountry =>
+            nameof(IranDirectCommand.SetConfigurationDirectCountry),
         IranDirectCommand.RuntimePlan => nameof(IranDirectCommand.RuntimePlan),
         IranDirectCommand.CustomRoutesList =>
             nameof(IranDirectCommand.CustomRoutesList),

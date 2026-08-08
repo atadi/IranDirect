@@ -118,6 +118,44 @@ public sealed class DirectCountryCode :
 
     public override string ToString() => Code;
 
+
+
+    /// <summary>
+    /// All ISO 3166-1 alpha-2 codes recognized by this catalog, in
+    /// deterministic ordinal order. Used by `country list` for UX display.
+    /// Identity remains the ISO code; display names (if needed) are a separate
+    /// presentation-only concern and must never change identity semantics.
+    /// </summary>
+    public static IReadOnlyList<DirectCountryCode> AllSupported =>
+        AllSupportedLazy.Value;
+
+    private static readonly Lazy<IReadOnlyList<DirectCountryCode>>
+        AllSupportedLazy = new(() =>
+            KnownCodes
+                .OrderBy(code => code, StringComparer.Ordinal)
+                .Select(code => new DirectCountryCode(code))
+                .ToArray());
+
+    /// <summary>
+    /// Presentation-only English display names for the countries surfaced in
+    /// the current UX. Treat as advisory text only: identity is always the ISO
+    /// alpha-2 code, never the name. Codes absent from this map still validate
+    /// and are supported by the generic provider; the map is not an
+    /// allow-list.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> DisplayNames { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["IR"] = "Iran",
+            ["IQ"] = "Iraq",
+            ["RO"] = "Romania"
+        };
+
+    public string DisplayName =>
+        DisplayNames.TryGetValue(Code, out string? name)
+            ? name
+            : Code;
+
     public static bool operator ==(
         DirectCountryCode? left,
         DirectCountryCode? right) =>

@@ -60,6 +60,35 @@ public sealed class DesiredConfigurationService :
         return updated;
     }
 
+    /// <summary>
+    /// Persists the requested direct-country routing policy without touching
+    /// <see cref="DesiredConfiguration.Enabled"/> or
+    /// <see cref="DesiredConfiguration.VpnProfilePath"/>. A missing file is
+    /// treated as "create from a valid default and apply the change" (matching
+    /// the other set-* commands); a corrupt file still fails closed.
+    /// </summary>
+    public async Task<DesiredConfiguration> SetDirectCountryAsync(
+        DirectCountryCode country,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(country);
+
+        DesiredConfiguration current =
+            await LoadOrDefaultAsync(cancellationToken);
+
+        DesiredConfiguration updated =
+            current with
+            {
+                DirectCountryCode = country
+            };
+
+        await _store.SaveAsync(
+            updated,
+            cancellationToken);
+
+        return updated;
+    }
+
     // A write command (enable/disable/set-profile) is how the authoritative
     // configuration is first created, so a MISSING file is treated as "start
     // from a valid default and apply the change". A CORRUPT file must still

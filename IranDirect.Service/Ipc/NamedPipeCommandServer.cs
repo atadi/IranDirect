@@ -262,6 +262,11 @@ public class NamedPipeCommandServer
                     request,
                     cancellationToken),
 
+            IranDirectCommand.SetConfigurationDirectCountry =>
+                SetConfigurationDirectCountryAsync(
+                    request,
+                    cancellationToken),
+
             IranDirectCommand.RuntimePlan =>
                 GetRuntimePlanAsync(cancellationToken),
 
@@ -563,6 +568,73 @@ public class NamedPipeCommandServer
                 "Desired configuration profile path updated.",
             Configuration = configuration
         };
+    }
+
+    private async Task<ServiceResponse>
+        SetConfigurationDirectCountryAsync(
+            ServiceRequest request,
+            CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Value) ||
+            !DirectCountryCode.TryParse(
+                request.Value,
+                out DirectCountryCode? country) ||
+            country is null)
+        {
+            return Failure(
+                "INVALID_COUNTRY_CODE",
+                "Country code must be a recognized ISO 3166-1 " +
+                "alpha-2 country code (e.g. IR, IQ, RO).");
+        }
+
+        // Persist requested policy, then refresh that country's prefix
+        // dataset. Both run inside the OperationCoordinator so country write,
+        // prefix update, and runtime cycle can never mutate shared state
+        // concurrently. A failed refresh does NOT roll the config back: the
+        // requested policy (country) remains set and reconciliation stays
+        // safely blocked until the dataset becomes available.
+        return await _operations.ExecuteAsync(
+            async ct =>
+            {
+                DesiredConfiguration configuration =
+                    await _configurationService.SetDirectCountryAsync(
+                        country,
+                        ct);
+
+                bool refreshed;
+                string refreshNote;
+
+                try
+                {
+                    await _controller.UpdatePrefixesAsync(
+                        country,
+                        ct);
+
+                    refreshed = true;
+                    refreshNote =
+                        "Prefix dataset updated.";
+                }
+                catch (Exception exception)
+                {
+                    refreshed = false;
+                    refreshNote =
+                        "Prefix dataset update failed: " +
+                        exception.Message;
+                }
+
+                string message =
+                    $"Direct country set to {country.DisplayName} " +
+                    $"({country.Code}). {refreshNote}";
+
+                return new ServiceResponse
+                {
+                    Success = true,
+                    Message = message,
+                    Configuration = configuration,
+                    PrefixRefreshed = refreshed
+                };
+            },
+            cancellationToken);
     }
     private async Task<ServiceResponse> GetRuntimePlanAsync(
         CancellationToken cancellationToken)
