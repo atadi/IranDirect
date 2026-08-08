@@ -427,10 +427,10 @@ public sealed class RouteIdentityInvariantTests
     {
         string routeJson = JsonSerializer.Serialize(
             InventoryItem(),
-            IranDirectJson.Options);
+            PathVeerJson.Options);
         string vpnJson = JsonSerializer.Serialize(
             VpnItem(),
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         // Both persisted item types carry [JsonIgnore] on Identity; the
         // persisted schema must not gain an Identity property.
@@ -449,12 +449,12 @@ public sealed class RouteIdentityInvariantTests
         RouteInventoryItem original = InventoryItem();
         string json = JsonSerializer.Serialize(
             original,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         RouteInventoryItem? restored =
             JsonSerializer.Deserialize<RouteInventoryItem>(
                 json,
-                IranDirectJson.Options);
+                PathVeerJson.Options);
 
         Assert.NotNull(restored);
         Assert.Equal(original.Identity, restored!.Identity);

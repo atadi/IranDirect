@@ -90,7 +90,7 @@ public sealed class SimulatedRuntimeEnvironment : IDisposable
 
     public CountingExecutionHandlerDecorator ExecutionHandler { get; }
 
-    public IranDirectController Controller { get; }
+    public PathVeerController Controller { get; }
 
     public RuntimeSnapshotProvider SnapshotProvider { get; }
 
@@ -257,7 +257,7 @@ public sealed class SimulatedRuntimeEnvironment : IDisposable
             new OpenVpnProfileParser(),
             new VpnEndpointResolver());
 
-        Controller = new IranDirectController(
+        Controller = new PathVeerController(
             PrefixSource,
             PrefixStore,
             new GatewayDetector(),

@@ -384,7 +384,7 @@ public sealed class DiagnosticReportFormattingEquivalenceTests
             DateTimeOffset.UtcNow, BuildDeterministic(50));
 
         string json = JsonSerializer.Serialize(report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         using JsonDocument doc = JsonDocument.Parse(json);
         Assert.False(doc.RootElement.TryGetProperty(
@@ -425,13 +425,13 @@ public sealed class DiagnosticReportFormattingEquivalenceTests
             DateTimeOffset.UtcNow, data);
 
         string json = JsonSerializer.Serialize(report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         // Reference oracle grouping serialized the same way.
         var referenceReport = new DiagnosticReport(
             DateTimeOffset.UtcNow, data);
         string referenceJson = JsonSerializer.Serialize(
-            referenceReport, IranDirectJson.Options);
+            referenceReport, PathVeerJson.Options);
 
         // Categories block must be byte-identical in ordering/keys.
         using JsonDocument doc = JsonDocument.Parse(json);

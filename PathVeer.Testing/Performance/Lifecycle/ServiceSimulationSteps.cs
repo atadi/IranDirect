@@ -7,7 +7,7 @@ namespace PathVeer.Testing.Performance.Lifecycle;
 
 /// <summary>
 /// A run cycle step: drives the production
-/// <see cref="PathVeer.Core.IranDirectController.RunCycleAsync"/>,
+/// <see cref="PathVeer.Core.PathVeerController.RunCycleAsync"/>,
 /// records the outcome, and marks a sampling boundary.
 /// </summary>
 public sealed class RunCycleStep : IServiceSimulationStep
@@ -59,7 +59,7 @@ public sealed class SetEnabledStep : IServiceSimulationStep
 
 /// <summary>
 /// Runs the full production enable path
-/// (<see cref="PathVeer.Core.IranDirectController.EnableAsync"/>),
+/// (<see cref="PathVeer.Core.PathVeerController.EnableAsync"/>),
 /// including prefix discovery, and records the resulting cycle like a
 /// <see cref="RunCycleStep"/>.
 /// </summary>
@@ -84,7 +84,7 @@ public sealed class EnableStep : IServiceSimulationStep
 
 /// <summary>
 /// Runs the full production disable path
-/// (<see cref="PathVeer.Core.IranDirectController.DisableAsync"/>)
+/// (<see cref="PathVeer.Core.PathVeerController.DisableAsync"/>)
 /// and records the resulting cycle like a <see cref="RunCycleStep"/>.
 /// </summary>
 public sealed class DisableStep : IServiceSimulationStep

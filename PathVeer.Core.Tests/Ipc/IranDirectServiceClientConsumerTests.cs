@@ -22,7 +22,7 @@ public sealed class IranDirectServiceClientConsumerTests
         Assert.Equal(1, exitCode);
         Assert.Empty(stdout.ToString());
         Assert.Contains(
-            "IranDirect command failed: " +
+            "PathVeer command failed: " +
             "Fault injected at NamedPipeSend.",
             stderr.ToString());
     }
@@ -46,7 +46,7 @@ public sealed class IranDirectServiceClientConsumerTests
         ICustomRouteCommandSender
     {
         public async Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

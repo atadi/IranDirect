@@ -247,7 +247,7 @@ public sealed class TelemetryArchitectureTests
         // The controller may only StartActivity(IranDirectActivityNames.RuntimeCycle)
         // and call RuntimeCycleTelemetry.Start; it must not create instruments
         // or use any other telemetry name.
-        string path = Path.Combine(RepoRoot(), "PathVeer.Core/IranDirectController.cs");
+        string path = Path.Combine(RepoRoot(), "PathVeer.Core/PathVeerController.cs");
         string content = File.ReadAllText(path);
 
         Assert.Contains(
@@ -636,7 +636,7 @@ public sealed class TelemetryArchitectureTests
         // The controller may only call RuntimeExecutionTelemetry.Start and the
         // scope terminal methods; it must not create instruments or use other
         // telemetry names for execution.
-        string path = Path.Combine(RepoRoot(), "PathVeer.Core/IranDirectController.cs");
+        string path = Path.Combine(RepoRoot(), "PathVeer.Core/PathVeerController.cs");
         string content = File.ReadAllText(path);
 
         Assert.Contains("RuntimeExecutionTelemetry.Start(", content);
@@ -1025,10 +1025,10 @@ public sealed class TelemetryArchitectureTests
     }
 
     [Fact]
-    public void IranDirectServiceClient_OnlyUsesIpcTelemetryHelpers()
+    public void PathVeerServiceClient_OnlyUsesIpcTelemetryHelpers()
     {
         string path = Path.Combine(
-            RepoRoot(), "PathVeer.Core/Ipc/IranDirectServiceClient.cs");
+            RepoRoot(), "PathVeer.Core/Ipc/PathVeerServiceClient.cs");
         string content = File.ReadAllText(path);
 
         Assert.Contains("IpcRequestTelemetry.Start(", content);

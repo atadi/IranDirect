@@ -51,7 +51,7 @@ public sealed class TelemetryAllocationTests
         _ = TelemetryOutcomeMapper.Map(RuntimeExecutionResultStatus.Failed);
         _ = TelemetryOutcomeMapper.Map(CycleCompletionStatus.Completed);
         _ = TelemetryOutcomeMapper.Map(DiagnosticSeverity.Warning);
-        _ = TelemetryOutcomeMapper.Map(IranDirectCommand.Repair);
+        _ = TelemetryOutcomeMapper.Map(PathVeerCommand.Repair);
         _ = TelemetryFailureCategoryMapper.Map(ioException);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
@@ -60,7 +60,7 @@ public sealed class TelemetryAllocationTests
             _ = TelemetryOutcomeMapper.Map(RuntimeExecutionResultStatus.Failed);
             _ = TelemetryOutcomeMapper.Map(CycleCompletionStatus.Completed);
             _ = TelemetryOutcomeMapper.Map(DiagnosticSeverity.Warning);
-            _ = TelemetryOutcomeMapper.Map(IranDirectCommand.Repair);
+            _ = TelemetryOutcomeMapper.Map(PathVeerCommand.Repair);
             _ = TelemetryFailureCategoryMapper.Map(ioException);
         }
         long after = GC.GetAllocatedBytesForCurrentThread();

@@ -176,7 +176,7 @@ public sealed class IranDirectWorkerTests : IDisposable
 
         FakeCountryPrefixSource prefixSource = new(seed);
 
-        IranDirectController controller = new(
+        PathVeerController controller = new(
             prefixSource,
             prefixStore,
             gatewayDetector,
@@ -205,13 +205,13 @@ public sealed class IranDirectWorkerTests : IDisposable
 
         NoopPipeServer pipeServer = new(controller, operations);
 
-        IranDirectWorker worker = new(
+        PathVeerWorker worker = new(
             controller,
             pipeServer,
             operations,
             _configurationService,
             recovery,
-            NullLogger<IranDirectWorker>.Instance);
+            NullLogger<PathVeerWorker>.Instance);
 
         return new Harness(worker, pipeServer, controller);
     }
@@ -241,14 +241,14 @@ public sealed class IranDirectWorkerTests : IDisposable
 
     private sealed class Harness
     {
-        public IranDirectWorker Worker { get; }
+        public PathVeerWorker Worker { get; }
         public NoopPipeServer PipeServer { get; }
-        public IranDirectController Controller { get; }
+        public PathVeerController Controller { get; }
 
         public Harness(
-            IranDirectWorker worker,
+            PathVeerWorker worker,
             NoopPipeServer pipeServer,
-            IranDirectController controller)
+            PathVeerController controller)
         {
             Worker = worker;
             PipeServer = pipeServer;
@@ -257,7 +257,7 @@ public sealed class IranDirectWorkerTests : IDisposable
     }
 
     private static async Task RunUntilCanceled(
-        IranDirectWorker worker, CancellationTokenSource cts)
+        PathVeerWorker worker, CancellationTokenSource cts)
     {
         // BackgroundService.StartAsync kicks off ExecuteAsync without awaiting
         // it. Let the synchronous startup cycle run, then cancel to stop the
@@ -396,13 +396,13 @@ public sealed class IranDirectWorkerTests : IDisposable
     private sealed class NoopPipeServer : NamedPipeCommandServer
     {
         public NoopPipeServer(
-            IranDirectController controller,
+            PathVeerController controller,
             OperationCoordinator operations)
             : base(
                 controller,
                 operations,
                 null!, // OpenVpnEndpointProvider
-                null!, // IranDirectDiagnosticsService
+                null!, // PathVeerDiagnosticsService
                 null!, // DesiredConfigurationService
                 null!, // RuntimeCoordinator
                 null!, // CustomRouteCommandHandler

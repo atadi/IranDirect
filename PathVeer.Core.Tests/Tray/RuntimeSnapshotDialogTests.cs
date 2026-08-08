@@ -15,7 +15,7 @@ public sealed class RuntimeSnapshotDialogTests
         await dialog.RefreshAsync();
 
         Assert.Equal(
-            [IranDirectCommand.RuntimeSnapshot],
+            [PathVeerCommand.RuntimeSnapshot],
             sender.Commands);
     }
 
@@ -68,10 +68,10 @@ public sealed class RuntimeSnapshotDialogTests
             _throwOnSend = throwOnSend;
         }
 
-        public List<IranDirectCommand> Commands { get; } = [];
+        public List<PathVeerCommand> Commands { get; } = [];
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

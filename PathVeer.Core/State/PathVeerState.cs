@@ -1,6 +1,6 @@
 ﻿namespace PathVeer.Core.State;
 
-public sealed record IranDirectState
+public sealed record PathVeerState
 {
     public bool Enabled { get; init; }
 

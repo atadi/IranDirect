@@ -161,7 +161,7 @@ public sealed class CustomRouteMergeTests
                 new OpenVpnProfileParser(),
                 new VpnEndpointResolver());
 
-        IranDirectRuntimeObservationSource source =
+        PathVeerRuntimeObservationSource source =
             new(
                 profilePath,
                 endpointProvider,
@@ -267,5 +267,5 @@ public sealed class CustomRouteMergeTests
     }
 
     private sealed record ObservationSourceFixture(
-        IranDirectRuntimeObservationSource Source);
+        PathVeerRuntimeObservationSource Source);
 }

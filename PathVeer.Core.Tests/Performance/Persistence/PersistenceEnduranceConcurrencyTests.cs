@@ -223,7 +223,7 @@ public sealed class PersistenceEnduranceConcurrencyTests
             PersistenceEnduranceFixtures.RouteInventory(Seed, cycles).Routes,
             routesLoaded.Routes);
 
-        IranDirectState stateLoaded = await stateStore.LoadAsync();
+        PathVeerState stateLoaded = await stateStore.LoadAsync();
         Assert.Equal(
             PersistenceEnduranceFixtures.State(cycles - 1),
             stateLoaded);

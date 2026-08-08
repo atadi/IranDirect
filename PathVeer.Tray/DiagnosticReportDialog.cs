@@ -20,7 +20,7 @@ public sealed class DiagnosticReportDialog : Form
         ICustomRouteCommandSender? sender = null,
         Action<string>? showError = null)
     {
-        _sender = sender ?? new IranDirectServiceClient();
+        _sender = sender ?? new PathVeerServiceClient();
         _showError = showError;
 
         Text = "Run Diagnostics...";
@@ -102,7 +102,7 @@ public sealed class DiagnosticReportDialog : Form
         {
             ServiceResponse response =
                 await _sender.SendAsync(
-                    IranDirectCommand.Diagnostics);
+                    PathVeerCommand.Diagnostics);
 
             if (!response.Success ||
                 response.Report is null)

@@ -1,6 +1,6 @@
 namespace PathVeer.Core.Ipc;
 
-public enum IranDirectCommand
+public enum PathVeerCommand
 {
     Status,
     UpdatePrefixes,

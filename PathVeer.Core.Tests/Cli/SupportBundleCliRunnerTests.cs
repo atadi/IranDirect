@@ -33,11 +33,11 @@ public sealed class SupportBundleCliRunnerTests
             Assert.StartsWith(
                 Path.Combine(
                     tempRoot,
-                    "IranDirect",
+                    "PathVeer",
                     "SupportBundles"),
                 exporter.LastOutputPath!);
             Assert.Contains(
-                "IranDirect-Support-",
+                "PathVeer-Support-",
                 Path.GetFileName(exporter.LastOutputPath!));
         }
         finally
@@ -261,11 +261,11 @@ public sealed class SupportBundleCliRunnerTests
             string filename = Path.GetFileName(path);
 
             Assert.StartsWith(
-                "IranDirect-Support-", filename);
+                "PathVeer-Support-", filename);
             Assert.EndsWith(".zip", filename);
             Assert.Contains("20260803", filename);
             Assert.Matches(
-                @"IranDirect-Support-\d{8}-\d{6}\.zip",
+                @"PathVeer-Support-\d{8}-\d{6}\.zip",
                 filename);
         }
         finally

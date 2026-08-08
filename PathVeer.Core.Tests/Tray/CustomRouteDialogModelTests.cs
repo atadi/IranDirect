@@ -62,16 +62,16 @@ public sealed class CustomRouteDialogModelTests
     [Theory]
     [InlineData(
         CustomRouteEntryType.Domain,
-        IranDirectCommand.CustomRoutesAddDomain)]
+        PathVeerCommand.CustomRoutesAddDomain)]
     [InlineData(
         CustomRouteEntryType.IpAddress,
-        IranDirectCommand.CustomRoutesAddIp)]
+        PathVeerCommand.CustomRoutesAddIp)]
     [InlineData(
         CustomRouteEntryType.Cidr,
-        IranDirectCommand.CustomRoutesAddCidr)]
+        PathVeerCommand.CustomRoutesAddCidr)]
     public void GetAddCommand_MapsEachType(
         CustomRouteEntryType type,
-        IranDirectCommand expected)
+        PathVeerCommand expected)
     {
         Assert.Equal(
             expected,
@@ -202,13 +202,13 @@ public sealed class CustomRouteDialogModelTests
     [Theory]
     [InlineData(
         true,
-        IranDirectCommand.CustomRoutesInvalidateAllCaches)]
+        PathVeerCommand.CustomRoutesInvalidateAllCaches)]
     [InlineData(
         false,
-        IranDirectCommand.CustomRoutesInvalidateCache)]
+        PathVeerCommand.CustomRoutesInvalidateCache)]
     public void GetInvalidateCommand_MapsTarget(
         bool all,
-        IranDirectCommand expected)
+        PathVeerCommand expected)
     {
         Assert.Equal(
             expected,

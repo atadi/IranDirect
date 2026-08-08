@@ -91,7 +91,7 @@ public static class PersistenceEnduranceFixtures
                 .ToArray()
         };
 
-    public static IranDirectState State(int revision) =>
+    public static PathVeerState State(int revision) =>
         new()
         {
             Enabled = revision % 2 == 0,

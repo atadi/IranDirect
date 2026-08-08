@@ -43,7 +43,7 @@ public sealed class PrefixUpdateCliRunnerTests
     [Fact]
     public async Task RunAsync_Check_SendsPrefixUpdateCheckNow()
     {
-        IranDirectCommand? sent = null;
+        PathVeerCommand? sent = null;
         FakeSender sender = new(
             (command, _, _) =>
             {
@@ -58,7 +58,7 @@ public sealed class PrefixUpdateCliRunnerTests
 
         Assert.Equal(0, exitCode);
         Assert.Equal(
-            IranDirectCommand.PrefixUpdateCheckNow,
+            PathVeerCommand.PrefixUpdateCheckNow,
             sent);
     }
 
@@ -240,14 +240,14 @@ public sealed class PrefixUpdateCliRunnerTests
     private sealed class FakeSender : ICustomRouteCommandSender
     {
         private readonly Func<
-            IranDirectCommand,
+            PathVeerCommand,
             string?,
             string?,
             ServiceResponse> _handler;
 
         public FakeSender(
             Func<
-                IranDirectCommand,
+                PathVeerCommand,
                 string?,
                 string?,
                 ServiceResponse> handler)
@@ -256,7 +256,7 @@ public sealed class PrefixUpdateCliRunnerTests
         }
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

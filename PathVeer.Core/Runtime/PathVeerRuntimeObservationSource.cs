@@ -9,7 +9,7 @@ using PathVeer.Core.Vpn;
 
 namespace PathVeer.Core.Runtime;
 
-public sealed class IranDirectRuntimeObservationSource :
+public sealed class PathVeerRuntimeObservationSource :
     IRuntimeObservationSource
 {
     private readonly string _profilePath;
@@ -21,7 +21,7 @@ public sealed class IranDirectRuntimeObservationSource :
     private readonly RuntimeCycleProfiler _profiler;
     private readonly ICustomRouteResolver? _customRouteResolver;
 
-    public IranDirectRuntimeObservationSource(
+    public PathVeerRuntimeObservationSource(
         string profilePath,
         OpenVpnEndpointProvider vpnEndpointProvider,
         GatewayDetector gatewayDetector,

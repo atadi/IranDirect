@@ -121,7 +121,7 @@ public sealed class ObservabilityConsumerTests
         Assert.Equal(2, exitCode);
         Assert.Empty(stdout.ToString());
         Assert.Contains(
-            "IranDirect command failed: " +
+            "PathVeer command failed: " +
             "Fault injected at DiagnosticsRun.",
             stderr.ToString());
     }
@@ -147,7 +147,7 @@ public sealed class ObservabilityConsumerTests
         ICustomRouteCommandSender
     {
         public async Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

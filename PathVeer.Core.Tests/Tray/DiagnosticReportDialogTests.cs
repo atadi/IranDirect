@@ -15,7 +15,7 @@ public sealed class DiagnosticReportDialogTests
         await dialog.RefreshAsync();
 
         Assert.Equal(
-            [IranDirectCommand.Diagnostics],
+            [PathVeerCommand.Diagnostics],
             sender.Commands);
     }
 
@@ -88,14 +88,14 @@ public sealed class DiagnosticReportDialogTests
         private readonly string _message;
         private readonly bool _throwOnSend;
         private readonly bool _hasReport;
-        private readonly Action<IranDirectCommand>? _onSend;
+        private readonly Action<PathVeerCommand>? _onSend;
 
         public RecordingSender(
             bool success = true,
             string message = "Diagnostics completed.",
             bool throwOnSend = false,
             bool hasReport = true,
-            Action<IranDirectCommand>? onSend = null)
+            Action<PathVeerCommand>? onSend = null)
         {
             _success = success;
             _message = message;
@@ -104,10 +104,10 @@ public sealed class DiagnosticReportDialogTests
             _onSend = onSend;
         }
 
-        public List<IranDirectCommand> Commands { get; } = [];
+        public List<PathVeerCommand> Commands { get; } = [];
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace PathVeer.Core.Ipc;
 
-public static class IranDirectJson
+public static class PathVeerJson
 {
     public static JsonSerializerOptions Options { get; } =
         CreateOptions();

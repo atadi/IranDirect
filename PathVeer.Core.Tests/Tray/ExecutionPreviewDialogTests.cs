@@ -15,7 +15,7 @@ public sealed class ExecutionPreviewDialogTests
         await dialog.RefreshAsync();
 
         Assert.Equal(
-            [IranDirectCommand.ExecutionPreview],
+            [PathVeerCommand.ExecutionPreview],
             sender.Commands);
     }
 
@@ -87,7 +87,7 @@ public sealed class ExecutionPreviewDialogTests
     {
         Type dialogType = typeof(ExecutionPreviewDialog);
         System.Reflection.Assembly core =
-            typeof(PathVeer.Core.Ipc.IranDirectServiceClient)
+            typeof(PathVeer.Core.Ipc.PathVeerServiceClient)
                 .Assembly;
         Type planner = core.GetType(
             "PathVeer.Core.Planning.IRuntimePreviewPlanner",
@@ -118,14 +118,14 @@ public sealed class ExecutionPreviewDialogTests
         private readonly string _message;
         private readonly bool _throwOnSend;
         private readonly bool _hasPreview;
-        private readonly Action<IranDirectCommand>? _onSend;
+        private readonly Action<PathVeerCommand>? _onSend;
 
         public RecordingSender(
             bool success = true,
             string message = "Execution preview computed.",
             bool throwOnSend = false,
             bool hasPreview = true,
-            Action<IranDirectCommand>? onSend = null)
+            Action<PathVeerCommand>? onSend = null)
         {
             _success = success;
             _message = message;
@@ -134,10 +134,10 @@ public sealed class ExecutionPreviewDialogTests
             _onSend = onSend;
         }
 
-        public List<IranDirectCommand> Commands { get; } = [];
+        public List<PathVeerCommand> Commands { get; } = [];
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

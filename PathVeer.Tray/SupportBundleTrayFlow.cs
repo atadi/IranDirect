@@ -49,7 +49,7 @@ public static class SupportBundleTrayFlow
         {
             ServiceResponse response =
                 await sender.SendAsync(
-                    IranDirectCommand.SupportBundleExport,
+                    PathVeerCommand.SupportBundleExport,
                     outputPath,
                     cancellationToken: cancellationToken);
 

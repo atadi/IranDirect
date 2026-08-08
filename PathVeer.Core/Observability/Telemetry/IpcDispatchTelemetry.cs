@@ -19,7 +19,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// </summary>
 public static class IpcDispatchTelemetry
 {
-    public static IpcDispatchScope Start(IranDirectCommand command)
+    public static IpcDispatchScope Start(PathVeerCommand command)
     {
         Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
             IranDirectActivityNames.IpcDispatch,

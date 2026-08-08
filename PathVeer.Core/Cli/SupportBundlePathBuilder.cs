@@ -2,7 +2,7 @@ namespace PathVeer.Core.Cli;
 
 public static class SupportBundlePathBuilder
 {
-    public const string DefaultFilePrefix = "IranDirect-Support";
+    public const string DefaultFilePrefix = "PathVeer-Support";
 
     public static string CreateDefaultPath(
         TimeProvider timeProvider,
@@ -16,7 +16,7 @@ public static class SupportBundlePathBuilder
 
         string directory = Path.Combine(
             root,
-            "IranDirect",
+            "PathVeer",
             "SupportBundles");
 
         Directory.CreateDirectory(directory);

@@ -42,7 +42,7 @@ public sealed class RuntimeSnapshotDiagnosticCheckTests
         {
             CapturedAt = DateTimeOffset.UtcNow,
             SchemaVersion = 1,
-            Runtime = new IranDirectStatus
+            Runtime = new PathVeerStatus
             {
                 Enabled = false,
                 DesiredEnabled = false

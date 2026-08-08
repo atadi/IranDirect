@@ -13,7 +13,7 @@ namespace PathVeer.Service.Tests;
 /// Composition-root tests for the IranDirect Service dependency graph.
 ///
 /// These build the ACTUAL registration graph via
-/// <see cref="ServiceCompositionRoot.AddIranDirectServiceComposition"/> — the
+/// <see cref="ServiceCompositionRoot.AddPathVeerServiceComposition"/> — the
 /// same call <c>Program.cs</c> makes — with full ServiceProvider validation
 /// enabled. A missing or mis-scoped registration fails here exactly as it
 /// would when the real service host starts.
@@ -60,7 +60,7 @@ public sealed class ServiceCompositionRootTests : IDisposable
 
         ServiceCollection services = new();
         services.AddLogging();
-        services.AddIranDirectServiceComposition(
+        services.AddPathVeerServiceComposition(
             configuration,
             _dataDirectory);
 
@@ -183,7 +183,7 @@ public sealed class ServiceCompositionRootTests : IDisposable
                 ["Observability:Enabled"] = "false"
             });
 
-        builder.Services.AddIranDirectServiceComposition(
+        builder.Services.AddPathVeerServiceComposition(
             builder.Configuration,
             _dataDirectory);
 

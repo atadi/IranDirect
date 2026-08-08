@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 
 namespace PathVeer.Service;
 
-public sealed class IranDirectWorker : BackgroundService
+public sealed class PathVeerWorker : BackgroundService
 {
     // While the authoritative configuration is missing or corrupt the runtime
     // must not reconcile, so it polls at a calm interval (rather than the
@@ -18,20 +18,20 @@ public sealed class IranDirectWorker : BackgroundService
     // configuration appears. This keeps the host alive without a crash-loop.
     private static readonly TimeSpan UnconfiguredRetryInterval =
         TimeSpan.FromSeconds(30);
-    private readonly IranDirectController _controller;
+    private readonly PathVeerController _controller;
     private readonly NamedPipeCommandServer _pipeServer;
     private readonly OperationCoordinator _operations;
     private readonly DesiredConfigurationService _configurationService;
     private readonly RouteMutationRecovery _recovery;
-    private readonly ILogger<IranDirectWorker> _logger;
+    private readonly ILogger<PathVeerWorker> _logger;
 
-    public IranDirectWorker(
-        IranDirectController controller,
+    public PathVeerWorker(
+        PathVeerController controller,
         NamedPipeCommandServer pipeServer,
         OperationCoordinator operations,
         DesiredConfigurationService configurationService,
         RouteMutationRecovery recovery,
-        ILogger<IranDirectWorker> logger)
+        ILogger<PathVeerWorker> logger)
     {
         _controller = controller;
         _pipeServer = pipeServer;

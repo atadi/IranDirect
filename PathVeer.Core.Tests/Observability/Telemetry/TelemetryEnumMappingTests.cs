@@ -59,7 +59,7 @@ public sealed class TelemetryEnumMappingTests
     [Fact]
     public void Map_IranDirectCommand_EveryMember()
     {
-        foreach (IranDirectCommand command in Enum.GetValues<IranDirectCommand>())
+        foreach (PathVeerCommand command in Enum.GetValues<PathVeerCommand>())
         {
             string mapped = TelemetryOutcomeMapper.Map(command);
             Assert.Equal(command.ToString(), mapped);

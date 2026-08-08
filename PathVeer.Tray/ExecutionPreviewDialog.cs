@@ -20,7 +20,7 @@ public sealed class ExecutionPreviewDialog : Form
         ICustomRouteCommandSender? sender = null,
         Action<string>? showError = null)
     {
-        _sender = sender ?? new IranDirectServiceClient();
+        _sender = sender ?? new PathVeerServiceClient();
         _showError = showError;
 
         Text = "Preview Next Repair...";
@@ -102,7 +102,7 @@ public sealed class ExecutionPreviewDialog : Form
         {
             ServiceResponse response =
                 await _sender.SendAsync(
-                    IranDirectCommand.ExecutionPreview);
+                    PathVeerCommand.ExecutionPreview);
 
             if (!response.Success ||
                 response.Preview is null)

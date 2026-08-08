@@ -10,7 +10,7 @@ using PathVeer.Core.Vpn;
 
 public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
 {
-    private readonly IranDirectController _controller;
+    private readonly PathVeerController _controller;
     private readonly DesiredConfigurationService _configurationService;
     private readonly IRouteInventoryPersistence _routeInventory;
     private readonly CustomRouteDnsCacheService _dnsCacheService;
@@ -25,7 +25,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
     private readonly IFaultInjectionPolicy _faultPolicy;
 
     public RuntimeSnapshotProvider(
-        IranDirectController controller,
+        PathVeerController controller,
         DesiredConfigurationService configurationService,
         IRouteInventoryPersistence routeInventory,
         CustomRouteDnsCacheService dnsCacheService,
@@ -69,7 +69,7 @@ public sealed class RuntimeSnapshotProvider : IRuntimeSnapshotProvider
         DateTimeOffset capturedAt =
             _timeProvider.GetUtcNow();
 
-        IranDirectStatus runtime =
+        PathVeerStatus runtime =
             await _controller.GetStatusAsync(
                 cancellationToken);
 

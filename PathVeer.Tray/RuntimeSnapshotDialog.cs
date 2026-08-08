@@ -18,7 +18,7 @@ public sealed class RuntimeSnapshotDialog : Form
         ICustomRouteCommandSender? sender = null,
         Action<string>? showError = null)
     {
-        _sender = sender ?? new IranDirectServiceClient();
+        _sender = sender ?? new PathVeerServiceClient();
         _showError = showError;
 
         Text = "Runtime Snapshot";
@@ -90,7 +90,7 @@ public sealed class RuntimeSnapshotDialog : Form
         {
             ServiceResponse response =
                 await _sender.SendAsync(
-                    IranDirectCommand.RuntimeSnapshot);
+                    PathVeerCommand.RuntimeSnapshot);
 
             if (!response.Success || response.Snapshot is null)
             {

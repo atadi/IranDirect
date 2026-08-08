@@ -17,7 +17,7 @@ public sealed class TrayApplicationContext :
     private const int RunningPollIntervalMs = 15000;
     private const int TransitionalPollIntervalMs = 2000;
 
-    private readonly IranDirectServiceClient _client;
+    private readonly PathVeerServiceClient _client;
     private readonly IServiceLifecycle _serviceLifecycle;
     private readonly bool _isAdministrator;
 
@@ -56,7 +56,7 @@ public sealed class TrayApplicationContext :
 
     public TrayApplicationContext()
     {
-        _client = new IranDirectServiceClient();
+        _client = new PathVeerServiceClient();
 
         string binaryPath = Path.Combine(
             AppContext.BaseDirectory,
@@ -168,16 +168,16 @@ public sealed class TrayApplicationContext :
 
         _enableItem.Click +=
             async (_, _) =>
-                await ExecuteCommandAsync(IranDirectCommand.Enable);
+                await ExecuteCommandAsync(PathVeerCommand.Enable);
 
         _disableItem.Click +=
             async (_, _) =>
-                await ExecuteCommandAsync(IranDirectCommand.Disable);
+                await ExecuteCommandAsync(PathVeerCommand.Disable);
 
         _updateItem.Click +=
             async (_, _) =>
                 await ExecuteCommandAsync(
-                    IranDirectCommand.UpdatePrefixes);
+                    PathVeerCommand.UpdatePrefixes);
 
         _prefixUpdateCheckItem.Click +=
             async (_, _) =>
@@ -185,7 +185,7 @@ public sealed class TrayApplicationContext :
 
         _repairItem.Click +=
             async (_, _) =>
-                await ExecuteCommandAsync(IranDirectCommand.Repair);
+                await ExecuteCommandAsync(PathVeerCommand.Repair);
 
         _configItem.Click +=
             async (_, _) => await ShowConfigurationAsync();
@@ -240,7 +240,7 @@ public sealed class TrayApplicationContext :
 
         _notifyIcon = new NotifyIcon
         {
-            Text = "IranDirect",
+            Text = "PathVeer",
             Icon = LoadApplicationIcon(),
             ContextMenuStrip = menu,
             Visible = true
@@ -301,7 +301,7 @@ if (snapshot.Running)
             if (_prefixUpdateNotificationTracker.ShouldNotify)
             {
                 _prefixUpdateNotificationSink.NotifyBalloon(
-                    "IranDirect",
+                    "PathVeer",
                     "A newer Iran prefix dataset is available.");
 
                 _prefixUpdateNotificationTracker.MarkNotified();
@@ -324,7 +324,7 @@ if (snapshot.Running)
                 ? $"Service: {stateText}"
                 : $"Service: {stateText} (not elevated)";
 
-        _notifyIcon.Text = $"IranDirect — Service {stateText}";
+        _notifyIcon.Text = $"PathVeer — Service {stateText}";
 
         bool busy = _busy;
 
@@ -374,7 +374,7 @@ if (snapshot.Running)
         {
             MessageBox.Show(
                 exception.Message,
-                $"IranDirect — could not {verb} service",
+                $"PathVeer — could not {verb} service",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -390,9 +390,9 @@ finally
     {
         DialogResult result = MessageBox.Show(
             $"Administrator privileges are required to {verb} " +
-            "the IranDirect service.\n\n" +
+            "the PathVeer service.\n\n" +
             "Restart the tray as administrator?",
-            "IranDirect",
+            "PathVeer",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
 
@@ -425,7 +425,7 @@ finally
     }
 
     private async Task ExecuteCommandAsync(
-        IranDirectCommand command)
+        PathVeerCommand command)
     {
         if (_busy)
         {
@@ -443,7 +443,7 @@ finally
             {
                 MessageBox.Show(
                     response.Message,
-                    "IranDirect",
+                    "PathVeer",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
@@ -451,7 +451,7 @@ finally
             {
                 _notifyIcon.ShowBalloonTip(
                     3000,
-                    "IranDirect",
+                    "PathVeer",
                     response.Message,
                     ToolTipIcon.Info);
             }
@@ -460,7 +460,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect service unavailable",
+                "PathVeer service unavailable",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -487,13 +487,13 @@ finally
         {
             response =
                 await _client.SendAsync(
-                    IranDirectCommand.PrefixUpdateCheckNow);
+                    PathVeerCommand.PrefixUpdateCheckNow);
 
             if (!response.Success)
             {
                 MessageBox.Show(
                     response.Message,
-                    "IranDirect prefix update check",
+                    "PathVeer prefix update check",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
@@ -503,7 +503,7 @@ finally
                 MessageBox.Show(
                     "The service did not return prefix " +
                     "update monitor state.",
-                    "IranDirect prefix update check",
+                    "PathVeer prefix update check",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
@@ -512,7 +512,7 @@ finally
                 MessageBox.Show(
                     PrefixUpdateCheckResultFormatter
                         .BuildResultText(monitor),
-                    "IranDirect prefix update check",
+                    "PathVeer prefix update check",
                     MessageBoxButtons.OK,
                     PrefixUpdateCheckResultFormatter
                         .IsFailure(monitor)
@@ -524,7 +524,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect service unavailable",
+                "PathVeer service unavailable",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -555,7 +555,7 @@ finally
         try
         {
             ServiceResponse response =
-                await _client.SendAsync(IranDirectCommand.Status);
+                await _client.SendAsync(PathVeerCommand.Status);
 
             if (!response.Success ||
                 response.Status is null)
@@ -570,7 +570,7 @@ finally
             {
                 MessageBox.Show(
                     BuildStatusText(response.Status),
-                    "IranDirect status",
+                    "PathVeer status",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
@@ -585,7 +585,7 @@ finally
     }
 
     private void ApplyStatus(
-        IranDirectStatus status)
+        PathVeerStatus status)
     {
         _statusItem.Text =
             status.Enabled
@@ -642,8 +642,8 @@ finally
 
         _notifyIcon.Text =
             status.Enabled
-                ? "IranDirect — Enabled"
-                : "IranDirect — Disabled";
+                ? "PathVeer — Enabled"
+                : "PathVeer — Disabled";
     }
 
     private void SetRuntimeUnavailable(
@@ -675,11 +675,11 @@ finally
         _supportBundleItem.Enabled = false;
 
         if (!_notifyIcon.Text.StartsWith(
-                "IranDirect — Service",
+                "PathVeer — Service",
                 StringComparison.Ordinal))
         {
             _notifyIcon.Text =
-                "IranDirect — Service unavailable";
+                "PathVeer — Service unavailable";
         }
     }
 
@@ -722,14 +722,14 @@ finally
         {
             ServiceResponse response =
                 await _client.SendAsync(
-                    IranDirectCommand.SetConfigurationDirectCountry,
+                    PathVeerCommand.SetConfigurationDirectCountry,
                     code);
 
             if (!response.Success)
             {
                 MessageBox.Show(
                     response.Message,
-                    "IranDirect — country change failed",
+                    "PathVeer — country change failed",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
@@ -750,7 +750,7 @@ finally
             {
                 MessageBox.Show(
                     response.Message,
-                    "IranDirect — country set (dataset unavailable)",
+                    "PathVeer — country set (dataset unavailable)",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return;
@@ -762,7 +762,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect service unavailable",
+                "PathVeer service unavailable",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -774,14 +774,14 @@ finally
         {
             ServiceResponse response =
                 await _client.SendAsync(
-                    IranDirectCommand.GetConfiguration);
+                    PathVeerCommand.GetConfiguration);
 
             if (!response.Success ||
                 response.Configuration is null)
             {
                 MessageBox.Show(
                     response.Message,
-                    "IranDirect configuration",
+                    "PathVeer configuration",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
@@ -798,7 +798,7 @@ finally
                 $"Repair interval: {c.RepairInterval}\n" +
                 $"Auto update prefixes: {c.AutoUpdatePrefixes}\n" +
                 $"Prefix update interval: {c.PrefixUpdateInterval}",
-                "IranDirect configuration",
+                "PathVeer configuration",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
@@ -806,7 +806,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect service unavailable",
+                "PathVeer service unavailable",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -828,7 +828,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect custom routes",
+                "PathVeer custom routes",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -854,7 +854,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect runtime snapshot",
+                "PathVeer runtime snapshot",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -880,7 +880,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect execution preview",
+                "PathVeer execution preview",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -906,7 +906,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect diagnostics",
+                "PathVeer diagnostics",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -939,7 +939,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect support bundle",
+                "PathVeer support bundle",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -963,7 +963,7 @@ finally
         {
             MessageBox.Show(
                 exception.Message,
-                "IranDirect",
+                "PathVeer",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -989,7 +989,7 @@ finally
     }
 
     private static string BuildStatusText(
-        IranDirectStatus status)
+        PathVeerStatus status)
     {
         return
             $"Enabled: {status.Enabled}\n" +

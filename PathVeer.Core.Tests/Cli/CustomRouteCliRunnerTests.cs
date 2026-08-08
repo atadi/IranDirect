@@ -165,7 +165,7 @@ public sealed class CustomRouteCliRunnerTests
             (command, value, description) =>
             {
                 Assert.Equal(
-                    IranDirectCommand.CustomRoutesAddDomain,
+                    PathVeerCommand.CustomRoutesAddDomain,
                     command);
                 Assert.Equal("example.com", value);
                 Assert.Equal("my site", description);
@@ -199,7 +199,7 @@ public sealed class CustomRouteCliRunnerTests
             (command, _, _) =>
             {
                 Assert.Equal(
-                    IranDirectCommand.CustomRoutesCacheStatus,
+                    PathVeerCommand.CustomRoutesCacheStatus,
                     command);
 
                 return new ServiceResponse
@@ -237,7 +237,7 @@ public sealed class CustomRouteCliRunnerTests
             (command, value, _) =>
             {
                 Assert.Equal(
-                    IranDirectCommand.CustomRoutesInvalidateCache,
+                    PathVeerCommand.CustomRoutesInvalidateCache,
                     command);
                 Assert.Equal(id.ToString(), value);
 
@@ -265,7 +265,7 @@ public sealed class CustomRouteCliRunnerTests
             (command, value, _) =>
             {
                 Assert.Equal(
-                    IranDirectCommand.CustomRoutesInvalidateAllCaches,
+                    PathVeerCommand.CustomRoutesInvalidateAllCaches,
                     command);
                 Assert.Null(value);
 
@@ -343,14 +343,14 @@ public sealed class CustomRouteCliRunnerTests
     private sealed class FakeSender : ICustomRouteCommandSender
     {
         private readonly Func<
-            IranDirectCommand,
+            PathVeerCommand,
             string?,
             string?,
             ServiceResponse> _handler;
 
         public FakeSender(
             Func<
-                IranDirectCommand,
+                PathVeerCommand,
                 string?,
                 string?,
                 ServiceResponse> handler)
@@ -359,7 +359,7 @@ public sealed class CustomRouteCliRunnerTests
         }
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

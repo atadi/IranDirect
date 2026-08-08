@@ -8,7 +8,7 @@ using PathVeer.Core.Vpn;
 
 namespace PathVeer.Core.Diagnostics;
 
-public sealed class IranDirectDiagnosticsService
+public sealed class PathVeerDiagnosticsService
 {
     private readonly string _profilePath;
     private readonly CountryPrefixStore _prefixStore;
@@ -23,7 +23,7 @@ public sealed class IranDirectDiagnosticsService
     private readonly VpnEndpointRouteManager
         _endpointRouteManager;
 
-    public IranDirectDiagnosticsService(
+    public PathVeerDiagnosticsService(
         string profilePath,
         CountryPrefixStore prefixStore,
         Func<DirectCountryCode> countryResolver,
@@ -45,7 +45,7 @@ public sealed class IranDirectDiagnosticsService
         _endpointRouteManager = endpointRouteManager;
     }
 
-    public async Task<IranDirectDiagnostics> RunAsync(
+    public async Task<PathVeerDiagnostics> RunAsync(
         CancellationToken cancellationToken = default)
     {
         List<DiagnosticCheck> checks = [];
@@ -81,7 +81,7 @@ public sealed class IranDirectDiagnosticsService
                 .ToString()
             ?? "Unknown";
 
-        return new IranDirectDiagnostics
+        return new PathVeerDiagnostics
         {
             GeneratedAt = DateTimeOffset.UtcNow,
             Version = version,
@@ -96,7 +96,7 @@ public sealed class IranDirectDiagnosticsService
     {
         try
         {
-            IranDirectState state =
+            PathVeerState state =
                 await _stateRepository.LoadAsync(
                     cancellationToken);
 

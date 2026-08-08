@@ -61,7 +61,7 @@ public static class CountryCliRunner
         catch (Exception exception)
         {
             stderr.WriteLine(
-                $"IranDirect command failed: {exception.Message}");
+                $"PathVeer command failed: {exception.Message}");
             return ExitFailure;
         }
     }
@@ -73,7 +73,7 @@ public static class CountryCliRunner
     {
         ServiceResponse response =
             await sender.SendAsync(
-                IranDirectCommand.GetConfiguration);
+                PathVeerCommand.GetConfiguration);
 
         if (!response.Success || response.Configuration is null)
         {
@@ -107,14 +107,14 @@ public static class CountryCliRunner
             country is null)
         {
             stderr.WriteLine(
-                "Usage: IranDirect.Cli country set <ISO2>  " +
+                "Usage: PathVeer.Cli country set <ISO2>  " +
                 "(e.g. IR, IQ, RO)");
             return ExitUsage;
         }
 
         ServiceResponse response =
             await sender.SendAsync(
-                IranDirectCommand.SetConfigurationDirectCountry,
+                PathVeerCommand.SetConfigurationDirectCountry,
                 country.Code);
 
         if (!response.Success)
@@ -159,7 +159,7 @@ public static class CountryCliRunner
     private static int Usage(TextWriter stderr)
     {
         stderr.WriteLine(
-            "Usage: IranDirect.Cli country <get|set|list>");
+            "Usage: PathVeer.Cli country <get|set|list>");
         stderr.WriteLine("  country get");
         stderr.WriteLine("  country set <ISO2>   (e.g. IR, IQ, RO)");
         stderr.WriteLine("  country list");

@@ -13,7 +13,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 ///
 /// This instruments exactly one production operation — the single invocation of
 /// <c>IRuntimeExecutor.ExecuteAsync</c> inside the runtime-cycle orchestration
-/// (see <c>IranDirectController.RunCycleCoreAsync</c>). It does NOT instrument
+/// (see <c>PathVeerController.RunCycleCoreAsync</c>). It does NOT instrument
 /// the executor implementation, per-step loops, prefix-group mutation loops,
 /// route handler implementations, or individual execution handlers.
 ///

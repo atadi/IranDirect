@@ -25,7 +25,7 @@ public sealed class RuntimeCycleTelemetryCollection
 
 /// <summary>
 /// Runtime-cycle telemetry instrumentation tests. Reuses the production
-/// <see cref="IranDirectController"/> with lightweight fakes and captures the
+/// <see cref="PathVeerController"/> with lightweight fakes and captures the
 /// root activity + metrics via BCL <see cref="ActivityListener"/> and
 /// <see cref="MeterListener"/> only. No OpenTelemetry packages.
 ///
@@ -42,7 +42,7 @@ public sealed class RuntimeCycleTelemetryTests
 
         public StateRepository StateRepository { get; }
         public RouteInventoryStore RouteInventoryStore { get; }
-        public IranDirectController Controller { get; }
+        public PathVeerController Controller { get; }
         public IranDirectControllerTests.FakeExecutor FakeExecutor { get; }
         public IranDirectControllerTests.FakeDecisionBuilder FakeDecisionBuilder { get; }
         public RuntimeOperationStatus OperationStatus { get; }
@@ -90,7 +90,7 @@ public sealed class RuntimeCycleTelemetryTests
 
             SetDesiredEnabled(configService, true);
 
-            Controller = new IranDirectController(
+            Controller = new PathVeerController(
                 null!,
                 new CountryPrefixStore(_tempDir),
                 gatewayDetector,

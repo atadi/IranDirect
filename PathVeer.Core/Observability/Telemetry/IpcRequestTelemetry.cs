@@ -6,7 +6,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 
 /// <summary>
 /// IPC request/response telemetry: one <c>IranDirect.IpcRequest</c> client root
-/// Activity per <see cref="IranDirectServiceClient.SendAsync"/> attempt, with
+/// Activity per <see cref="PathVeerServiceClient.SendAsync"/> attempt, with
 /// <c>Ipc.Connect</c>, <c>Ipc.Send</c>, and <c>Ipc.Receive</c> child Activities
 /// created only around the operations that actually execute. Exactly one
 /// <c>irandirect.ipc.requests</c> counter increment and one
@@ -35,7 +35,7 @@ public static class IpcRequestTelemetry
             unit: "ms",
             description: "Elapsed client-owned time of one IPC request.");
 
-    internal static IpcRequestScope Start(IranDirectCommand command)
+    internal static IpcRequestScope Start(PathVeerCommand command)
     {
         Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
             IranDirectActivityNames.IpcRequest,

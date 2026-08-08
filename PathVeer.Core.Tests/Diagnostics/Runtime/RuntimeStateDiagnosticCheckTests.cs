@@ -7,19 +7,19 @@ namespace PathVeer.Core.Tests.Diagnostics.Runtime;
 public sealed class RuntimeStateDiagnosticCheckTests
 {
     private sealed class FakeStatusProvider :
-        IIranDirectStatusProvider
+        IPathVeerStatusProvider
     {
         private readonly Func<CancellationToken,
-            Task<IranDirectStatus>> _handler;
+            Task<PathVeerStatus>> _handler;
 
         public FakeStatusProvider(
             Func<CancellationToken,
-                Task<IranDirectStatus>> handler)
+                Task<PathVeerStatus>> handler)
         {
             _handler = handler;
         }
 
-        public Task<IranDirectStatus> GetStatusAsync(
+        public Task<PathVeerStatus> GetStatusAsync(
             CancellationToken cancellationToken = default)
         {
             return _handler(cancellationToken);
@@ -27,9 +27,9 @@ public sealed class RuntimeStateDiagnosticCheckTests
     }
 
     private sealed class ThrowingStatusProvider :
-        IIranDirectStatusProvider
+        IPathVeerStatusProvider
     {
-        public Task<IranDirectStatus> GetStatusAsync(
+        public Task<PathVeerStatus> GetStatusAsync(
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException(
@@ -37,7 +37,7 @@ public sealed class RuntimeStateDiagnosticCheckTests
         }
     }
 
-    private static IranDirectStatus ValidStatus() =>
+    private static PathVeerStatus ValidStatus() =>
         new()
         {
             Enabled = false,
@@ -68,7 +68,7 @@ public sealed class RuntimeStateDiagnosticCheckTests
     {
         var check = new RuntimeStateDiagnosticCheck(
             new FakeStatusProvider(
-                _ => Task.FromResult<IranDirectStatus>(null!)));
+                _ => Task.FromResult<PathVeerStatus>(null!)));
 
         DiagnosticResult result = await check.CheckAsync(
             CancellationToken.None);
@@ -81,7 +81,7 @@ public sealed class RuntimeStateDiagnosticCheckTests
     [Fact]
     public async Task CheckAsync_NullDesiredEnabled_ReturnsFailed()
     {
-        IranDirectStatus status =
+        PathVeerStatus status =
             ValidStatus() with { DesiredEnabled = null };
 
         var check = new RuntimeStateDiagnosticCheck(
@@ -98,7 +98,7 @@ public sealed class RuntimeStateDiagnosticCheckTests
     [Fact]
     public async Task CheckAsync_DesiredEnabledButDisabled_ReturnsWarning()
     {
-        IranDirectStatus status = ValidStatus() with
+        PathVeerStatus status = ValidStatus() with
         {
             DesiredEnabled = true,
             Enabled = false,
@@ -124,7 +124,7 @@ public sealed class RuntimeStateDiagnosticCheckTests
     [Fact]
     public async Task CheckAsync_DesiredDisabledButEnabled_ReturnsWarning()
     {
-        IranDirectStatus status = ValidStatus() with
+        PathVeerStatus status = ValidStatus() with
         {
             DesiredEnabled = false,
             Enabled = true,
@@ -149,7 +149,7 @@ public sealed class RuntimeStateDiagnosticCheckTests
     [Fact]
     public async Task CheckAsync_OperationInProgress_ReturnsPassed()
     {
-        IranDirectStatus status = ValidStatus() with
+        PathVeerStatus status = ValidStatus() with
         {
             Enabled = true,
             DesiredEnabled = true,

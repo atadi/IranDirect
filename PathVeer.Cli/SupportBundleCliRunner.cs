@@ -32,7 +32,7 @@ public static class SupportBundleCliRunner
         if (!parsed.IsValid)
         {
             stderr.WriteLine(
-                "Usage: IranDirect.Cli support-bundle [<path>]");
+                "Usage: PathVeer.Cli support-bundle [<path>]");
             if (!string.IsNullOrWhiteSpace(parsed.Error))
             {
                 stderr.WriteLine($"Error: {parsed.Error}");

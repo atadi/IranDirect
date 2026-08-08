@@ -205,7 +205,7 @@ public sealed class RuntimeSnapshotProviderTests
     {
         await using Fixture fixture = Fixture.Create();
         await fixture.StateRepository.SaveAsync(
-            new IranDirectState
+            new PathVeerState
             {
                 Enabled = false,
                 LastError = "boom"
@@ -231,7 +231,7 @@ public sealed class RuntimeSnapshotProviderTests
 
         DesiredConfiguration config =
             await fixture.ConfigurationService.GetAsync();
-        IranDirectState state =
+        PathVeerState state =
             await fixture.StateRepository.LoadAsync();
         RouteInventory inventory =
             await fixture.RouteInventoryStore.LoadAsync();
@@ -668,7 +668,7 @@ public sealed class RuntimeSnapshotProviderTests
             VpnEndpointRouteManager vpnRouteManager =
                 new(routeManager);
 
-            IranDirectController controller = new(
+            PathVeerController controller = new(
                 null!,
                 prefixStore,
                 gatewayDetector,

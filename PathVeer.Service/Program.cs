@@ -23,7 +23,7 @@ builder.Services.AddWindowsService(options =>
 
 // The application dependency graph lives in ServiceCompositionRoot so that the
 // Service composition tests exercise the exact registrations the host uses.
-builder.Services.AddIranDirectServiceComposition(
+builder.Services.AddPathVeerServiceComposition(
     builder.Configuration,
     dataDirectory);
 

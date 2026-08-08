@@ -56,7 +56,7 @@ public static class SupportBundleDefaultFileName
                 .ToLocalTime();
 
         string fileName =
-            $"IranDirect-Support-{stamp:yyyyMMdd-HHmmss}.zip";
+            $"PathVeer-Support-{stamp:yyyyMMdd-HHmmss}.zip";
 
         return fileName;
     }

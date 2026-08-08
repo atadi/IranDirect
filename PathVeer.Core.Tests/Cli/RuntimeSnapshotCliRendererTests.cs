@@ -395,7 +395,7 @@ public sealed class RuntimeSnapshotCliRendererTests
                 VpnProfilePath = "vpn-profile.ovpn",
                 AutoRepair = true
             },
-            Runtime = new IranDirectStatus
+            Runtime = new PathVeerStatus
             {
                 Enabled = true
             },

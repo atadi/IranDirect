@@ -32,7 +32,7 @@ namespace PathVeer.Service;
 ///
 /// This is the single definition of the Service's dependency graph. Both
 /// <c>Program.cs</c> and the Service composition tests call
-/// <see cref="AddIranDirectServiceComposition"/>, so a registration defect
+/// <see cref="AddPathVeerServiceComposition"/>, so a registration defect
 /// cannot exist in the shipped host without also failing the tests.
 ///
 /// Host-specific concerns (Windows Service lifetime, telemetry export
@@ -48,7 +48,7 @@ public static class ServiceCompositionRoot
     /// <param name="dataDirectory">
     /// Directory holding IranDirect state files. The caller owns creating it.
     /// </param>
-    public static IServiceCollection AddIranDirectServiceComposition(
+    public static IServiceCollection AddPathVeerServiceComposition(
         this IServiceCollection services,
         IConfiguration configuration,
         string dataDirectory)
@@ -302,10 +302,10 @@ public static class ServiceCompositionRoot
         });
 
         services.AddSingleton<VpnEndpointRouteManager>();
-        services.AddSingleton<IranDirectController>();
-        services.AddSingleton<IIranDirectStatusProvider>(
+        services.AddSingleton<PathVeerController>();
+        services.AddSingleton<IPathVeerStatusProvider>(
             serviceProvider =>
-                serviceProvider.GetRequiredService<IranDirectController>());
+                serviceProvider.GetRequiredService<PathVeerController>());
 
         services.AddSingleton<
             DesiredConfigurationDiagnosticCheck>();
@@ -364,7 +364,7 @@ public static class ServiceCompositionRoot
 
         services.AddSingleton(
             serviceProvider =>
-                new IranDirectDiagnosticsService(
+                new PathVeerDiagnosticsService(
                     Path.Combine(
                         dataDirectory,
                         "vpn-profile.ovpn"),
@@ -386,7 +386,7 @@ public static class ServiceCompositionRoot
                         VpnEndpointRouteManager>()));
         services.AddSingleton<IRuntimeObservationSource>(
             serviceProvider =>
-                new IranDirectRuntimeObservationSource(
+                new PathVeerRuntimeObservationSource(
                     Path.Combine(
                         dataDirectory,
                         "vpn-profile.ovpn"),
@@ -484,7 +484,7 @@ public static class ServiceCompositionRoot
                         SupportSnapshotExporter>()));
         services.AddSingleton<SupportBundleCommandHandler>();
         services.AddSingleton<NamedPipeCommandServer>();
-        services.AddHostedService<IranDirectWorker>();
+        services.AddHostedService<PathVeerWorker>();
 
         return services;
     }

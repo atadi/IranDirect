@@ -267,7 +267,7 @@ public sealed class DiagnosticReportEquivalenceTests
 
         string json = JsonSerializer.Serialize(
             report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         using JsonDocument doc = JsonDocument.Parse(json);
         JsonElement root = doc.RootElement;
@@ -291,7 +291,7 @@ public sealed class DiagnosticReportEquivalenceTests
 
         string json = JsonSerializer.Serialize(
             report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         int summaryCount = 0;
         using JsonDocument doc = JsonDocument.Parse(json);
@@ -320,10 +320,10 @@ public sealed class DiagnosticReportEquivalenceTests
 
         string first = JsonSerializer.Serialize(
             report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
         string second = JsonSerializer.Serialize(
             report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         Assert.Equal(first, second);
     }
@@ -342,7 +342,7 @@ public sealed class DiagnosticReportEquivalenceTests
 
         string json = JsonSerializer.Serialize(
             report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         using JsonDocument doc = JsonDocument.Parse(json);
         JsonElement results = doc.RootElement.GetProperty("Results");
@@ -360,7 +360,7 @@ public sealed class DiagnosticReportEquivalenceTests
 
         string json = JsonSerializer.Serialize(
             report,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         using JsonDocument doc = JsonDocument.Parse(json);
         Assert.Equal(
@@ -380,11 +380,11 @@ public sealed class DiagnosticReportEquivalenceTests
 
         string json = JsonSerializer.Serialize(
             response,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         ServiceResponse? round = JsonSerializer.Deserialize<ServiceResponse>(
             json,
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         Assert.NotNull(round);
         Assert.NotNull(round!.Report);

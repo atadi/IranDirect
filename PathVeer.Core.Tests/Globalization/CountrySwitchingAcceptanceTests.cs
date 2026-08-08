@@ -20,7 +20,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 /// Phase 35.4 - Country switching & offline-state acceptance.
 ///
 /// Drives the REAL production pipeline end-to-end against in-memory fakes:
-///   IranDirectController -> RuntimeCycleCoordinator
+///   PathVeerController -> RuntimeCycleCoordinator
 ///     -> RuntimeDecisionBuilder -> RuntimeCoordinator(RuntimeObserver,
 ///        RuntimePlanner) + RuntimeReconciler(RuntimeRouteOwnershipProvider,
 ///        RuntimeChangeSetPlanner) -> RuntimeExecutor(WindowsRuntimeExecutionStepHandler)
@@ -793,7 +793,7 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
                     .GetAsync(CancellationToken.None)
                     .GetAwaiter().GetResult().DirectCountryCode!;
 
-            IranDirectRuntimeObservationSource observationSource = new(
+            PathVeerRuntimeObservationSource observationSource = new(
                 _profilePath,
                 vpnProvider,
                 gatewayDetector,
@@ -831,7 +831,7 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
 
             MetadataService = new PrefixSourceMetadataService(PrefixStore);
 
-            Controller = new IranDirectController(
+            Controller = new PathVeerController(
                 PrefixSource,
                 PrefixStore,
                 gatewayDetector,
@@ -861,7 +861,7 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
         public RouteInventoryStore RouteInventory { get; }
         public VpnEndpointInventoryStore EndpointInventory { get; }
 
-        public IranDirectController Controller { get; }
+        public PathVeerController Controller { get; }
 
         public IRouteMutationJournal Journal => _journal;
 
@@ -914,7 +914,7 @@ public sealed class CountrySwitchingAcceptanceTests : IAsyncDisposable
         /// Persists ONLY the requested country (the new 35.5 country-set
         /// contract) without triggering a prefix fetch. This lets integration
         /// tests drive the refresh step explicitly via
-        /// <see cref="IranDirectController.UpdatePrefixesAsync"/>, mirroring
+        /// <see cref="PathVeerController.UpdatePrefixesAsync"/>, mirroring
         /// how the IPC command handler orders persist -> refresh -> reconcile.
         /// </summary>
         public Task SetCountryAsync(DirectCountryCode country) =>

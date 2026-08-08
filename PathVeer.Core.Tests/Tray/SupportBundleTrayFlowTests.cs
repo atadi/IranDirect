@@ -24,7 +24,7 @@ public sealed class SupportBundleTrayFlowTests
             new FixedTimeProvider(FixedTime));
 
         Assert.Equal(
-            [IranDirectCommand.SupportBundleExport],
+            [PathVeerCommand.SupportBundleExport],
             sender.Commands);
         Assert.Equal(
             "C:\\bundle.zip",
@@ -274,12 +274,12 @@ public sealed class SupportBundleTrayFlowTests
 
         public int CallCount { get; private set; }
 
-        public List<IranDirectCommand> Commands { get; } = [];
+        public List<PathVeerCommand> Commands { get; } = [];
 
         public string? LastValue { get; private set; }
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)
@@ -308,7 +308,7 @@ public sealed class SupportBundleTrayFlowTests
         }
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

@@ -78,17 +78,17 @@ public static class CustomRouteDialogModel
         CidrLabel
     ];
 
-    public static IranDirectCommand GetAddCommand(
+    public static PathVeerCommand GetAddCommand(
         CustomRouteEntryType type)
     {
         return type switch
         {
             CustomRouteEntryType.Domain =>
-                IranDirectCommand.CustomRoutesAddDomain,
+                PathVeerCommand.CustomRoutesAddDomain,
             CustomRouteEntryType.IpAddress =>
-                IranDirectCommand.CustomRoutesAddIp,
+                PathVeerCommand.CustomRoutesAddIp,
             CustomRouteEntryType.Cidr =>
-                IranDirectCommand.CustomRoutesAddCidr,
+                PathVeerCommand.CustomRoutesAddCidr,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(type))
         };
@@ -140,12 +140,12 @@ public static class CustomRouteDialogModel
         row is not null &&
         row.Type == CustomRouteEntryType.Domain;
 
-    public static IranDirectCommand GetInvalidateCommand(
+    public static PathVeerCommand GetInvalidateCommand(
         bool all)
     {
         return all
-            ? IranDirectCommand.CustomRoutesInvalidateAllCaches
-            : IranDirectCommand.CustomRoutesInvalidateCache;
+            ? PathVeerCommand.CustomRoutesInvalidateAllCaches
+            : PathVeerCommand.CustomRoutesInvalidateCache;
     }
 
     public static string FormatCacheAddresses(

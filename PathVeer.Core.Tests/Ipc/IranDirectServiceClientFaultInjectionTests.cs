@@ -11,14 +11,14 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_NamedPipeSendFault_ExposesCorrectPoint()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
 
         FaultInjectionException exception =
             await Assert.ThrowsAsync<FaultInjectionException>(
-                () => client.SendAsync(IranDirectCommand.Status));
+                () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Equal(
             FaultInjectionPoint.NamedPipeSend,
@@ -29,13 +29,13 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_NamedPipeSendFault_ZeroConnectionAttempts()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
 
         await Assert.ThrowsAsync<FaultInjectionException>(
-            () => client.SendAsync(IranDirectCommand.Status));
+            () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Equal(0, factory.ConnectCallCount);
         Assert.Null(factory.LastConnection);
@@ -45,13 +45,13 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_NamedPipeSendFault_ZeroWriteAttempts()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
 
         await Assert.ThrowsAsync<FaultInjectionException>(
-            () => client.SendAsync(IranDirectCommand.Status));
+            () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Null(factory.LastConnection);
         Assert.Equal(0, factory.ConnectCallCount);
@@ -62,14 +62,14 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_NamedPipeSendFault_DoesNotRetry()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
 
         FaultInjectionException exception =
             await Assert.ThrowsAsync<FaultInjectionException>(
-                () => client.SendAsync(IranDirectCommand.Status));
+                () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Equal(
             FaultInjectionPoint.NamedPipeSend,
@@ -82,7 +82,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_NextUnfaultedSend_Succeeds()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         FaultInjectionException exception;
         using (FaultInjectionScope scope =
@@ -90,7 +90,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
                 FaultInjectionPoint.NamedPipeSend))
         {
             exception = await Assert.ThrowsAsync<FaultInjectionException>(
-                () => client.SendAsync(IranDirectCommand.Status));
+                () => client.SendAsync(PathVeerCommand.Status));
         }
 
         Assert.Equal(
@@ -99,7 +99,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
         Assert.Equal(0, factory.ConnectCallCount);
 
         ServiceResponse response =
-            await client.SendAsync(IranDirectCommand.Status);
+            await client.SendAsync(PathVeerCommand.Status);
 
         Assert.True(response.Success);
         Assert.Equal(1, factory.ConnectCallCount);
@@ -111,13 +111,13 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_UnrelatedFaultPoint_HasNoEffect()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.HttpRequest]));
 
         ServiceResponse response =
-            await client.SendAsync(IranDirectCommand.Status);
+            await client.SendAsync(PathVeerCommand.Status);
 
         Assert.True(response.Success);
         Assert.Equal(1, factory.ConnectCallCount);
@@ -128,14 +128,14 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_InjectedPolicy_WorksWithoutAmbientScope()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
 
         FaultInjectionException exception =
             await Assert.ThrowsAsync<FaultInjectionException>(
-                () => client.SendAsync(IranDirectCommand.Status));
+                () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Equal(
             FaultInjectionPoint.NamedPipeSend,
@@ -147,14 +147,14 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_AmbientScope_OverridesInjectedPolicy_TriggersFault()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         using (FaultInjectionScope scope =
             FaultInjectionScope.Fail(
                 FaultInjectionPoint.NamedPipeSend))
         {
             await Assert.ThrowsAsync<FaultInjectionException>(
-                () => client.SendAsync(IranDirectCommand.Status));
+                () => client.SendAsync(PathVeerCommand.Status));
         }
 
         Assert.Equal(0, factory.ConnectCallCount);
@@ -164,7 +164,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_AmbientScope_OverridesInjectedPolicy_SuppressesFault()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
@@ -174,7 +174,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
                 FaultInjectionPoint.HttpRequest))
         {
             ServiceResponse response =
-                await client.SendAsync(IranDirectCommand.Status);
+                await client.SendAsync(PathVeerCommand.Status);
 
             Assert.True(response.Success);
         }
@@ -187,7 +187,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_NestedScopes_InnerScopeTriggersCorrectPoint()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         using (FaultInjectionScope outer =
             FaultInjectionScope.Fail(
@@ -199,7 +199,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
             {
                 FaultInjectionException exception =
                     await Assert.ThrowsAsync<FaultInjectionException>(
-                        () => client.SendAsync(IranDirectCommand.Status));
+                        () => client.SendAsync(PathVeerCommand.Status));
 
                 Assert.Equal(
                     FaultInjectionPoint.NamedPipeSend,
@@ -214,7 +214,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_NestedScopes_UnselectedInnerScope_NoFault()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         using (FaultInjectionScope outer =
             FaultInjectionScope.Fail(
@@ -225,7 +225,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
                     FaultInjectionPoint.HttpRequest))
             {
                 ServiceResponse response =
-                    await client.SendAsync(IranDirectCommand.Status);
+                    await client.SendAsync(PathVeerCommand.Status);
 
                 Assert.True(response.Success);
             }
@@ -238,7 +238,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_ScopeDisposal_PreventsLeakage()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         FaultInjectionScope scope =
             FaultInjectionScope.Fail(
@@ -246,7 +246,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
         scope.Dispose();
 
         ServiceResponse response =
-            await client.SendAsync(IranDirectCommand.Status);
+            await client.SendAsync(PathVeerCommand.Status);
 
         Assert.True(response.Success);
         Assert.Equal(1, factory.ConnectCallCount);
@@ -266,11 +266,11 @@ public sealed class IranDirectServiceClientFaultInjectionTests
                     new FakeNamedPipeClientConnection(
                         SuccessResponseLine()));
             });
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => client.SendAsync(
-                IranDirectCommand.Status,
+                PathVeerCommand.Status,
                 cancellationToken: callerCts.Token));
 
         Assert.Equal(1, factory.ConnectCallCount);
@@ -283,11 +283,11 @@ public sealed class IranDirectServiceClientFaultInjectionTests
             cancellationToken =>
                 throw new OperationCanceledException(
                     cancellationToken));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         TimeoutException exception =
             await Assert.ThrowsAsync<TimeoutException>(
-                () => client.SendAsync(IranDirectCommand.Status));
+                () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Equal(
             "IranDirect Service is unavailable or did not " +
@@ -306,11 +306,11 @@ public sealed class IranDirectServiceClientFaultInjectionTests
             cancellationToken =>
                 throw new OperationCanceledException(
                     cancellationToken));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => client.SendAsync(
-                IranDirectCommand.Status,
+                PathVeerCommand.Status,
                 cancellationToken: callerCts.Token));
 
         Assert.Equal(1, factory.ConnectCallCount);
@@ -320,10 +320,10 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_RequestSerialization_UnchangedWithoutFaults()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = await client.SendAsync(
-            IranDirectCommand.CustomRoutesAddDomain,
+            PathVeerCommand.CustomRoutesAddDomain,
             value: "example.com",
             description: "my site");
 
@@ -333,11 +333,11 @@ public sealed class IranDirectServiceClientFaultInjectionTests
         string expected = JsonSerializer.Serialize(
             new ServiceRequest
             {
-                Command = IranDirectCommand.CustomRoutesAddDomain,
+                Command = PathVeerCommand.CustomRoutesAddDomain,
                 Value = "example.com",
                 Description = "my site"
             },
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
         Assert.Equal(
             expected,
@@ -349,10 +349,10 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     {
         FakeNamedPipeClientFactory factory = CreateFactory(
             responseLine: "null");
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response =
-            await client.SendAsync(IranDirectCommand.Status);
+            await client.SendAsync(PathVeerCommand.Status);
 
         Assert.False(response.Success);
         Assert.Equal("INVALID_RESPONSE", response.ErrorCode);
@@ -367,10 +367,10 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_EmptyResponseLine_ThrowsJsonException()
     {
         FakeNamedPipeClientFactory factory = new();
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<JsonException>(
-            () => client.SendAsync(IranDirectCommand.Status));
+            () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Equal(1, factory.ConnectCallCount);
         Assert.Equal(1, factory.LastConnection!.ReadCallCount);
@@ -381,49 +381,49 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     {
         FakeDispatcher dispatcher = new();
         FakeNamedPipeClientFactory factory = CreateDispatcherFactory(dispatcher);
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         using (FaultInjectionScope scope =
             FaultInjectionScope.Fail(
                 FaultInjectionPoint.NamedPipeSend))
         {
             await Assert.ThrowsAsync<FaultInjectionException>(
-                () => client.SendAsync(IranDirectCommand.Status));
+                () => client.SendAsync(PathVeerCommand.Status));
         }
 
         Assert.Empty(dispatcher.ReceivedRequests);
         Assert.Equal(0, factory.ConnectCallCount);
 
         ServiceResponse response =
-            await client.SendAsync(IranDirectCommand.Status);
+            await client.SendAsync(PathVeerCommand.Status);
 
         Assert.True(response.Success);
         string line = Assert.Single(dispatcher.ReceivedRequests);
         ServiceRequest request =
             JsonSerializer.Deserialize<ServiceRequest>(
                 line,
-                IranDirectJson.Options)!;
-        Assert.Equal(IranDirectCommand.Status, request.Command);
+                PathVeerJson.Options)!;
+        Assert.Equal(PathVeerCommand.Status, request.Command);
         Assert.Equal(1, factory.ConnectCallCount);
     }
 
     [Fact]
     public async Task SendAsync_DifferentCommands_AreUnaffectedByFaultMechanism()
     {
-        IranDirectCommand[] commands =
+        PathVeerCommand[] commands =
         [
-            IranDirectCommand.Status,
-            IranDirectCommand.CustomRoutesList,
-            IranDirectCommand.Enable,
-            IranDirectCommand.UpdatePrefixes,
-            IranDirectCommand.ExecutionPreview
+            PathVeerCommand.Status,
+            PathVeerCommand.CustomRoutesList,
+            PathVeerCommand.Enable,
+            PathVeerCommand.UpdatePrefixes,
+            PathVeerCommand.ExecutionPreview
         ];
 
-        foreach (IranDirectCommand command in commands)
+        foreach (PathVeerCommand command in commands)
         {
             FakeNamedPipeClientFactory factory =
                 CreateFactory(SuccessResponseLine());
-            IranDirectServiceClient client = CreateClient(factory);
+            PathVeerServiceClient client = CreateClient(factory);
 
             using (FaultInjectionScope scope =
                 FaultInjectionScope.Fail(
@@ -442,7 +442,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
             ServiceRequest sent =
                 JsonSerializer.Deserialize<ServiceRequest>(
                     factory.LastConnection!.WrittenLines.Single(),
-                    IranDirectJson.Options)!;
+                    PathVeerJson.Options)!;
             Assert.Equal(command, sent.Command);
         }
     }
@@ -454,16 +454,16 @@ public sealed class IranDirectServiceClientFaultInjectionTests
         FakeNamedPipeClientFactory healthyFactory =
             CreateFactory(SuccessResponseLine());
 
-        IranDirectServiceClient faultedClient = CreateClient(
+        PathVeerServiceClient faultedClient = CreateClient(
             faultedFactory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
-        IranDirectServiceClient healthyClient = CreateClient(healthyFactory);
+        PathVeerServiceClient healthyClient = CreateClient(healthyFactory);
 
         Task<ServiceResponse> faultedTask =
-            faultedClient.SendAsync(IranDirectCommand.Status);
+            faultedClient.SendAsync(PathVeerCommand.Status);
         Task<ServiceResponse> healthyTask =
-            healthyClient.SendAsync(IranDirectCommand.Enable);
+            healthyClient.SendAsync(PathVeerCommand.Enable);
 
         FaultInjectionException exception =
             await Assert.ThrowsAsync<FaultInjectionException>(
@@ -480,8 +480,8 @@ public sealed class IranDirectServiceClientFaultInjectionTests
         ServiceRequest sent =
             JsonSerializer.Deserialize<ServiceRequest>(
                 healthyFactory.LastConnection!.WrittenLines.Single(),
-                IranDirectJson.Options)!;
-        Assert.Equal(IranDirectCommand.Enable, sent.Command);
+                PathVeerJson.Options)!;
+        Assert.Equal(PathVeerCommand.Enable, sent.Command);
     }
 
     [Fact]
@@ -501,10 +501,10 @@ public sealed class IranDirectServiceClientFaultInjectionTests
 
         FakeNamedPipeClientFactory factory =
             CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response =
-            await client.SendAsync(IranDirectCommand.Status);
+            await client.SendAsync(PathVeerCommand.Status);
 
         Assert.True(response.Success);
         Assert.Equal(1, factory.ConnectCallCount);
@@ -526,14 +526,14 @@ public sealed class IranDirectServiceClientFaultInjectionTests
         FakeNamedPipeClientFactory immediateFactory =
             CreateFactory(SuccessResponseLine());
 
-        IranDirectServiceClient gatedClient = CreateClient(gatedFactory);
-        IranDirectServiceClient immediateClient =
+        PathVeerServiceClient gatedClient = CreateClient(gatedFactory);
+        PathVeerServiceClient immediateClient =
             CreateClient(immediateFactory);
 
         Task<ServiceResponse> gatedTask =
-            gatedClient.SendAsync(IranDirectCommand.Status);
+            gatedClient.SendAsync(PathVeerCommand.Status);
         Task<ServiceResponse> immediateTask =
-            immediateClient.SendAsync(IranDirectCommand.Status);
+            immediateClient.SendAsync(PathVeerCommand.Status);
 
         ServiceResponse immediateResponse = await immediateTask;
 
@@ -553,9 +553,9 @@ public sealed class IranDirectServiceClientFaultInjectionTests
     public async Task SendAsync_SuccessfulSend_DisposesConnection()
     {
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
-        await client.SendAsync(IranDirectCommand.Status);
+        await client.SendAsync(PathVeerCommand.Status);
 
         FakeNamedPipeClientConnection connection =
             factory.LastConnection!;
@@ -571,10 +571,10 @@ public sealed class IranDirectServiceClientFaultInjectionTests
                 Task.FromResult<INamedPipeClientConnection>(
                     new FakeNamedPipeClientConnection(
                         throwOnRead: true)));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<IOException>(
-            () => client.SendAsync(IranDirectCommand.Status));
+            () => client.SendAsync(PathVeerCommand.Status));
 
         FakeNamedPipeClientConnection connection =
             factory.LastConnection!;
@@ -591,10 +591,10 @@ public sealed class IranDirectServiceClientFaultInjectionTests
                 Task.FromResult<INamedPipeClientConnection>(
                     new FakeNamedPipeClientConnection(
                         throwOnWrite: true)));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<IOException>(
-            () => client.SendAsync(IranDirectCommand.Status));
+            () => client.SendAsync(PathVeerCommand.Status));
 
         FakeNamedPipeClientConnection connection =
             factory.LastConnection!;
@@ -604,7 +604,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
         Assert.Equal(0, connection.ReadCallCount);
     }
 
-    private static IranDirectServiceClient CreateClient(
+    private static PathVeerServiceClient CreateClient(
         FakeNamedPipeClientFactory factory,
         IFaultInjectionPolicy? faultPolicy = null) =>
         new(factory, faultPolicy);
@@ -633,7 +633,7 @@ public sealed class IranDirectServiceClientFaultInjectionTests
                 Success = true,
                 Message = "ok."
             },
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
     private sealed class FakeNamedPipeClientFactory :
         INamedPipeClientFactory

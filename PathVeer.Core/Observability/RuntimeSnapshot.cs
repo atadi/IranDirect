@@ -15,7 +15,7 @@ public sealed record RuntimeSnapshot
 
     public DesiredConfiguration? Configuration { get; init; }
 
-    public IranDirectStatus? Runtime { get; init; }
+    public PathVeerStatus? Runtime { get; init; }
 
     public RuntimeOperationSnapshot? Operation { get; init; }
 

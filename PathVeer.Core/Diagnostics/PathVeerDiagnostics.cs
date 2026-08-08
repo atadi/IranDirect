@@ -1,6 +1,6 @@
 namespace PathVeer.Core.Diagnostics;
 
-public sealed record IranDirectDiagnostics
+public sealed record PathVeerDiagnostics
 {
     public DateTimeOffset GeneratedAt { get; init; }
 

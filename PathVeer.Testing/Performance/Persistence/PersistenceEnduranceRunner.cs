@@ -140,11 +140,11 @@ public static class PersistenceEnduranceRunner
 
         for (int i = 0; i < cycles; i++)
         {
-            IranDirectState state = PersistenceEnduranceFixtures.State(i);
+            PathVeerState state = PersistenceEnduranceFixtures.State(i);
 
             await store.SaveAsync(state, cancellationToken);
 
-            IranDirectState loaded =
+            PathVeerState loaded =
                 await store.LoadAsync(cancellationToken);
 
             if (state != loaded)

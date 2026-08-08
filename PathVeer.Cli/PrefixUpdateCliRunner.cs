@@ -27,7 +27,7 @@ public static class PrefixUpdateCliRunner
         if (subcommand != "check" || args.Length > 1)
         {
             stderr.WriteLine(
-                "Usage: IranDirect.Cli prefix-update check");
+                "Usage: PathVeer.Cli prefix-update check");
             return ExitUsage;
         }
 
@@ -35,7 +35,7 @@ public static class PrefixUpdateCliRunner
         {
             ServiceResponse response =
                 await sender.SendAsync(
-                    IranDirectCommand.PrefixUpdateCheckNow);
+                    PathVeerCommand.PrefixUpdateCheckNow);
 
             if (!response.Success)
             {
@@ -81,7 +81,7 @@ public static class PrefixUpdateCliRunner
         catch (Exception exception)
         {
             stderr.WriteLine(
-                $"IranDirect command failed: " +
+                $"PathVeer command failed: " +
                 $"{exception.Message}");
             return ExitFailure;
         }

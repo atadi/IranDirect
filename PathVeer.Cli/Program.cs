@@ -39,35 +39,35 @@ string commandText = args.Length == 0
     {
         return await CountryCliRunner.RunAsync(
             args.Skip(1).ToArray(),
-            new IranDirectServiceClient());
+            new PathVeerServiceClient());
     }
 
     if (commandText == "custom-routes")
     {
         return await CustomRouteCliRunner.RunAsync(
             args.Skip(1).ToArray(),
-            new IranDirectServiceClient());
+            new PathVeerServiceClient());
     }
 
     if (commandText == "prefix-update")
     {
         return await PrefixUpdateCliRunner.RunAsync(
             args.Skip(1).ToArray(),
-            new IranDirectServiceClient());
+            new PathVeerServiceClient());
     }
 
     if (commandText == "doctor")
     {
         return await DiagnosticCliRunner.RunAsync(
             args.Skip(1).ToArray(),
-            new IranDirectServiceClient());
+            new PathVeerServiceClient());
     }
 
     if (commandText == "plan")
     {
         return await ExecutionPreviewCliRunner.RunAsync(
             args.Skip(1).ToArray(),
-            new IranDirectServiceClient());
+            new PathVeerServiceClient());
     }
 
     if (commandText == "support-bundle")
@@ -87,7 +87,7 @@ string commandText = args.Length == 0
 
 if (!TryParseCommand(
         commandText,
-        out IranDirectCommand command))
+        out PathVeerCommand command))
 {
     Console.Error.WriteLine(
         "Usage: PathVeer.Cli " +
@@ -96,14 +96,14 @@ if (!TryParseCommand(
     return 6;
 }
 
-IranDirectServiceClient client = new();
+PathVeerServiceClient client = new();
 
 try
 {
     string? value =
         command is
-            IranDirectCommand.SetConfigurationEnabled or
-            IranDirectCommand.SetConfigurationProfilePath
+            PathVeerCommand.SetConfigurationEnabled or
+            PathVeerCommand.SetConfigurationProfilePath
             ? args.ElementAtOrDefault(1)
             : null;
 
@@ -125,33 +125,33 @@ try
         return 1;
     }
 
-    if (command == IranDirectCommand.Status &&
+    if (command == PathVeerCommand.Status &&
         response.Status is not null)
     {
         WriteStatus(response.Status);
     }
     else if (
-        command == IranDirectCommand.VpnEndpoints)
+        command == PathVeerCommand.VpnEndpoints)
     {
         WriteVpnEndpoints(response);
     }
     else if (
-        command == IranDirectCommand.Diagnostics &&
+        command == PathVeerCommand.Diagnostics &&
         response.Diagnostics is not null)
     {
         WriteDiagnostics(response.Diagnostics);
     }
     else if (
         command is
-            IranDirectCommand.GetConfiguration or
-            IranDirectCommand.SetConfigurationEnabled or
-            IranDirectCommand.SetConfigurationProfilePath &&
+            PathVeerCommand.GetConfiguration or
+            PathVeerCommand.SetConfigurationEnabled or
+            PathVeerCommand.SetConfigurationProfilePath &&
         response.Configuration is not null)
     {
         WriteConfiguration(response.Configuration);
     }
     else if (
-        command == IranDirectCommand.RuntimePlan &&
+        command == PathVeerCommand.RuntimePlan &&
         response.RuntimePlan is not null)
     {
         WriteRuntimePlan(response.RuntimePlan);
@@ -178,29 +178,29 @@ catch (OperationCanceledException)
 catch (Exception exception)
 {
     Console.Error.WriteLine(
-        $"IranDirect command failed: {exception.Message}");
+        $"PathVeer command failed: {exception.Message}");
 
     return 1;
 }
 
 static bool TryParseCommand(
     string value,
-    out IranDirectCommand command)
+    out PathVeerCommand command)
 {
     command = value switch
     {
-        "status" => IranDirectCommand.Status,
-        "update" => IranDirectCommand.UpdatePrefixes,
-        "enable" => IranDirectCommand.Enable,
-        "disable" => IranDirectCommand.Disable,
-        "repair" => IranDirectCommand.Repair,
-        "vpn-endpoints" => IranDirectCommand.VpnEndpoints,
-        "diagnostics" => IranDirectCommand.Diagnostics,
-        "config" => IranDirectCommand.GetConfiguration,
-        "get-config" => IranDirectCommand.GetConfiguration,
-        "set-enabled" => IranDirectCommand.SetConfigurationEnabled,
-        "set-profile" => IranDirectCommand.SetConfigurationProfilePath,
-        "runtime-plan" => IranDirectCommand.RuntimePlan,
+        "status" => PathVeerCommand.Status,
+        "update" => PathVeerCommand.UpdatePrefixes,
+        "enable" => PathVeerCommand.Enable,
+        "disable" => PathVeerCommand.Disable,
+        "repair" => PathVeerCommand.Repair,
+        "vpn-endpoints" => PathVeerCommand.VpnEndpoints,
+        "diagnostics" => PathVeerCommand.Diagnostics,
+        "config" => PathVeerCommand.GetConfiguration,
+        "get-config" => PathVeerCommand.GetConfiguration,
+        "set-enabled" => PathVeerCommand.SetConfigurationEnabled,
+        "set-profile" => PathVeerCommand.SetConfigurationProfilePath,
+        "runtime-plan" => PathVeerCommand.RuntimePlan,
         _ => default
     };
 
@@ -220,7 +220,7 @@ static bool TryParseCommand(
 }
 
 static void WriteStatus(
-    IranDirectStatus status)
+    PathVeerStatus status)
 {
     Console.WriteLine("=== Iran Direct status ===");
 
@@ -312,9 +312,9 @@ static void WriteVpnEndpoints(
     }
 }
 static void WriteDiagnostics(
-    PathVeer.Core.Diagnostics.IranDirectDiagnostics diagnostics)
+    PathVeer.Core.Diagnostics.PathVeerDiagnostics diagnostics)
 {
-    Console.WriteLine("=== IranDirect Diagnostics ===");
+    Console.WriteLine("=== PathVeer Diagnostics ===");
     Console.WriteLine($"Version: {diagnostics.Version}");
     Console.WriteLine($"Generated: {diagnostics.GeneratedAt}");
     Console.WriteLine(
@@ -433,13 +433,13 @@ static async Task<int> ShowLatestProfileAsync(
 
 static async Task<int> ShowSnapshotAsync()
 {
-    IranDirectServiceClient client = new();
+    PathVeerServiceClient client = new();
 
     try
     {
         ServiceResponse response =
             await client.SendAsync(
-                IranDirectCommand.RuntimeSnapshot);
+                PathVeerCommand.RuntimeSnapshot);
 
         if (!response.Success || response.Snapshot is null)
         {
@@ -470,7 +470,7 @@ static async Task<int> ShowSnapshotAsync()
     catch (Exception exception)
     {
         Console.Error.WriteLine(
-            $"IranDirect command failed: " +
+            $"PathVeer command failed: " +
             $"{exception.Message}");
         return 1;
     }

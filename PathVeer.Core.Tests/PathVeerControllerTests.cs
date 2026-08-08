@@ -32,7 +32,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.EnableAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
         Assert.Null(state.LastError);
     }
@@ -47,7 +47,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.EnableAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
     }
 
@@ -69,7 +69,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.EnableAsync();
 
         Assert.False(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
         Assert.Contains("1 step(s) failed.", state.LastError);
         Assert.Contains("Type:", state.LastError);
@@ -94,7 +94,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.EnableAsync();
 
         Assert.False(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
     }
 
@@ -123,7 +123,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.EnableAsync();
 
         Assert.False(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
     }
 
@@ -144,7 +144,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.DisableAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
         Assert.Null(state.LastError);
     }
@@ -158,7 +158,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.DisableAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
     }
 
@@ -166,7 +166,7 @@ public sealed class IranDirectControllerTests
     public async Task Disable_FailedExecution_DoesNotChangeState()
     {
         await using TestContext ctx = new();
-        await ctx.StateRepository.SaveAsync(new IranDirectState
+        await ctx.StateRepository.SaveAsync(new PathVeerState
         {
             Enabled = true,
             Gateway = "192.168.1.1",
@@ -189,7 +189,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.DisableAsync();
 
         Assert.False(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
     }
 
@@ -230,7 +230,7 @@ public sealed class IranDirectControllerTests
         RuntimeCycleExecutionResult result = await ctx.Controller.EnableAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state = await ctx.StateRepository.LoadAsync();
+        PathVeerState state = await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
     }
 
@@ -348,7 +348,7 @@ public sealed class IranDirectControllerTests
             await ctx.Controller.RunCycleAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state =
+        PathVeerState state =
             await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
         Assert.Null(state.LastError);
@@ -366,7 +366,7 @@ public sealed class IranDirectControllerTests
             await ctx.Controller.RunCycleAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state =
+        PathVeerState state =
             await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
     }
@@ -390,7 +390,7 @@ public sealed class IranDirectControllerTests
             await ctx.Controller.RunCycleAsync();
 
         Assert.False(result.IsSuccess);
-        IranDirectState state =
+        PathVeerState state =
             await ctx.StateRepository.LoadAsync();
         Assert.False(state.Enabled);
         Assert.Contains("1 step(s) failed.", state.LastError);
@@ -405,7 +405,7 @@ public sealed class IranDirectControllerTests
         await using TestContext ctx = new();
         ctx.DesiredEnabled = true;
         await ctx.StateRepository.SaveAsync(
-            new IranDirectState
+            new PathVeerState
             {
                 Enabled = true,
                 LastError = "previous error"
@@ -423,7 +423,7 @@ public sealed class IranDirectControllerTests
 
         await ctx.Controller.RunCycleAsync();
 
-        IranDirectState state =
+        PathVeerState state =
             await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
         Assert.Null(state.LastError);
@@ -435,7 +435,7 @@ public sealed class IranDirectControllerTests
         await using TestContext ctx = new();
         ctx.DesiredEnabled = true;
         await ctx.StateRepository.SaveAsync(
-            new IranDirectState
+            new PathVeerState
             {
                 Enabled = true,
                 LastError = "previous error"
@@ -454,7 +454,7 @@ public sealed class IranDirectControllerTests
 
         await ctx.Controller.RunCycleAsync();
 
-        IranDirectState state =
+        PathVeerState state =
             await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
         Assert.Contains("1 step(s) failed.", state.LastError);
@@ -471,7 +471,7 @@ public sealed class IranDirectControllerTests
 
         uint staleIndex = 5;
         await ctx.StateRepository.SaveAsync(
-            new IranDirectState
+            new PathVeerState
             {
                 Enabled = false,
                 Gateway = "192.168.1.1",
@@ -520,7 +520,7 @@ public sealed class IranDirectControllerTests
 
         await ctx.Controller.RunCycleAsync();
 
-        IranDirectState state =
+        PathVeerState state =
             await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
         Assert.Equal(20u, state.InterfaceIndex);
@@ -553,7 +553,7 @@ public sealed class IranDirectControllerTests
             await ctx.Controller.RunCycleAsync();
 
         Assert.True(result.IsSuccess);
-        IranDirectState state =
+        PathVeerState state =
             await ctx.StateRepository.LoadAsync();
         Assert.True(state.Enabled);
     }
@@ -662,7 +662,7 @@ public sealed class IranDirectControllerTests
         await using TestContext ctx = new();
         ctx.DesiredEnabled = true;
 
-        IranDirectStatus status = await ctx.Controller.GetStatusAsync();
+        PathVeerStatus status = await ctx.Controller.GetStatusAsync();
 
         Assert.True(status.DesiredEnabled);
         Assert.NotNull(status.Operation);
@@ -673,7 +673,7 @@ public sealed class IranDirectControllerTests
     {
         await using TestContext ctx = new();
 
-        IranDirectStatus status = await ctx.Controller.GetStatusAsync();
+        PathVeerStatus status = await ctx.Controller.GetStatusAsync();
 
         Assert.NotNull(status.Operation);
         Assert.IsType<RuntimeOperationSnapshot>(status.Operation);
@@ -999,7 +999,7 @@ public sealed class IranDirectControllerTests
 
         public StateRepository StateRepository { get; }
         public RouteInventoryStore RouteInventoryStore { get; }
-        public IranDirectController Controller { get; }
+        public PathVeerController Controller { get; }
         public FakeExecutor FakeExecutor { get; }
         public FakeDecisionBuilder FakeDecisionBuilder { get; }
         public RuntimeOperationStatus OperationStatus { get; }
@@ -1097,7 +1097,7 @@ public sealed class IranDirectControllerTests
                 new VpnEndpointResolver());
             VpnEndpointRouteManager vpnRouteManager = new(routeManager);
 
-            Controller = new IranDirectController(
+            Controller = new PathVeerController(
                 null!, // ICountryPrefixSource - not called in these tests
                 prefixStore,
                 gatewayDetector,

@@ -11,7 +11,7 @@ namespace PathVeer.Core.Tests.Observability.Telemetry;
 
 /// <summary>
 /// Behavior + allocation-free verification for the IPC request/response
-/// telemetry produced by <see cref="IranDirectServiceClient.SendAsync"/>.
+/// telemetry produced by <see cref="PathVeerServiceClient.SendAsync"/>.
 /// All assertions pin the established contracts from the committed
 /// <see cref="TelemetryFailureCategoryMapper"/> and
 /// <see cref="TelemetryOutcomeMapper"/> rather than inventing categories.
@@ -80,10 +80,10 @@ public sealed class IpcRequestTelemetryTests
         using var ml = CreateMeterListener(requests, durations);
 
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = client.SendAsync(
-            IranDirectCommand.Status).GetAwaiter().GetResult();
+            PathVeerCommand.Status).GetAwaiter().GetResult();
 
         Assert.True(response.Success);
 
@@ -94,7 +94,7 @@ public sealed class IpcRequestTelemetryTests
             IranDirectTagValues.OperationIpcRequest,
             root.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
         Assert.Equal(
-            TelemetryOutcomeMapper.Map(IranDirectCommand.Status),
+            TelemetryOutcomeMapper.Map(PathVeerCommand.Status),
             root.Tags.Single(t => t.Key == IranDirectTagNames.IpcCommand).Value);
 
         Activity connect = Assert.Single(
@@ -143,10 +143,10 @@ public sealed class IpcRequestTelemetryTests
 
         FakeNamedPipeClientFactory factory = CreateFactory(
             FailedResponseLine("INVALID_BUNDLE_PATH"));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = client.SendAsync(
-            IranDirectCommand.SupportBundleExport).GetAwaiter().GetResult();
+            PathVeerCommand.SupportBundleExport).GetAwaiter().GetResult();
 
         Assert.False(response.Success);
         Assert.Equal("INVALID_BUNDLE_PATH", response.ErrorCode);
@@ -200,13 +200,13 @@ public sealed class IpcRequestTelemetryTests
         using var ml = CreateMeterListener(requests, durations);
 
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(
+        PathVeerServiceClient client = CreateClient(
             factory,
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.NamedPipeSend]));
 
         FaultInjectionException thrown = Assert.Throws<FaultInjectionException>(
-            () => client.SendAsync(IranDirectCommand.Status)
+            () => client.SendAsync(PathVeerCommand.Status)
                 .GetAwaiter().GetResult());
 
         Assert.Equal(FaultInjectionPoint.NamedPipeSend, thrown.Point);
@@ -260,10 +260,10 @@ public sealed class IpcRequestTelemetryTests
         FakeNamedPipeClientFactory factory = new(
             cancellationToken => throw new OperationCanceledException(
                 cancellationToken));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         TimeoutException exception = Assert.Throws<TimeoutException>(
-            () => client.SendAsync(IranDirectCommand.Status)
+            () => client.SendAsync(PathVeerCommand.Status)
                 .GetAwaiter().GetResult());
 
         Assert.Equal(
@@ -325,11 +325,11 @@ public sealed class IpcRequestTelemetryTests
                 return Task.FromResult<INamedPipeClientConnection>(
                     new FakeNamedPipeClientConnection(SuccessResponseLine()));
             });
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         Assert.Throws<OperationCanceledException>(
             () => client.SendAsync(
-                IranDirectCommand.Status,
+                PathVeerCommand.Status,
                 cancellationToken: callerCts.Token).GetAwaiter().GetResult());
 
         Assert.Equal(1, factory.ConnectCallCount);
@@ -375,10 +375,10 @@ public sealed class IpcRequestTelemetryTests
             cancellationToken =>
                 Task.FromResult<INamedPipeClientConnection>(
                     new FakeNamedPipeClientConnection(throwOnWrite: true)));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         Assert.Throws<IOException>(
-            () => client.SendAsync(IranDirectCommand.Status)
+            () => client.SendAsync(PathVeerCommand.Status)
                 .GetAwaiter().GetResult());
 
         Activity root = Assert.Single(
@@ -428,10 +428,10 @@ public sealed class IpcRequestTelemetryTests
             cancellationToken =>
                 Task.FromResult<INamedPipeClientConnection>(
                     new FakeNamedPipeClientConnection(throwOnRead: true)));
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         Assert.Throws<IOException>(
-            () => client.SendAsync(IranDirectCommand.Status)
+            () => client.SendAsync(PathVeerCommand.Status)
                 .GetAwaiter().GetResult());
 
         Assert.Equal(
@@ -467,10 +467,10 @@ public sealed class IpcRequestTelemetryTests
 
         FakeNamedPipeClientFactory factory = CreateFactory(
             responseLine: "null");
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = client.SendAsync(
-            IranDirectCommand.Status).GetAwaiter().GetResult();
+            PathVeerCommand.Status).GetAwaiter().GetResult();
 
         Assert.False(response.Success);
         Assert.Equal("INVALID_RESPONSE", response.ErrorCode);
@@ -503,10 +503,10 @@ public sealed class IpcRequestTelemetryTests
         using var al = CreateActivityListener(started, stopped);
 
         FakeNamedPipeClientFactory factory = new();
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         Assert.Throws<JsonException>(
-            () => client.SendAsync(IranDirectCommand.Status)
+            () => client.SendAsync(PathVeerCommand.Status)
                 .GetAwaiter().GetResult());
 
         Activity root = Assert.Single(
@@ -530,10 +530,10 @@ public sealed class IpcRequestTelemetryTests
         // Without any ActivityListener, the telemetry is a no-op and behavior
         // is identical to the non-instrumented path.
         FakeNamedPipeClientFactory factory = CreateFactory(SuccessResponseLine());
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = client.SendAsync(
-            IranDirectCommand.Status).GetAwaiter().GetResult();
+            PathVeerCommand.Status).GetAwaiter().GetResult();
 
         Assert.True(response.Success);
         Assert.Equal(1, factory.ConnectCallCount);
@@ -559,7 +559,7 @@ public sealed class IpcRequestTelemetryTests
         }
     }
 
-    private static IranDirectServiceClient CreateClient(
+    private static PathVeerServiceClient CreateClient(
         FakeNamedPipeClientFactory factory,
         IFaultInjectionPolicy? faultPolicy = null) =>
         new(factory, faultPolicy);
@@ -574,7 +574,7 @@ public sealed class IpcRequestTelemetryTests
     private static string SuccessResponseLine() =>
         JsonSerializer.Serialize(
             new ServiceResponse { Success = true, Message = "ok." },
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
     private static string FailedResponseLine(string errorCode) =>
         JsonSerializer.Serialize(
@@ -584,7 +584,7 @@ public sealed class IpcRequestTelemetryTests
                 ErrorCode = errorCode,
                 Message = $"business failure {errorCode}"
             },
-            IranDirectJson.Options);
+            PathVeerJson.Options);
 
     private sealed class FakeNamedPipeClientFactory :
         INamedPipeClientFactory

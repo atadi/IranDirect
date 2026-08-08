@@ -16,7 +16,7 @@ public sealed class SupportBundleDefaultFileNameTests
             FixedTime);
 
         Assert.StartsWith(
-            "IranDirect-Support-",
+            "PathVeer-Support-",
             fileName);
         Assert.EndsWith(".zip", fileName);
     }
@@ -35,7 +35,7 @@ public sealed class SupportBundleDefaultFileNameTests
             new FixedTimeProvider(localStamp));
 
         string expectedTime =
-            $"IranDirect-Support-{localStamp:yyyyMMdd-HHmmss}.zip";
+            $"PathVeer-Support-{localStamp:yyyyMMdd-HHmmss}.zip";
 
         Assert.Equal(expectedTime, fileName);
     }
@@ -58,7 +58,7 @@ public sealed class SupportBundleDefaultFileNameTests
             FixedTime);
 
         Assert.StartsWith(
-            "IranDirect-Support-",
+            "PathVeer-Support-",
             fileName);
     }
 }

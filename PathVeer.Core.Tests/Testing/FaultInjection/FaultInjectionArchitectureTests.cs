@@ -15,7 +15,7 @@ public sealed class FaultInjectionArchitectureTests
         "PathVeer.Core\\CustomRoutes\\CustomRouteResolver.cs",
         "PathVeer.Core\\Routing\\WindowsRouteManager.cs",
         "PathVeer.Core\\Routing\\WindowsRouteApi.cs",
-        "PathVeer.Core\\Ipc\\IranDirectServiceClient.cs",
+        "PathVeer.Core\\Ipc\\PathVeerServiceClient.cs",
         "PathVeer.Core\\Observability\\RuntimeSnapshotProvider.cs",
         "PathVeer.Core\\Diagnostics\\DiagnosticRunner.cs"
     ];

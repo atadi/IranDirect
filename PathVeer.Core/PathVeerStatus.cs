@@ -2,7 +2,7 @@ namespace PathVeer.Core;
 
 using PathVeer.Core.Runtime.Execution;
 
-public sealed record IranDirectStatus
+public sealed record PathVeerStatus
 {
     public bool Enabled { get; init; }
 

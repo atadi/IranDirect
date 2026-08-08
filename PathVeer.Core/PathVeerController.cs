@@ -16,8 +16,8 @@ using System.Text;
 
 namespace PathVeer.Core;
 
-public sealed class IranDirectController :
-    IIranDirectStatusProvider
+public sealed class PathVeerController :
+    IPathVeerStatusProvider
 {
     private const int RouteMetric = 5;
 
@@ -42,9 +42,9 @@ public sealed class IranDirectController :
         _prefixSourceMetadataService;
     private readonly IPrefixSourceUpdateHistoryService?
         _prefixSourceUpdateHistoryService;
-    private readonly ILogger<IranDirectController>? _logger;
+    private readonly ILogger<PathVeerController>? _logger;
 
-    public IranDirectController(
+    public PathVeerController(
         ICountryPrefixSource prefixSource,
         CountryPrefixStore prefixStore,
         GatewayDetector gatewayDetector,
@@ -63,7 +63,7 @@ public sealed class IranDirectController :
             null,
         IPrefixSourceUpdateHistoryService?
             prefixSourceUpdateHistoryService = null,
-        ILogger<IranDirectController>? logger = null)
+        ILogger<PathVeerController>? logger = null)
     {
         _prefixSource = prefixSource;
         _prefixStore = prefixStore;
@@ -142,7 +142,7 @@ public sealed class IranDirectController :
             previousPrefixes,
             cancellationToken);
 
-        IranDirectState state =
+        PathVeerState state =
             await _stateRepository.LoadAsync(
                 cancellationToken);
 
@@ -571,10 +571,10 @@ public sealed class IranDirectController :
         _ => CycleCompletionStatus.Failed
     };
 
-    public async Task<IranDirectStatus> GetStatusAsync(
+    public async Task<PathVeerStatus> GetStatusAsync(
         CancellationToken cancellationToken = default)
     {
-        IranDirectState state =
+        PathVeerState state =
             await _stateRepository.LoadAsync(
                 cancellationToken);
 
@@ -623,7 +623,7 @@ public sealed class IranDirectController :
             desiredEnabled = false;
         }
 
-        return new IranDirectStatus
+        return new PathVeerStatus
         {
             Enabled = state.Enabled,
             DesiredEnabled = desiredEnabled,
@@ -654,7 +654,7 @@ public sealed class IranDirectController :
     public async Task RepairAsync(
         CancellationToken cancellationToken = default)
     {
-        IranDirectState state =
+        PathVeerState state =
             await _stateRepository.LoadAsync(
                 cancellationToken);
 
@@ -671,7 +671,7 @@ public sealed class IranDirectController :
         RuntimeExecutionResult execution,
         CancellationToken cancellationToken)
     {
-        IranDirectState state =
+        PathVeerState state =
             await _stateRepository.LoadAsync(
                 cancellationToken);
 

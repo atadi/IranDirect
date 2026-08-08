@@ -133,7 +133,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
         ];
         ThrowingHistoryService throwing = new();
 
-        IranDirectController controller =
+        PathVeerController controller =
             fixture.CreateController(
                 fixture.Source,
                 fixture.MetadataService,
@@ -325,7 +325,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
         public PrefixSourceUpdateHistoryService HistoryService { get; }
         public FakeTimeProvider Clock { get; } = new();
         public FakePrefixSource Source { get; } = new();
-        public IranDirectController Controller { get; }
+        public PathVeerController Controller { get; }
 
         public Fixture()
         {
@@ -363,7 +363,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
                 HistoryService);
         }
 
-        public IranDirectController CreateController(
+        public PathVeerController CreateController(
             ICountryPrefixSource source,
             IPrefixSourceMetadataService? metadataService = null,
             IPrefixSourceUpdateHistoryService? historyService = null)
@@ -384,7 +384,7 @@ public sealed class PrefixUpdateHistoryIntegrationTests
             RuntimeCycleCoordinator coordinator = new(
                 new FakeDecisionBuilder());
 
-            return new IranDirectController(
+            return new PathVeerController(
                 source,
                 PrefixStore,
                 gatewayDetector,

@@ -19,7 +19,7 @@ public sealed record ServiceResponse
 
     public string? ErrorCode { get; init; }
 
-    public IranDirectStatus? Status { get; init; }
+    public PathVeerStatus? Status { get; init; }
 
     public ReconciliationResult? Reconciliation { get; init; }
 
@@ -28,7 +28,7 @@ public sealed record ServiceResponse
     public IReadOnlyList<ResolvedVpnEndpoint> VpnEndpoints
         { get; init; } = [];
 
-    public IranDirectDiagnostics? Diagnostics { get; init; }
+    public PathVeerDiagnostics? Diagnostics { get; init; }
 
     public DesiredConfiguration? Configuration { get; init; }
 

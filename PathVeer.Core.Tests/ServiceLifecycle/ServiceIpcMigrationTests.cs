@@ -92,10 +92,10 @@ public sealed class ServiceIpcMigrationTests
             primaryConnectable: true,
             legacyConnectable: true);
 
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = await client.SendAsync(
-            IranDirectCommand.Status);
+            PathVeerCommand.Status);
 
         Assert.True(response.Success);
         Assert.Equal(1, factory.ConnectCount);
@@ -111,10 +111,10 @@ public sealed class ServiceIpcMigrationTests
             primaryConnectable: false,
             legacyConnectable: true);
 
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = await client.SendAsync(
-            IranDirectCommand.Status);
+            PathVeerCommand.Status);
 
         Assert.True(response.Success);
         Assert.Equal(2, factory.ConnectCount);
@@ -131,9 +131,9 @@ public sealed class ServiceIpcMigrationTests
             primaryConnectable: false,
             legacyConnectable: true);
 
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
-        await client.SendAsync(IranDirectCommand.Enable);
+        await client.SendAsync(PathVeerCommand.Enable);
 
         // Exactly one write occurred — on the legacy pipe after the safe
         // connect-time fallback, never a double execution.
@@ -151,10 +151,10 @@ public sealed class ServiceIpcMigrationTests
         ThrowingOnWriteFactory factory = new(
             throwOnPipe: "primary");
 
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<IOException>(
-            () => client.SendAsync(IranDirectCommand.Enable));
+            () => client.SendAsync(PathVeerCommand.Enable));
 
         // It connected (to primary) but never attempted the legacy pipe.
         Assert.Equal(1, factory.ConnectCallCount);
@@ -168,10 +168,10 @@ public sealed class ServiceIpcMigrationTests
         ThrowingOnReadFactory factory = new(
             throwOnPipe: "primary");
 
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<IOException>(
-            () => client.SendAsync(IranDirectCommand.Enable));
+            () => client.SendAsync(PathVeerCommand.Enable));
 
         // One connect to primary, zero attempts on legacy.
         Assert.Equal(1, factory.ConnectCallCount);
@@ -189,10 +189,10 @@ public sealed class ServiceIpcMigrationTests
                 "\"errorCode\":\"INVALID_CONFIGURATION_VALUE\"," +
                 "\"message\":\"bad\"}");
 
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         ServiceResponse response = await client.SendAsync(
-            IranDirectCommand.Status);
+            PathVeerCommand.Status);
 
         Assert.False(response.Success);
         Assert.Equal("INVALID_CONFIGURATION_VALUE", response.ErrorCode);
@@ -206,10 +206,10 @@ public sealed class ServiceIpcMigrationTests
             primaryConnectable: false,
             legacyConnectable: false);
 
-        IranDirectServiceClient client = CreateClient(factory);
+        PathVeerServiceClient client = CreateClient(factory);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => client.SendAsync(IranDirectCommand.Status));
+            () => client.SendAsync(PathVeerCommand.Status));
 
         Assert.Equal(2, factory.ConnectCount);
     }
@@ -313,7 +313,7 @@ public sealed class ServiceIpcMigrationTests
 
     #region Helpers
 
-    private static IranDirectServiceClient CreateClient(
+    private static PathVeerServiceClient CreateClient(
         INamedPipeClientFactory factory,
         IFaultInjectionPolicy? policy = null) =>
         new(factory, policy ?? FaultInjectionPolicy.Never);

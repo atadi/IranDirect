@@ -17,10 +17,10 @@ namespace PathVeer.Service.Ipc;
 
 public class NamedPipeCommandServer
 {
-    private readonly IranDirectController _controller;
+    private readonly PathVeerController _controller;
     private readonly OperationCoordinator _operations;
     private readonly OpenVpnEndpointProvider _vpnEndpointProvider;
-    private readonly IranDirectDiagnosticsService _diagnosticsService;
+    private readonly PathVeerDiagnosticsService _diagnosticsService;
     private readonly DesiredConfigurationService _configurationService;
     private readonly RuntimeCoordinator _runtimeCoordinator;
     private readonly CustomRouteCommandHandler _customRoutes;
@@ -35,10 +35,10 @@ public class NamedPipeCommandServer
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
-        IranDirectController controller,
+        PathVeerController controller,
         OperationCoordinator operations,
         OpenVpnEndpointProvider vpnEndpointProvider,
-        IranDirectDiagnosticsService diagnosticsService,
+        PathVeerDiagnosticsService diagnosticsService,
         DesiredConfigurationService configurationService,
         RuntimeCoordinator runtimeCoordinator,
         CustomRouteCommandHandler customRoutes,
@@ -165,7 +165,7 @@ public class NamedPipeCommandServer
             ServiceRequest? request =
                 JsonSerializer.Deserialize<ServiceRequest>(
                     requestJson ?? "",
-                    IranDirectJson.Options);
+                    PathVeerJson.Options);
 
             if (request is null)
             {
@@ -212,7 +212,7 @@ public class NamedPipeCommandServer
         string responseJson =
             JsonSerializer.Serialize(
                 response,
-                IranDirectJson.Options);
+                PathVeerJson.Options);
 
         await writer.WriteLineAsync(
             responseJson.AsMemory(),
@@ -250,124 +250,124 @@ public class NamedPipeCommandServer
     {
         return request.Command switch
         {
-            IranDirectCommand.Status =>
+            PathVeerCommand.Status =>
                 GetStatusAsync(cancellationToken),
 
-            IranDirectCommand.UpdatePrefixes =>
+            PathVeerCommand.UpdatePrefixes =>
                 _operations.ExecuteAsync(
                     UpdatePrefixesAsync,
                     cancellationToken),
 
-            IranDirectCommand.Enable =>
+            PathVeerCommand.Enable =>
                 _operations.ExecuteAsync(
                     EnableAsync,
                     cancellationToken),
 
-            IranDirectCommand.Disable =>
+            PathVeerCommand.Disable =>
                 _operations.ExecuteAsync(
                     DisableAsync,
                     cancellationToken),
 
-            IranDirectCommand.Repair =>
+            PathVeerCommand.Repair =>
                 _operations.ExecuteAsync(
                     RepairAsync,
                     cancellationToken),
 
-            IranDirectCommand.VpnEndpoints =>
+            PathVeerCommand.VpnEndpoints =>
                 GetVpnEndpointsAsync(cancellationToken),
 
-            IranDirectCommand.Diagnostics =>
+            PathVeerCommand.Diagnostics =>
                 GetDiagnosticsAsync(cancellationToken),
 
-            IranDirectCommand.GetConfiguration =>
+            PathVeerCommand.GetConfiguration =>
                 GetConfigurationAsync(cancellationToken),
 
-            IranDirectCommand.SetConfigurationEnabled =>
+            PathVeerCommand.SetConfigurationEnabled =>
                 SetConfigurationEnabledAsync(
                     request,
                     cancellationToken),
 
-            IranDirectCommand.SetConfigurationProfilePath =>
+            PathVeerCommand.SetConfigurationProfilePath =>
                 SetConfigurationProfilePathAsync(
                     request,
                     cancellationToken),
 
-            IranDirectCommand.SetConfigurationDirectCountry =>
+            PathVeerCommand.SetConfigurationDirectCountry =>
                 SetConfigurationDirectCountryAsync(
                     request,
                     cancellationToken),
 
-            IranDirectCommand.RuntimePlan =>
+            PathVeerCommand.RuntimePlan =>
                 GetRuntimePlanAsync(cancellationToken),
 
-            IranDirectCommand.CustomRoutesList =>
+            PathVeerCommand.CustomRoutesList =>
                 _customRoutes.ListAsync(cancellationToken),
 
-            IranDirectCommand.CustomRoutesAddDomain =>
+            PathVeerCommand.CustomRoutesAddDomain =>
                 _customRoutes.AddAsync(
                     CustomRouteEntryType.Domain,
                     request.Value,
                     request.Description,
                     cancellationToken),
 
-            IranDirectCommand.CustomRoutesAddIp =>
+            PathVeerCommand.CustomRoutesAddIp =>
                 _customRoutes.AddAsync(
                     CustomRouteEntryType.IpAddress,
                     request.Value,
                     request.Description,
                     cancellationToken),
 
-            IranDirectCommand.CustomRoutesAddCidr =>
+            PathVeerCommand.CustomRoutesAddCidr =>
                 _customRoutes.AddAsync(
                     CustomRouteEntryType.Cidr,
                     request.Value,
                     request.Description,
                     cancellationToken),
 
-            IranDirectCommand.CustomRoutesEnable =>
+            PathVeerCommand.CustomRoutesEnable =>
                 _customRoutes.SetEnabledAsync(
                     request.Value,
                     enabled: true,
                     cancellationToken),
 
-            IranDirectCommand.CustomRoutesDisable =>
+            PathVeerCommand.CustomRoutesDisable =>
                 _customRoutes.SetEnabledAsync(
                     request.Value,
                     enabled: false,
                     cancellationToken),
 
-            IranDirectCommand.CustomRoutesRemove =>
+            PathVeerCommand.CustomRoutesRemove =>
                 _customRoutes.RemoveAsync(
                     request.Value,
                     cancellationToken),
 
-            IranDirectCommand.CustomRoutesResolve =>
+            PathVeerCommand.CustomRoutesResolve =>
                 _customRoutes.ResolveAsync(cancellationToken),
 
-            IranDirectCommand.CustomRoutesCacheStatus =>
+            PathVeerCommand.CustomRoutesCacheStatus =>
                 _customRoutes.CacheStatusAsync(cancellationToken),
 
-            IranDirectCommand.CustomRoutesInvalidateCache =>
+            PathVeerCommand.CustomRoutesInvalidateCache =>
                 _customRoutes.InvalidateCacheAsync(
                     request.Value,
                     cancellationToken),
 
-            IranDirectCommand.CustomRoutesInvalidateAllCaches =>
+            PathVeerCommand.CustomRoutesInvalidateAllCaches =>
                 _customRoutes.InvalidateAllCachesAsync(
                     cancellationToken),
 
-            IranDirectCommand.RuntimeSnapshot =>
+            PathVeerCommand.RuntimeSnapshot =>
                 _runtimeSnapshot.GetAsync(cancellationToken),
 
-            IranDirectCommand.PrefixUpdateCheckNow =>
+            PathVeerCommand.PrefixUpdateCheckNow =>
                 _prefixUpdateCheck.CheckNowAsync(
                     cancellationToken),
 
-            IranDirectCommand.ExecutionPreview =>
+            PathVeerCommand.ExecutionPreview =>
                 _executionPreviewHandler.GetAsync(
                     cancellationToken),
 
-            IranDirectCommand.SupportBundleExport =>
+            PathVeerCommand.SupportBundleExport =>
                 _supportBundleHandler.ExportAsync(
                     request.Value ?? string.Empty,
                     cancellationToken),
@@ -382,7 +382,7 @@ public class NamedPipeCommandServer
     private async Task<ServiceResponse> GetStatusAsync(
         CancellationToken cancellationToken)
     {
-        IranDirectStatus status =
+        PathVeerStatus status =
             await _controller.GetStatusAsync(
                 cancellationToken);
 
@@ -417,7 +417,7 @@ public class NamedPipeCommandServer
             await _controller.EnableAsync(
                 cancellationToken);
 
-        IranDirectStatus status =
+        PathVeerStatus status =
             await _controller.GetStatusAsync(
                 cancellationToken);
 
@@ -441,7 +441,7 @@ public class NamedPipeCommandServer
             await _controller.DisableAsync(
                 cancellationToken);
 
-        IranDirectStatus status =
+        PathVeerStatus status =
             await _controller.GetStatusAsync(
                 cancellationToken);
 
@@ -464,7 +464,7 @@ public class NamedPipeCommandServer
         await _controller.RepairAsync(
             cancellationToken);
 
-        IranDirectStatus status =
+        PathVeerStatus status =
             await _controller.GetStatusAsync(
                 cancellationToken);
 
@@ -496,7 +496,7 @@ public class NamedPipeCommandServer
     private async Task<ServiceResponse> GetDiagnosticsAsync(
         CancellationToken cancellationToken)
     {
-        IranDirectDiagnostics diagnostics =
+        PathVeerDiagnostics diagnostics =
             await _diagnosticsService.RunAsync(
                 cancellationToken);
 

@@ -26,7 +26,7 @@ public static class DiagnosticReportCliRenderer
     private static IEnumerable<string> RenderSummary(
         DiagnosticReport report)
     {
-        yield return "IranDirect Diagnostics";
+        yield return "PathVeer Diagnostics";
         yield return string.Empty;
         yield return
             $"Healthy: {(report.Healthy ? "Yes" : "No")}";
@@ -39,7 +39,7 @@ public static class DiagnosticReportCliRenderer
     private static IEnumerable<string> RenderDetailed(
         DiagnosticReport report)
     {
-        yield return "IranDirect Diagnostics";
+        yield return "PathVeer Diagnostics";
         yield return string.Empty;
 
         IReadOnlyDictionary<DiagnosticCategory,

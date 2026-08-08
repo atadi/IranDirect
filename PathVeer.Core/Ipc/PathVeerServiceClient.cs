@@ -4,7 +4,7 @@ using PathVeer.Core.Testing.FaultInjection;
 
 namespace PathVeer.Core.Ipc;
 
-public sealed class IranDirectServiceClient :
+public sealed class PathVeerServiceClient :
     ICustomRouteCommandSender
 {
     private static readonly TimeSpan DefaultConnectTimeout =
@@ -13,7 +13,7 @@ public sealed class IranDirectServiceClient :
     private readonly INamedPipeClientFactory _factory;
     private readonly IFaultInjectionPolicy _faultPolicy;
 
-    public IranDirectServiceClient(
+    public PathVeerServiceClient(
         INamedPipeClientFactory? factory = null,
         IFaultInjectionPolicy? faultPolicy = null)
     {
@@ -22,7 +22,7 @@ public sealed class IranDirectServiceClient :
     }
 
     public async Task<ServiceResponse> SendAsync(
-        IranDirectCommand command,
+        PathVeerCommand command,
         string? value = null,
         string? description = null,
         CancellationToken cancellationToken = default)
@@ -37,7 +37,7 @@ public sealed class IranDirectServiceClient :
         string requestJson =
             JsonSerializer.Serialize(
                 request,
-                IranDirectJson.Options);
+                PathVeerJson.Options);
 
         using IpcRequestTelemetry.IpcRequestScope root =
             IpcRequestTelemetry.Start(command);
@@ -129,7 +129,7 @@ public sealed class IranDirectServiceClient :
                 ServiceResponse? response =
                     JsonSerializer.Deserialize<ServiceResponse>(
                         responseJson ?? "",
-                        IranDirectJson.Options);
+                        PathVeerJson.Options);
 
                 if (response is null)
                 {

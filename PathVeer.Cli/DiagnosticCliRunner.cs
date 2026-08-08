@@ -43,7 +43,7 @@ public static class DiagnosticCliRunner
             else
             {
                 stderr.WriteLine(
-                    "Usage: IranDirect.Cli doctor " +
+                    "Usage: PathVeer.Cli doctor " +
                     "[--summary|--detailed|--compact]");
                 return ExitUsage;
             }
@@ -53,7 +53,7 @@ public static class DiagnosticCliRunner
         {
             ServiceResponse response =
                 await sender.SendAsync(
-                    IranDirectCommand.Diagnostics);
+                    PathVeerCommand.Diagnostics);
 
             if (!response.Success)
             {
@@ -109,7 +109,7 @@ public static class DiagnosticCliRunner
         catch (Exception exception)
         {
             stderr.WriteLine(
-                $"IranDirect command failed: " +
+                $"PathVeer command failed: " +
                 $"{exception.Message}");
             return ExitFailed;
         }

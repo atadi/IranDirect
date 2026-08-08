@@ -27,7 +27,7 @@ public static class CustomRouteCliRunner
         {
             stderr.WriteLine($"Error: {parsed.Error}");
             stderr.WriteLine(
-                "Usage: IranDirect.Cli custom-routes " +
+                "Usage: PathVeer.Cli custom-routes " +
                 "[list|add-domain <domain> [description]|" +
                 "add-ip <ipv4> [description]|" +
                 "add-cidr <cidr> [description]|" +
@@ -107,39 +107,39 @@ public static class CustomRouteCliRunner
         catch (Exception exception)
         {
             stderr.WriteLine(
-                $"IranDirect command failed: " +
+                $"PathVeer command failed: " +
                 $"{exception.Message}");
             return ExitFailure;
         }
     }
 
-    private static IranDirectCommand MapCommand(
+    private static PathVeerCommand MapCommand(
         CustomRouteCliCommand command)
     {
         return command switch
         {
             CustomRouteCliCommand.List =>
-                IranDirectCommand.CustomRoutesList,
+                PathVeerCommand.CustomRoutesList,
             CustomRouteCliCommand.AddDomain =>
-                IranDirectCommand.CustomRoutesAddDomain,
+                PathVeerCommand.CustomRoutesAddDomain,
             CustomRouteCliCommand.AddIp =>
-                IranDirectCommand.CustomRoutesAddIp,
+                PathVeerCommand.CustomRoutesAddIp,
             CustomRouteCliCommand.AddCidr =>
-                IranDirectCommand.CustomRoutesAddCidr,
+                PathVeerCommand.CustomRoutesAddCidr,
             CustomRouteCliCommand.Enable =>
-                IranDirectCommand.CustomRoutesEnable,
+                PathVeerCommand.CustomRoutesEnable,
             CustomRouteCliCommand.Disable =>
-                IranDirectCommand.CustomRoutesDisable,
+                PathVeerCommand.CustomRoutesDisable,
             CustomRouteCliCommand.Remove =>
-                IranDirectCommand.CustomRoutesRemove,
+                PathVeerCommand.CustomRoutesRemove,
             CustomRouteCliCommand.Resolve =>
-                IranDirectCommand.CustomRoutesResolve,
+                PathVeerCommand.CustomRoutesResolve,
             CustomRouteCliCommand.Status =>
-                IranDirectCommand.CustomRoutesCacheStatus,
+                PathVeerCommand.CustomRoutesCacheStatus,
             CustomRouteCliCommand.Invalidate =>
-                IranDirectCommand.CustomRoutesInvalidateCache,
+                PathVeerCommand.CustomRoutesInvalidateCache,
             CustomRouteCliCommand.InvalidateAll =>
-                IranDirectCommand.CustomRoutesInvalidateAllCaches,
+                PathVeerCommand.CustomRoutesInvalidateAllCaches,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(command))
         };

@@ -52,7 +52,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         Assert.Equal(BaseTime, metadata.LastSucceededAt);
         Assert.Null(metadata.LastError);
 
-        IranDirectState state =
+        PathVeerState state =
             await fixture.StateRepository.LoadAsync();
         Assert.Equal(2, state.PrefixCount);
         Assert.NotNull(state.PrefixesUpdatedAt);
@@ -91,7 +91,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         ];
         ThrowingMetadataService throwing = new();
 
-        IranDirectController controller =
+        PathVeerController controller =
             fixture.CreateController(
                 fixture.Source,
                 throwing);
@@ -267,7 +267,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
         public PrefixSourceMetadataService MetadataService { get; }
         public FakeTimeProvider Clock { get; } = new();
         public FakePrefixSource Source { get; } = new();
-        public IranDirectController Controller { get; }
+        public PathVeerController Controller { get; }
 
         public Fixture()
         {
@@ -298,7 +298,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
                 MetadataService);
         }
 
-        public IranDirectController CreateController(
+        public PathVeerController CreateController(
             ICountryPrefixSource source,
             IPrefixSourceMetadataService? metadataService = null)
         {
@@ -318,7 +318,7 @@ public sealed class PrefixUpdateMetadataIntegrationTests
             RuntimeCycleCoordinator coordinator = new(
                 new FakeDecisionBuilder());
 
-            return new IranDirectController(
+            return new PathVeerController(
                 source,
                 PrefixStore,
                 gatewayDetector,

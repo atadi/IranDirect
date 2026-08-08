@@ -23,7 +23,7 @@ public static class ExecutionPreviewCliRunner
         if (args.Length > 0)
         {
             stderr.WriteLine(
-                "Usage: IranDirect.Cli plan");
+                "Usage: PathVeer.Cli plan");
             return ExitUsage;
         }
 
@@ -31,7 +31,7 @@ public static class ExecutionPreviewCliRunner
         {
             ServiceResponse response =
                 await sender.SendAsync(
-                    IranDirectCommand.ExecutionPreview);
+                    PathVeerCommand.ExecutionPreview);
 
             if (!response.Success)
             {
@@ -75,7 +75,7 @@ public static class ExecutionPreviewCliRunner
         catch (Exception exception)
         {
             stderr.WriteLine(
-                $"IranDirect command failed: " +
+                $"PathVeer command failed: " +
                 $"{exception.Message}");
             return ExitFailed;
         }

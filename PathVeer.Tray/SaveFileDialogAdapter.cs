@@ -10,11 +10,11 @@ internal sealed class SaveFileDialogAdapter :
 
         using SaveFileDialog dialog = new()
         {
-            Title = "Save IranDirect Support Bundle",
+            Title = "Save PathVeer Support Bundle",
             FileName = request.DefaultFileName,
             DefaultExt = "zip",
             Filter =
-                "IranDirect Support Bundle (*.zip)|*.zip|" +
+                "PathVeer Support Bundle (*.zip)|*.zip|" +
                 "All files (*.*)|*.*",
             AddExtension = true,
             OverwritePrompt = true,
@@ -75,7 +75,7 @@ internal sealed class MessageBoxStatusSink :
 
         MessageBox.Show(
             body,
-            "IranDirect support bundle",
+            "PathVeer support bundle",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
     }
@@ -84,7 +84,7 @@ internal sealed class MessageBoxStatusSink :
     {
         MessageBox.Show(
             message,
-            "IranDirect support bundle",
+            "PathVeer support bundle",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);
     }

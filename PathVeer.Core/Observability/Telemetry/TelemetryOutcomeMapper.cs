@@ -97,55 +97,55 @@ public static class TelemetryOutcomeMapper
     /// The tag value is the enum member name exactly; this is the centralized
     /// mapper so callers never embed the enum name elsewhere.
     /// </summary>
-    public static string Map(IranDirectCommand command) => command switch
+    public static string Map(PathVeerCommand command) => command switch
     {
-        IranDirectCommand.Status => nameof(IranDirectCommand.Status),
-        IranDirectCommand.UpdatePrefixes =>
-            nameof(IranDirectCommand.UpdatePrefixes),
-        IranDirectCommand.Enable => nameof(IranDirectCommand.Enable),
-        IranDirectCommand.Disable => nameof(IranDirectCommand.Disable),
-        IranDirectCommand.Repair => nameof(IranDirectCommand.Repair),
-        IranDirectCommand.VpnEndpoints => nameof(IranDirectCommand.VpnEndpoints),
-        IranDirectCommand.Diagnostics => nameof(IranDirectCommand.Diagnostics),
-        IranDirectCommand.GetConfiguration =>
-            nameof(IranDirectCommand.GetConfiguration),
-        IranDirectCommand.SetConfigurationEnabled =>
-            nameof(IranDirectCommand.SetConfigurationEnabled),
-        IranDirectCommand.SetConfigurationProfilePath =>
-            nameof(IranDirectCommand.SetConfigurationProfilePath),
-        IranDirectCommand.SetConfigurationDirectCountry =>
-            nameof(IranDirectCommand.SetConfigurationDirectCountry),
-        IranDirectCommand.RuntimePlan => nameof(IranDirectCommand.RuntimePlan),
-        IranDirectCommand.CustomRoutesList =>
-            nameof(IranDirectCommand.CustomRoutesList),
-        IranDirectCommand.CustomRoutesAddDomain =>
-            nameof(IranDirectCommand.CustomRoutesAddDomain),
-        IranDirectCommand.CustomRoutesAddIp =>
-            nameof(IranDirectCommand.CustomRoutesAddIp),
-        IranDirectCommand.CustomRoutesAddCidr =>
-            nameof(IranDirectCommand.CustomRoutesAddCidr),
-        IranDirectCommand.CustomRoutesEnable =>
-            nameof(IranDirectCommand.CustomRoutesEnable),
-        IranDirectCommand.CustomRoutesDisable =>
-            nameof(IranDirectCommand.CustomRoutesDisable),
-        IranDirectCommand.CustomRoutesRemove =>
-            nameof(IranDirectCommand.CustomRoutesRemove),
-        IranDirectCommand.CustomRoutesResolve =>
-            nameof(IranDirectCommand.CustomRoutesResolve),
-        IranDirectCommand.CustomRoutesCacheStatus =>
-            nameof(IranDirectCommand.CustomRoutesCacheStatus),
-        IranDirectCommand.CustomRoutesInvalidateCache =>
-            nameof(IranDirectCommand.CustomRoutesInvalidateCache),
-        IranDirectCommand.CustomRoutesInvalidateAllCaches =>
-            nameof(IranDirectCommand.CustomRoutesInvalidateAllCaches),
-        IranDirectCommand.RuntimeSnapshot =>
-            nameof(IranDirectCommand.RuntimeSnapshot),
-        IranDirectCommand.PrefixUpdateCheckNow =>
-            nameof(IranDirectCommand.PrefixUpdateCheckNow),
-        IranDirectCommand.ExecutionPreview =>
-            nameof(IranDirectCommand.ExecutionPreview),
-        IranDirectCommand.SupportBundleExport =>
-            nameof(IranDirectCommand.SupportBundleExport),
+        PathVeerCommand.Status => nameof(PathVeerCommand.Status),
+        PathVeerCommand.UpdatePrefixes =>
+            nameof(PathVeerCommand.UpdatePrefixes),
+        PathVeerCommand.Enable => nameof(PathVeerCommand.Enable),
+        PathVeerCommand.Disable => nameof(PathVeerCommand.Disable),
+        PathVeerCommand.Repair => nameof(PathVeerCommand.Repair),
+        PathVeerCommand.VpnEndpoints => nameof(PathVeerCommand.VpnEndpoints),
+        PathVeerCommand.Diagnostics => nameof(PathVeerCommand.Diagnostics),
+        PathVeerCommand.GetConfiguration =>
+            nameof(PathVeerCommand.GetConfiguration),
+        PathVeerCommand.SetConfigurationEnabled =>
+            nameof(PathVeerCommand.SetConfigurationEnabled),
+        PathVeerCommand.SetConfigurationProfilePath =>
+            nameof(PathVeerCommand.SetConfigurationProfilePath),
+        PathVeerCommand.SetConfigurationDirectCountry =>
+            nameof(PathVeerCommand.SetConfigurationDirectCountry),
+        PathVeerCommand.RuntimePlan => nameof(PathVeerCommand.RuntimePlan),
+        PathVeerCommand.CustomRoutesList =>
+            nameof(PathVeerCommand.CustomRoutesList),
+        PathVeerCommand.CustomRoutesAddDomain =>
+            nameof(PathVeerCommand.CustomRoutesAddDomain),
+        PathVeerCommand.CustomRoutesAddIp =>
+            nameof(PathVeerCommand.CustomRoutesAddIp),
+        PathVeerCommand.CustomRoutesAddCidr =>
+            nameof(PathVeerCommand.CustomRoutesAddCidr),
+        PathVeerCommand.CustomRoutesEnable =>
+            nameof(PathVeerCommand.CustomRoutesEnable),
+        PathVeerCommand.CustomRoutesDisable =>
+            nameof(PathVeerCommand.CustomRoutesDisable),
+        PathVeerCommand.CustomRoutesRemove =>
+            nameof(PathVeerCommand.CustomRoutesRemove),
+        PathVeerCommand.CustomRoutesResolve =>
+            nameof(PathVeerCommand.CustomRoutesResolve),
+        PathVeerCommand.CustomRoutesCacheStatus =>
+            nameof(PathVeerCommand.CustomRoutesCacheStatus),
+        PathVeerCommand.CustomRoutesInvalidateCache =>
+            nameof(PathVeerCommand.CustomRoutesInvalidateCache),
+        PathVeerCommand.CustomRoutesInvalidateAllCaches =>
+            nameof(PathVeerCommand.CustomRoutesInvalidateAllCaches),
+        PathVeerCommand.RuntimeSnapshot =>
+            nameof(PathVeerCommand.RuntimeSnapshot),
+        PathVeerCommand.PrefixUpdateCheckNow =>
+            nameof(PathVeerCommand.PrefixUpdateCheckNow),
+        PathVeerCommand.ExecutionPreview =>
+            nameof(PathVeerCommand.ExecutionPreview),
+        PathVeerCommand.SupportBundleExport =>
+            nameof(PathVeerCommand.SupportBundleExport),
         _ => IranDirectTagValues.OutcomeUnknown,
     };
 }

@@ -7,10 +7,10 @@ namespace PathVeer.Core.Diagnostics.Runtime;
 public sealed class RuntimeStateDiagnosticCheck :
     IDiagnosticCheck
 {
-    private readonly IIranDirectStatusProvider _statusProvider;
+    private readonly IPathVeerStatusProvider _statusProvider;
 
     public RuntimeStateDiagnosticCheck(
-        IIranDirectStatusProvider statusProvider)
+        IPathVeerStatusProvider statusProvider)
     {
         _statusProvider = statusProvider;
     }
@@ -23,7 +23,7 @@ public sealed class RuntimeStateDiagnosticCheck :
     {
         try
         {
-            IranDirectStatus status =
+            PathVeerStatus status =
                 await _statusProvider.GetStatusAsync(
                     cancellationToken);
 

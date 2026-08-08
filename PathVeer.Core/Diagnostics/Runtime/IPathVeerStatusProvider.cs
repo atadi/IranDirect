@@ -1,7 +1,7 @@
 namespace PathVeer.Core.Diagnostics.Runtime;
 
-public interface IIranDirectStatusProvider
+public interface IPathVeerStatusProvider
 {
-    Task<IranDirectStatus> GetStatusAsync(
+    Task<PathVeerStatus> GetStatusAsync(
         CancellationToken cancellationToken = default);
 }

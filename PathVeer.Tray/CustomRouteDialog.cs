@@ -23,7 +23,7 @@ public sealed class CustomRouteDialog : Form
     public CustomRouteDialog(
         ICustomRouteCommandSender? sender = null)
     {
-        _sender = sender ?? new IranDirectServiceClient();
+        _sender = sender ?? new PathVeerServiceClient();
 
         Text = "Custom Routes";
         ClientSize = new Size(880, 420);
@@ -194,7 +194,7 @@ public sealed class CustomRouteDialog : Form
         {
             ServiceResponse listResponse =
                 await _sender.SendAsync(
-                    IranDirectCommand.CustomRoutesList);
+                    PathVeerCommand.CustomRoutesList);
 
             if (!listResponse.Success)
             {
@@ -205,7 +205,7 @@ public sealed class CustomRouteDialog : Form
 
             ServiceResponse statusResponse =
                 await _sender.SendAsync(
-                    IranDirectCommand.CustomRoutesCacheStatus);
+                    PathVeerCommand.CustomRoutesCacheStatus);
 
             if (!statusResponse.Success)
             {
@@ -311,10 +311,10 @@ public sealed class CustomRouteDialog : Form
             return;
         }
 
-        IranDirectCommand command =
+        PathVeerCommand command =
             row.Enabled
-                ? IranDirectCommand.CustomRoutesDisable
-                : IranDirectCommand.CustomRoutesEnable;
+                ? PathVeerCommand.CustomRoutesDisable
+                : PathVeerCommand.CustomRoutesEnable;
 
         await SendAsync(command, row.Id.ToString());
     }
@@ -341,7 +341,7 @@ public sealed class CustomRouteDialog : Form
         }
 
         await SendAsync(
-            IranDirectCommand.CustomRoutesRemove,
+            PathVeerCommand.CustomRoutesRemove,
             row.Id.ToString());
     }
 
@@ -381,7 +381,7 @@ public sealed class CustomRouteDialog : Form
     }
 
     private async Task InvalidateAsync(
-        IranDirectCommand command,
+        PathVeerCommand command,
         string? value)
     {
         SetBusy(true);
@@ -414,7 +414,7 @@ public sealed class CustomRouteDialog : Form
     }
 
     private async Task SendAsync(
-        IranDirectCommand command,
+        PathVeerCommand command,
         string? value,
         string? description = null)
     {

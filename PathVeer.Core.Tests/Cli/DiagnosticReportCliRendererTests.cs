@@ -39,7 +39,7 @@ public sealed class DiagnosticReportCliRendererTests
             .Render(report, DiagnosticFormat.Summary)
             .ToArray();
 
-        Assert.Contains("IranDirect Diagnostics", lines);
+        Assert.Contains("PathVeer Diagnostics", lines);
         Assert.Contains("Healthy: Yes", lines);
     }
 
@@ -121,7 +121,7 @@ public sealed class DiagnosticReportCliRendererTests
             .Render(report, DiagnosticFormat.Detailed)
             .ToArray();
 
-        Assert.Contains("IranDirect Diagnostics", lines);
+        Assert.Contains("PathVeer Diagnostics", lines);
     }
 
     [Fact]

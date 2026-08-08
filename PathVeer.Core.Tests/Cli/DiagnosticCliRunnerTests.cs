@@ -62,7 +62,7 @@ public sealed class DiagnosticCliRunnerTests
 
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
-        Assert.Contains("IranDirect Diagnostics", stdout);
+        Assert.Contains("PathVeer Diagnostics", stdout);
         Assert.Contains("Summary", stdout);
     }
 
@@ -77,7 +77,7 @@ public sealed class DiagnosticCliRunnerTests
 
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
-        Assert.Contains("IranDirect Diagnostics", stdout);
+        Assert.Contains("PathVeer Diagnostics", stdout);
         Assert.Contains("Healthy: Yes", stdout);
         Assert.Contains("Passed: 1", stdout);
         Assert.DoesNotContain("Summary", stdout);
@@ -240,7 +240,7 @@ public sealed class DiagnosticCliRunnerTests
     [Fact]
     public async Task RunAsync_SendsDiagnosticsCommand()
     {
-        IranDirectCommand? sent = null;
+        PathVeerCommand? sent = null;
         FakeSender sender = new(
             (command, _, _) =>
             {
@@ -251,7 +251,7 @@ public sealed class DiagnosticCliRunnerTests
         await RunAsync([], sender);
 
         Assert.Equal(
-            IranDirectCommand.Diagnostics, sent);
+            PathVeerCommand.Diagnostics, sent);
     }
 
     [Fact]
@@ -302,14 +302,14 @@ public sealed class DiagnosticCliRunnerTests
     private sealed class FakeSender : ICustomRouteCommandSender
     {
         private readonly Func<
-            IranDirectCommand,
+            PathVeerCommand,
             string?,
             string?,
             ServiceResponse> _handler;
 
         public FakeSender(
             Func<
-                IranDirectCommand,
+                PathVeerCommand,
                 string?,
                 string?,
                 ServiceResponse> handler)
@@ -318,7 +318,7 @@ public sealed class DiagnosticCliRunnerTests
         }
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

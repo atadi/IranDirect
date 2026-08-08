@@ -123,7 +123,7 @@ public sealed class ExecutionPreviewCliRunnerTests
     [Fact]
     public async Task RunAsync_SendsExecutionPreviewCommand()
     {
-        IranDirectCommand? sent = null;
+        PathVeerCommand? sent = null;
         FakeSender sender = new(
             (command, _, _) =>
             {
@@ -134,7 +134,7 @@ public sealed class ExecutionPreviewCliRunnerTests
         await RunAsync([], sender);
 
         Assert.Equal(
-            IranDirectCommand.ExecutionPreview, sent);
+            PathVeerCommand.ExecutionPreview, sent);
     }
 
     [Fact]
@@ -256,14 +256,14 @@ public sealed class ExecutionPreviewCliRunnerTests
         ICustomRouteCommandSender
     {
         private readonly Func<
-            IranDirectCommand,
+            PathVeerCommand,
             string?,
             string?,
             ServiceResponse> _handler;
 
         public FakeSender(
             Func<
-                IranDirectCommand,
+                PathVeerCommand,
                 string?,
                 string?,
                 ServiceResponse> handler)
@@ -272,7 +272,7 @@ public sealed class ExecutionPreviewCliRunnerTests
         }
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)

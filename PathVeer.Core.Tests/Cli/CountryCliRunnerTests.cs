@@ -33,7 +33,7 @@ public sealed class CountryCliRunnerTests
     {
         FakeSender sender = new((command, _, _) =>
         {
-            Assert.Equal(IranDirectCommand.GetConfiguration, command);
+            Assert.Equal(PathVeerCommand.GetConfiguration, command);
             return new ServiceResponse
             {
                 Success = true,
@@ -56,7 +56,7 @@ public sealed class CountryCliRunnerTests
     {
         FakeSender sender = new((command, _, _) =>
         {
-            Assert.Equal(IranDirectCommand.GetConfiguration, command);
+            Assert.Equal(PathVeerCommand.GetConfiguration, command);
             return new ServiceResponse
             {
                 Success = true,
@@ -79,7 +79,7 @@ public sealed class CountryCliRunnerTests
     public async Task Set_SendsSetConfigurationDirectCountry(
         string input)
     {
-        IranDirectCommand? sentCommand = null;
+        PathVeerCommand? sentCommand = null;
         string? sentValue = null;
 
         FakeSender sender = new((command, value, _) =>
@@ -105,7 +105,7 @@ public sealed class CountryCliRunnerTests
 
         Assert.Equal(0, exit);
         Assert.Equal(
-            IranDirectCommand.SetConfigurationDirectCountry,
+            PathVeerCommand.SetConfigurationDirectCountry,
             sentCommand);
         Assert.Equal(input.ToUpperInvariant(), sentValue);
         Assert.Contains("Iraq (IQ)", stdout);
@@ -119,7 +119,7 @@ public sealed class CountryCliRunnerTests
         FakeSender sender = new((command, value, _) =>
         {
             if (command ==
-                IranDirectCommand.SetConfigurationDirectCountry)
+                PathVeerCommand.SetConfigurationDirectCountry)
             {
                 persisted = new DesiredConfiguration
                 {
@@ -183,7 +183,7 @@ public sealed class CountryCliRunnerTests
         FakeSender sender = new((command, value, _) =>
         {
             Assert.Equal(
-                IranDirectCommand.SetConfigurationDirectCountry,
+                PathVeerCommand.SetConfigurationDirectCountry,
                 command);
 
             // Config accepted (requested policy), but dataset unavailable.
@@ -273,14 +273,14 @@ public sealed class CountryCliRunnerTests
     private sealed class FakeSender : ICustomRouteCommandSender
     {
         private readonly Func<
-            IranDirectCommand,
+            PathVeerCommand,
             string?,
             string?,
             ServiceResponse> _handler;
 
         public FakeSender(
             Func<
-                IranDirectCommand,
+                PathVeerCommand,
                 string?,
                 string?,
                 ServiceResponse> handler)
@@ -289,7 +289,7 @@ public sealed class CountryCliRunnerTests
         }
 
         public Task<ServiceResponse> SendAsync(
-            IranDirectCommand command,
+            PathVeerCommand command,
             string? value = null,
             string? description = null,
             CancellationToken cancellationToken = default)
