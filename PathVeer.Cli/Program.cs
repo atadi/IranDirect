@@ -90,7 +90,7 @@ if (!TryParseCommand(
         out IranDirectCommand command))
 {
     Console.Error.WriteLine(
-        "Usage: IranDirect.Cli " +
+        "Usage: PathVeer.Cli " +
         "[update|enable|disable|repair|status|vpn-endpoints|diagnostics|config|get-config|set-enabled|set-profile|runtime-plan|snapshot|prefix-update|custom-routes|doctor|plan|profile|support-bundle|country]");
 
     return 6;
@@ -532,7 +532,7 @@ static async Task<int> ShowProfileListAsync(
         && !int.TryParse(limitText, out limit))
     {
         Console.Error.WriteLine(
-            "Usage: IranDirect.Cli profile list [limit]");
+            "Usage: PathVeer.Cli profile list [limit]");
         return 6;
     }
 
@@ -579,7 +579,7 @@ static async Task<int> ShowProfileListAsync(
 static int ShowProfileUsage()
 {
     Console.Error.WriteLine(
-        "Usage: IranDirect.Cli profile " +
+        "Usage: PathVeer.Cli profile " +
         "[last|enable|disable|repair|list [limit]]");
     return 6;
 }

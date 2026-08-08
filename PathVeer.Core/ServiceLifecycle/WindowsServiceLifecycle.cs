@@ -59,7 +59,7 @@ public sealed class WindowsServiceLifecycle : IServiceLifecycle
             throw new InvalidOperationException(
                 "PathVeer.Service.exe was not found next to the " +
                 "tray application. Run " +
-                "tools\\Install-IranDirectService.ps1 from an " +
+                "tools\\Install.ps1 from an " +
                 "elevated PowerShell instead.");
         }
 
@@ -69,12 +69,12 @@ public sealed class WindowsServiceLifecycle : IServiceLifecycle
             ["create", _serviceName,
              "binPath=", quotedPath,
              "start=", "delayed-auto",
-             "displayName=", IranDirectServiceNames.DisplayName],
+             "displayName=", PathVeerServiceNames.DisplayName],
             cancellationToken);
 
         await RunScAsync(
             ["description", _serviceName,
-             IranDirectServiceNames.Description],
+             PathVeerServiceNames.Description],
             cancellationToken);
 
         await RunScAsync(

@@ -64,8 +64,8 @@ public sealed class TrayApplicationContext :
 
         _serviceLifecycle = new WindowsServiceLifecycle(
             new WindowsServiceControllerAdapter(
-                IranDirectServiceNames.ServiceName),
-            IranDirectServiceNames.ServiceName,
+                PathVeerServiceNames.ServiceName),
+            PathVeerServiceNames.ServiceName,
             File.Exists(binaryPath) ? binaryPath : null);
 
         _isAdministrator = CheckIsAdministrator();

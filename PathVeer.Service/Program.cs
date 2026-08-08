@@ -18,7 +18,7 @@ HostApplicationBuilder builder =
 
 builder.Services.AddWindowsService(options =>
 {
-    options.ServiceName = "IranDirect Service";
+    options.ServiceName = "PathVeer Service";
 });
 
 // The application dependency graph lives in ServiceCompositionRoot so that the

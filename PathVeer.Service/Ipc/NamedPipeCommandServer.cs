@@ -67,11 +67,39 @@ public class NamedPipeCommandServer
     public virtual async Task RunAsync(
         CancellationToken cancellationToken)
     {
+        // Dual-listen: both the primary PathVeer pipe and the legacy
+        // IranDirect pipe dispatch into the SAME command handler and the SAME
+        // OperationCoordinator. There is exactly one authority; the two pipes
+        // are two front doors into this single process. Each loop independently
+        // accepts clients on its pipe and funnels them through HandleOneClientAsync.
+        IReadOnlyList<string> pipeNames = PathVeerPipeNames.AllListenNames;
+
+        Task[] listeners = pipeNames
+            .Select(name => RunOnePipeAsync(name, cancellationToken))
+            .ToArray();
+
+        try
+        {
+            await Task.WhenAny(listeners);
+            await Task.WhenAll(listeners);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected on shutdown; swallow so the worker can finish cleanly.
+        }
+    }
+
+    private async Task RunOnePipeAsync(
+        string pipeName,
+        CancellationToken cancellationToken)
+    {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 await HandleOneClientAsync(
+                    pipeName,
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -83,7 +111,8 @@ public class NamedPipeCommandServer
             {
                 _logger.LogError(
                     exception,
-                    "Named-pipe request failed.");
+                    "Named-pipe '{PipeName}' request failed.",
+                    pipeName);
 
                 await Task.Delay(
                     TimeSpan.FromSeconds(1),
@@ -93,11 +122,12 @@ public class NamedPipeCommandServer
     }
 
     private async Task HandleOneClientAsync(
+        string pipeName,
         CancellationToken cancellationToken)
     {
         await using NamedPipeServerStream pipe =
             new(
-                IranDirectPipeNames.Control,
+                pipeName,
                 PipeDirection.InOut,
                 maxNumberOfServerInstances: 1,
                 PipeTransmissionMode.Byte,

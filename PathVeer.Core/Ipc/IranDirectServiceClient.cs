@@ -17,7 +17,7 @@ public sealed class IranDirectServiceClient :
         INamedPipeClientFactory? factory = null,
         IFaultInjectionPolicy? faultPolicy = null)
     {
-        _factory = factory ?? new NamedPipeClientFactory();
+        _factory = factory ?? new PathVeerNamedPipeClientFactory();
         _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
     }
 

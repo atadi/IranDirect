@@ -399,8 +399,8 @@ public sealed class StateRootMigrationTests
         Assert.Equal("IranDirect", StateRootResolver.LegacyStateDirectoryName);
         Assert.Equal("PathVeer", StateRootResolver.CurrentStateDirectoryName);
         // Service identity / pipe / telemetry are NOT touched by this phase.
-        Assert.Equal("IranDirect", PathVeer.Core.ServiceLifecycle.IranDirectServiceNames.ServiceName);
-        Assert.Equal("IranDirect.Control.v1", PathVeer.Core.Ipc.IranDirectPipeNames.Control);
+        Assert.Equal("IranDirect", PathVeer.Core.ServiceLifecycle.LegacyServiceNames.ServiceName);
+        Assert.Equal("IranDirect.Control.v1", PathVeer.Core.Ipc.PathVeerPipeNames.LegacyPipeName);
         Assert.Equal("IranDirect.Core", PathVeer.Core.Observability.Telemetry.IranDirectTelemetry.SourceName);
     }
 

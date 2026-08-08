@@ -7,9 +7,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ServiceName = "IranDirect"
-$DisplayName = "IranDirect Service"
-$ServiceDescription = "Routes Iranian IPv4 prefixes directly through the ISP gateway while protecting VPN endpoint connectivity."
+# New PathVeer external identity (Phase 36.4).
+$ServiceName = "PathVeer"
+$DisplayName = "PathVeer Service"
+$ServiceDescription = "Routes direct IPv4 prefixes through the ISP gateway while protecting VPN endpoint connectivity."
+
+# Legacy identity retained ONLY as a migration input: the installer stops the
+# old IranDirect service so it can never run concurrently with PathVeer (the
+# single-authority rule). It is NOT deleted here — Phase 36.7 owns the final
+# removal contract once PathVeer is confirmed operational.
+$LegacyServiceName = "IranDirect"
 
 $RepoRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $PSScriptRoot "..")
@@ -17,15 +24,15 @@ $RepoRoot = [System.IO.Path]::GetFullPath(
 
 $ProjectPath = Join-Path `
     $RepoRoot `
-    "IranDirect.Service\IranDirect.Service.csproj"
+    "PathVeer.Service\PathVeer.Service.csproj"
 
 $PublishPath = Join-Path `
     $RepoRoot `
-    "artifacts\IranDirect.Service\publish"
+    "artifacts\PathVeer.Service\publish"
 
 $BinPath = Join-Path `
     $PublishPath `
-    "IranDirect.Service.exe"
+    "PathVeer.Service.exe"
 
 function Assert-Administrator {
     $currentIdentity =
@@ -67,48 +74,51 @@ function Invoke-Sc {
 }
 
 function Test-ServiceExists {
+    param([string]$Name)
+
     $service =
         Get-Service `
-            -Name $ServiceName `
+            -Name $Name `
             -ErrorAction SilentlyContinue
 
     return $null -ne $service
 }
 
-function Stop-IranDirectService {
-    if (-not (Test-ServiceExists)) {
+function Stop-ServiceByName {
+    param([string]$Name)
+
+    if (-not (Test-ServiceExists $Name)) {
         return
     }
 
     $service =
         Get-Service `
-            -Name $ServiceName `
+            -Name $Name `
             -ErrorAction Stop
 
     if ($service.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
         return
     }
 
-    Write-Host "Stopping existing service '$ServiceName'..." `
+    Write-Host "Stopping existing service '$Name'..." `
         -ForegroundColor Cyan
 
     Stop-Service `
-        -Name $ServiceName `
+        -Name $Name `
         -Force `
         -ErrorAction Stop
 
     $service.WaitForStatus(
         [System.ServiceProcess.ServiceControllerStatus]::Stopped,
-        [TimeSpan]::FromSeconds(20)
-    )
+        [TimeSpan]::FromSeconds(20))
 }
 
-function Publish-IranDirectService {
+function Publish-PathVeerService {
     if (-not (Test-Path $ProjectPath)) {
         throw "Project file not found: $ProjectPath"
     }
 
-    Write-Host "Publishing IranDirect.Service..." `
+    Write-Host "Publishing PathVeer.Service..." `
         -ForegroundColor Cyan
 
     if (Test-Path $PublishPath) {
@@ -146,10 +156,10 @@ function Publish-IranDirectService {
         -ForegroundColor DarkGray
 }
 
-function Configure-IranDirectService {
+function Configure-PathVeerService {
     $quotedBinPath = "`"$BinPath`""
 
-    if (Test-ServiceExists) {
+    if (Test-ServiceExists $ServiceName) {
         Write-Host "Updating existing service '$ServiceName'..." `
             -ForegroundColor Cyan
 
@@ -202,7 +212,7 @@ function Configure-IranDirectService {
     )
 }
 
-function Start-IranDirectService {
+function Start-PathVeerService {
     Write-Host "Starting service '$ServiceName'..." `
         -ForegroundColor Cyan
 
@@ -217,8 +227,7 @@ function Start-IranDirectService {
 
     $service.WaitForStatus(
         [System.ServiceProcess.ServiceControllerStatus]::Running,
-        [TimeSpan]::FromSeconds(20)
-    )
+        [TimeSpan]::FromSeconds(20))
 
     $service.Refresh()
 
@@ -248,8 +257,11 @@ function Start-IranDirectService {
 function Install-Service {
     Assert-Administrator
 
-    # Stop the installed service before replacing published binaries.
-    Stop-IranDirectService
+    # Single-authority migration: the legacy IranDirect service MUST be stopped
+    # before PathVeer becomes the route-mutation authority. A running legacy
+    # service that also owns the pipe/state would violate the no-concurrent-
+    # authority rule. It is stopped, not deleted (Phase 36.7 owns removal).
+    Stop-ServiceByName -Name $LegacyServiceName
 
     # Also stop a development console instance if one is running.
     Get-Process `
@@ -259,15 +271,22 @@ function Install-Service {
             -Force `
             -ErrorAction SilentlyContinue
 
-    Publish-IranDirectService
-    Configure-IranDirectService
-    Start-IranDirectService
+    Get-Process `
+        -Name "PathVeer.Service" `
+        -ErrorAction SilentlyContinue |
+        Stop-Process `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+    Publish-PathVeerService
+    Configure-PathVeerService
+    Start-PathVeerService
 }
 
 function Uninstall-Service {
     Assert-Administrator
 
-    if (-not (Test-ServiceExists)) {
+    if (-not (Test-ServiceExists $ServiceName)) {
         Write-Host "Service '$ServiceName' is not installed." `
             -ForegroundColor Yellow
 
@@ -295,13 +314,13 @@ function Uninstall-Service {
     $timeout = [DateTimeOffset]::UtcNow.AddSeconds(15)
 
     while (
-        (Test-ServiceExists) -and
+        (Test-ServiceExists $ServiceName) -and
         [DateTimeOffset]::UtcNow -lt $timeout
     ) {
         Start-Sleep -Milliseconds 500
     }
 
-    if (Test-ServiceExists) {
+    if (Test-ServiceExists $ServiceName) {
         Write-Host "Service was marked for deletion but still exists. Close Services.msc or restart Windows if necessary." `
             -ForegroundColor Yellow
     }

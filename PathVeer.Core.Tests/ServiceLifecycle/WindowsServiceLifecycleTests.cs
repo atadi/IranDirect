@@ -209,7 +209,7 @@ public sealed class WindowsServiceLifecycleTests
         FakeAdapter adapter = new() { ExistsResult = false };
         WindowsServiceLifecycle lifecycle = new(
             adapter,
-            IranDirectServiceNames.ServiceName,
+            PathVeerServiceNames.ServiceName,
             serviceBinaryPath: null);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
@@ -218,7 +218,7 @@ public sealed class WindowsServiceLifecycleTests
 
     private static WindowsServiceLifecycle CreateLifecycle(
         FakeAdapter adapter) =>
-        new(adapter, IranDirectServiceNames.ServiceName);
+        new(adapter, PathVeerServiceNames.ServiceName);
 
     private sealed class FakeAdapter : IServiceControllerAdapter
     {
