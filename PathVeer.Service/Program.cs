@@ -1,11 +1,16 @@
+using PathVeer.Core.State;
 using PathVeer.Service;
 using PathVeer.Service.Observability;
 
-string dataDirectory = Path.Combine(
-    Environment.GetFolderPath(
-        Environment.SpecialFolder.CommonApplicationData),
-    "IranDirect");
+// Phase 36.3: resolve the authoritative PathVeer state root and migrate the
+// legacy %ProgramData%\IranDirect root (copy/verify/publish) when required.
+// Migration runs before any store is constructed so the composition root only
+// ever sees the single authoritative PathVeer root.
+StateRootResolver stateRootResolver = new();
+StateRootMigrator stateRootMigrator = new(stateRootResolver);
+stateRootMigrator.EnsureCurrentRoot();
 
+string dataDirectory = stateRootResolver.CurrentRoot;
 Directory.CreateDirectory(dataDirectory);
 
 HostApplicationBuilder builder =

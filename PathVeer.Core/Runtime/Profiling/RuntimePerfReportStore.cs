@@ -1,5 +1,7 @@
 namespace PathVeer.Core.Runtime.Profiling;
 
+using PathVeer.Core.State;
+
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -21,9 +23,7 @@ public sealed class RuntimePerfReportStore
 
     public static string DefaultDirectory =>
         Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.CommonApplicationData),
-            "IranDirect",
+            StateRootResolver.ResolveCurrentRoot(),
             "perf");
 
     private static readonly Regex s_reportNameRegex = new(
