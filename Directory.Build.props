@@ -1,0 +1,47 @@
+<Project>
+
+  <!--
+    Phase 37.1 — single authoritative release version source.
+
+    Every project, the package builder, the release orchestrator and the
+    bootstrapper read <Version> from here so the product version can never
+    drift between assemblies, installer metadata and release artifacts.
+
+    Prerelease convention (SemVer-ish, NuGet-compatible):
+        <Version>1.0.0</Version>                         stable
+        <Version>1.0.0-beta.1</Version>                 prerelease (VersionSuffix)
+        <Version>1.0.0-rc.1</Version>                   release candidate
+
+    Publishing derives:
+        AssemblyVersion  = MAJOR.0.0.0   (CLR binding compat: only MAJOR breaks)
+        FileVersion      = Version        (exact, shown in Explorer)
+        InformationalVersion = Version + commit metadata when available
+  -->
+
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <Authors>PathVeer</Authors>
+    <Company>PathVeer</Company>
+    <Product>PathVeer</Product>
+    <NeutralLanguage>en</NeutralLanguage>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <!-- Deterministic, reproducible release builds -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == ''">false</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(VersionSuffix)' != ''">
+    <!-- A prerelease tag (e.g. beta.1) supplied on the command line. -->
+    <Version>$(Version)-$(VersionSuffix)</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- AssemblyVersion changes ONLY on MAJOR so existing bindings stay valid. -->
+    <AssemblyVersion>$([System.Text.RegularExpressions.Regex]::Match($(Version), '^\d+').Value).0.0.0</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion Condition="'$(GIT_COMMIT)' != ''">$(Version) (commit $(GIT_COMMIT))</InformationalVersion>
+    <InformationalVersion Condition="'$(GIT_COMMIT)' == ''">$(Version)</InformationalVersion>
+  </PropertyGroup>
+
+</Project>
