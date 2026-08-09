@@ -51,7 +51,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('install', 'uninstall', 'status')]
+    [ValidateSet('install', 'uninstall', 'status', 'statejson')]
     [string]$Action = 'install',
 
     [Parameter(Mandatory = $false)]
@@ -61,7 +61,26 @@ param(
     [switch]$PurgeState,
 
     [Parameter(Mandatory = $false)]
-    [switch]$InstallTray
+    [switch]$InstallTray,
+
+    # --- Phase 37.2 structured-output contract (optional) -------------------
+    # When supplied, the script appends JSON progress records (one per line)
+    # and writes a final JSON result. The bootstrapper consumes these instead
+    # of scraping human-readable host output.
+    [Parameter(Mandatory = $false)]
+    [string]$ProgressFile,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ResultFile,
+
+    # Phase 37.2: emit machine-readable install state to this file (statejson).
+    [Parameter(Mandatory = $false)]
+    [string]$StateFile,
+
+    # Phase 37.2: create per-machine Start Menu entries + Apps&Features
+    # uninstall registration. Off by default to preserve prior dev behavior.
+    [Parameter(Mandatory = $false)]
+    [switch]$RegisterShell
 )
 
 Set-StrictMode -Version Latest
@@ -444,7 +463,172 @@ function Get-InstalledVersion {
     }
 }
 
-# --- actions ---------------------------------------------------------------
+# --- Phase 37.2: structured output / exit-code contract --------------------
+# The bootstrapper reads these so it can render progress and classify failures
+# without scraping human-readable host text. Codes are mirrored in
+# PathVeer.Setup/SetupExitCodes.cs.
+
+$Script:ExitCode = 0
+
+        function Write-ProgressRecord {
+        param(
+            [Parameter(Mandatory = $true)] [string]$Stage,
+            [string]$Message = ''
+        )
+
+        if ($ProgressFile) {
+            $record = [ordered]@{
+                stage     = $Stage
+                message   = $Message
+                timestamp = (Get-Date).ToUniversalTime().ToString('o')
+            }
+            Add-Content -Path $ProgressFile -Value ($record | ConvertTo-Json -Compress) -Encoding UTF8
+        }
+
+        Write-Step $Stage
+        if ($Message) { Write-Detail $Message }
+        }
+
+        function Write-ResultRecord {
+        param(
+            [bool]$Success,
+            [string]$Category = 'Success',
+            [string]$Message = ''
+        )
+
+        $Script:ExitCode = if ($Success) { 0 } else { (Map-CategoryToExitCode $Category) }
+
+        if ($ResultFile) {
+            $record = [ordered]@{
+                success   = $Success
+                category  = $Category
+                message   = $Message
+                version   = if ($version) { $version } else { $null }
+                timestamp = (Get-Date).ToUniversalTime().ToString('o')
+            }
+            Set-Content -Path $ResultFile -Value ($record | ConvertTo-Json -Depth 4) -Encoding UTF8
+        }
+        }
+
+        function Map-CategoryToExitCode {
+        param([string]$Category)
+        switch ($Category) {
+            'UserCancelled'          { return 100 }
+            'ElevationDenied'        { return 101 }
+            'InvalidArguments'       { return 102 }
+            'DowngradeBlocked'       { return 103 }
+            'PackageVerificationFail' { return 104 }
+            'LegacyUnsupported'      { return 105 }
+            'ServiceFailed'          { return 106 }
+            'ReadinessFailed'        { return 107 }
+            'UninstallFailed'        { return 108 }
+            'PurgeFailed'            { return 109 }
+            default                  { return 1 }
+        }
+        }
+
+        function Compare-VersionOrder {
+        param([string]$A, [string]$B)
+        # Returns -1 if A<B, 0 if equal (ignoring prerelease), 1 if A>B.
+        $na = ($A -replace '-.*$', '')
+        $nb = ($B -replace '-.*$', '')
+        $va = [version]::new($na)
+        $vb = [version]::new($nb)
+        return $va.CompareTo($vb)
+        }
+
+        # --- Phase 37.2: Windows shell integration ---------------------------------
+
+        function Get-CommonStartMenuPath {
+        return Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+        }
+
+        function New-StartMenuEntries {
+        $startMenu = Get-CommonStartMenuPath
+        $productDir = Join-Path $startMenu 'PathVeer'
+        New-Item -ItemType Directory -Force -Path $productDir | Out-Null
+
+        $trayExe = $TrayExe
+        $cliExe  = $CliExe
+
+        # Primary: launch the Tray/controller (not the Service binary).
+        New-Shortcut -Path (Join-Path $productDir 'PathVeer.lnk') `
+            -Target $trayExe `
+            -Description 'Open PathVeer'
+
+        # CLI shortcut opens a terminal with the CLI on PATH.
+        New-Shortcut -Path (Join-Path $productDir 'PathVeer Command Line.lnk') `
+            -Target 'cmd.exe' `
+            -Arguments "/k `"`"$cliExe`" help`"" `
+            -Description 'PathVeer command line'
+
+        # Uninstall entry points at the bootstrapper (elevated).
+        $setupExe = Join-Path $InstallRoot 'PathVeerSetup.exe'
+        if (Test-Path $setupExe) {
+            New-Shortcut -Path (Join-Path $productDir 'Uninstall PathVeer.lnk') `
+                -Target $setupExe `
+                -Arguments '--uninstall' `
+                -Description 'Uninstall PathVeer'
+        }
+
+        Write-Detail "Start Menu entries created at $productDir"
+        }
+
+        function Remove-StartMenuEntries {
+        $productDir = Join-Path (Get-CommonStartMenuPath) 'PathVeer'
+        if (Test-Path $productDir) {
+            Remove-Item $productDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Detail "Start Menu entries removed."
+        }
+        }
+
+        function New-Shortcut {
+        param(
+            [string]$Path,
+            [string]$Target,
+            [string]$Arguments = '',
+            [string]$Description = ''
+        )
+
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($Path)
+        $shortcut.TargetPath = $Target
+        if ($Arguments) { $shortcut.Arguments = $Arguments }
+        if ($Description) { $shortcut.Description = $Description }
+        $shortcut.WorkingDirectory = Split-Path $Target
+        $shortcut.Save()
+        }
+
+        function Register-Uninstall {
+        $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PathVeer'
+        $setupExe = Join-Path $InstallRoot 'PathVeerSetup.exe'
+
+        New-Item -Path $key -Force | Out-Null
+        Set-ItemProperty -Path $key -Name 'DisplayName'    -Value 'PathVeer'
+        Set-ItemProperty -Path $key -Name 'DisplayVersion' -Value $version
+        Set-ItemProperty -Path $key -Name 'Publisher'      -Value 'PathVeer'
+        Set-ItemProperty -Path $key -Name 'InstallLocation' -Value $InstallRoot
+        Set-ItemProperty -Path $key -Name 'UninstallString' -Value "`"$setupExe`" --uninstall"
+        Set-ItemProperty -Path $key -Name 'QuietUninstallString' -Value "`"$setupExe`" --uninstall"
+        Set-ItemProperty -Path $key -Name 'NoModify' -Value 1
+        Set-ItemProperty -Path $key -Name 'NoRepair' -Value 0
+        if (Test-Path $TrayExe) {
+            Set-ItemProperty -Path $key -Name 'DisplayIcon' -Value $TrayExe
+        }
+
+        Write-Detail "Registered PathVeer in Apps & Features (uninstall -> $setupExe --uninstall)."
+        }
+
+        function Unregister-Uninstall {
+        $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PathVeer'
+        if (Test-Path $key) {
+            Remove-Item $key -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Detail 'Uninstall registration removed.'
+        }
+        }
+
+        # --- actions ---------------------------------------------------------------
+
 
 function Invoke-Install {
     Assert-Administrator
@@ -460,6 +644,14 @@ function Invoke-Install {
     $version         = Get-PackageVersion $PackageDirectory
     $previousVersion = Get-InstalledVersion
 
+    # Phase 37.2: downgrade policy. Older-over-newer (incl. major) is blocked.
+    if ($previousVersion -and (Compare-VersionOrder $previousVersion $version) -gt 0) {
+        Write-ProgressRecord -Stage 'DowngradeBlocked' `
+            -Message "Installed $previousVersion is newer than $version."
+        Write-ResultRecord -Success $false -Category 'DowngradeBlocked' `
+            -Message "A newer version ($previousVersion) is already installed. Setup cannot install $version over it."
+        exit (Map-CategoryToExitCode 'DowngradeBlocked')
+    }
     Write-Host ''
     Write-Step "PathVeer $version -> $InstallRoot"
 
@@ -470,21 +662,31 @@ function Invoke-Install {
     }
 
     # 1. Verify BEFORE any teardown, so a corrupt package cannot strand the box.
-    Test-PackageIntegrity $PackageDirectory
+    Write-ProgressRecord -Stage 'VerifyingPackage' -Message 'Verifying package integrity...'
+    try {
+        Test-PackageIntegrity $PackageDirectory
+    } catch {
+        Write-ProgressRecord -Stage 'PackageVerificationFailed' -Message $_.Exception.Message
+        Write-ResultRecord -Success $false -Category 'PackageVerificationFail' `
+            -Message $_.Exception.Message
+        exit (Map-CategoryToExitCode 'PackageVerificationFail')
+    }
 
     # 2. Legacy authority down first.
     $legacyExisted = Test-ServiceExists $LegacyServiceName
 
     if ($legacyExisted) {
-        Write-Detail 'Legacy IranDirect service detected.'
+        Write-ProgressRecord -Stage 'StoppingLegacy' -Message 'Stopping legacy IranDirect service...'
         Stop-ServiceAndVerify -Name $LegacyServiceName -Label 'legacy IranDirect'
         Disable-LegacyService
     }
 
     # 3. Then the current service, so binaries are replaceable.
+    Write-ProgressRecord -Stage 'StoppingService' -Message 'Stopping PathVeer service...'
     Stop-ServiceAndVerify -Name $ServiceName -Label 'PathVeer'
 
     # 4. Replace binaries.
+    Write-ProgressRecord -Stage 'Installing' -Message 'Installing PathVeer binaries...'
     Install-Payload $PackageDirectory
 
     # 5. Point SCM at the canonical install root (never a dev checkout).
@@ -501,14 +703,17 @@ function Invoke-Install {
     }
 
     # 7. Start and prove health.
-    Write-Step 'Starting PathVeer service...'
+    Write-ProgressRecord -Stage 'StartingService' -Message 'Starting PathVeer service...'
     Start-Service -Name $ServiceName -ErrorAction Stop
 
     $service = Get-Service -Name $ServiceName
     try {
         $service.WaitForStatus('Running', $StatusTimeout)
     } catch {
-        throw "PathVeer did not reach Running. The legacy service remains stopped and disabled, so no second authority is active."
+        Write-ProgressRecord -Stage 'ServiceFailed' -Message $_.Exception.Message
+        Write-ResultRecord -Success $false -Category 'ServiceFailed' `
+            -Message 'PathVeer did not reach Running. The legacy service remains stopped and disabled, so no second authority is active.'
+        exit (Map-CategoryToExitCode 'ServiceFailed')
     }
 
     Start-Sleep -Seconds 2
@@ -518,7 +723,10 @@ function Invoke-Install {
         Write-Warning "Readiness validation failed: $($readiness.Reason)"
         Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
 
-        throw "PathVeer started but failed readiness validation. It has been stopped and the legacy service was NOT removed, so rollback remains possible."
+        Write-ProgressRecord -Stage 'ReadinessFailed' -Message $readiness.Reason
+        Write-ResultRecord -Success $false -Category 'ReadinessFailed' `
+            -Message "PathVeer started but failed readiness validation. It has been stopped and the legacy service was NOT removed, so rollback remains possible."
+        exit (Map-CategoryToExitCode 'ReadinessFailed')
     }
 
     Write-Detail "Readiness: $($readiness.Reason)"
@@ -538,10 +746,19 @@ function Invoke-Install {
         }
     }
 
+    # 9. Phase 37.2 shell integration (opt-in for backward-compatible dev behavior).
+    if ($RegisterShell) {
+        Write-ProgressRecord -Stage 'CreatingShortcuts' -Message 'Creating Start Menu entries...'
+        New-StartMenuEntries
+        Register-Uninstall
+    }
+
     Write-InstallManifest `
         -Version $version `
         -LegacyMigrated $legacyExisted `
         -PreviousVersion $previousVersion
+
+    Write-ProgressRecord -Stage 'Finished' -Message "PathVeer $version installed."
 
     Write-Host ''
     Write-Ok "SUCCESS: PathVeer $version installed."
@@ -553,6 +770,10 @@ function Invoke-Install {
     if ($legacyExisted) {
         Write-Detail 'Legacy state at %ProgramData%\IranDirect was preserved for rollback.'
     }
+
+    Write-ResultRecord -Success $true -Category 'Success' `
+        -Message "PathVeer $version installed."
+    exit $Script:ExitCode
 }
 
 function Invoke-Uninstall {
@@ -577,6 +798,8 @@ function Invoke-Uninstall {
         }
     }
 
+    Write-ProgressRecord -Stage 'ReleasingRoutes' -Message 'Releasing managed routes...'
+
     if (Test-ServiceExists $ServiceName) {
         Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
@@ -598,8 +821,15 @@ function Invoke-Uninstall {
         $stateRoot = Join-Path $env:ProgramData 'PathVeer'
 
         if (Test-Path $stateRoot) {
-            Remove-Item $stateRoot -Recurse -Force
-            Write-Warning "EXPLICIT PURGE: deleted $stateRoot."
+            try {
+                Remove-Item $stateRoot -Recurse -Force
+                Write-Warning "EXPLICIT PURGE: deleted $stateRoot."
+            } catch {
+                Write-ProgressRecord -Stage 'PurgeFailed' -Message $_.Exception.Message
+                Write-ResultRecord -Success $false -Category 'PurgeFailed' `
+                    -Message "Failed to delete state at $stateRoot : $($_.Exception.Message)"
+                exit (Map-CategoryToExitCode 'PurgeFailed')
+            }
         }
     }
     else {
@@ -609,10 +839,21 @@ function Invoke-Uninstall {
         Write-Detail 'Re-run with -PurgeState to delete it.'
     }
 
+    # Phase 37.2 shell cleanup (only meaningful if RegisterShell was used).
+    if ($RegisterShell) {
+        Write-ProgressRecord -Stage 'RemovingShortcuts' -Message 'Removing Start Menu entries...'
+        Remove-StartMenuEntries
+        Unregister-Uninstall
+    }
+
     Write-Detail "Legacy state at $env:ProgramData\IranDirect was not touched."
+
+    Write-ProgressRecord -Stage 'Finished' -Message 'PathVeer uninstalled.'
 
     Write-Host ''
     Write-Ok 'SUCCESS: PathVeer uninstalled.'
+    Write-ResultRecord -Success $true -Category 'Success' -Message 'PathVeer uninstalled.'
+    exit $Script:ExitCode
 }
 
 function Invoke-Status {
@@ -644,8 +885,44 @@ function Invoke-Status {
     Write-Host ''
 }
 
+# Phase 37.2: machine-readable installation state for the bootstrapper UI.
+function Get-InstallStateObject {
+    $installedVersion = Get-InstalledVersion
+    $serviceInstalled = Test-ServiceExists $ServiceName
+    $legacyInstalled  = Test-ServiceExists $LegacyServiceName
+    $legacyStateRoot  = Join-Path $env:ProgramData 'IranDirect'
+    $pathVeerStateRoot = Join-Path $env:ProgramData 'PathVeer'
+    $installRootPresent = (Test-Path $InstallRoot)
+    $manifestPresent    = (Test-Path $ManifestPath)
+
+    $state = [ordered]@{
+        productInstalled        = ($null -ne $installedVersion)
+        installedVersion        = $installedVersion
+        serviceInstalled        = $serviceInstalled
+        legacyIranDirectInstalled = $legacyInstalled
+        legacyStatePresent      = (Test-Path $legacyStateRoot)
+        pathVeerStatePresent    = (Test-Path $pathVeerStateRoot)
+        installRootPresent      = $installRootPresent
+        manifestPresent         = $manifestPresent
+        partialInstallation     = ($installRootPresent -or $serviceInstalled) -and (-not $installedVersion)
+    }
+
+    return $state
+}
+
+function Invoke-StateJson {
+    $state = Get-InstallStateObject
+    $json = $state | ConvertTo-Json -Depth 4 -Compress
+    if ($StateFile) {
+        Set-Content -Path $StateFile -Value $json -Encoding UTF8
+    } else {
+        [Console]::Out.Write($json)
+    }
+}
+
 switch ($Action) {
     'install'   { Invoke-Install }
     'uninstall' { Invoke-Uninstall }
     'status'    { Invoke-Status }
+    'statejson' { Invoke-StateJson }
 }
