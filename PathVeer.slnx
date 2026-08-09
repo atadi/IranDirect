@@ -5,6 +5,7 @@
   <Project Path="PathVeer.Core/PathVeer.Core.csproj" />
   <Project Path="PathVeer.Service/PathVeer.Service.csproj" />
   <Project Path="PathVeer.Service.Tests/PathVeer.Service.Tests.csproj" />
+  <Project Path="PathVeer.Setup/PathVeer.Setup.csproj" />
   <Project Path="PathVeer.Testing/PathVeer.Testing.csproj" />
   <Project Path="PathVeer.Tray/PathVeer.Tray.csproj" />
 </Solution>
