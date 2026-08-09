@@ -1,31 +1,34 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Principal;
+using System.Threading;
+using PathVeer.Core.Installer;
 
 namespace PathVeer.Setup;
 
 /// <summary>
-/// Phase 37.1 consumer-install bootstrap.
+/// Phase 37.2 consumer-install bootstrap.
 ///
-/// This executable is a thin, Authenticode-signable wrapper. It does NOT
-/// contain install/migration/state logic. The authoritative deployment
-/// contract lives in <c>Install-PathVeer.ps1</c> (embedded as a resource) and
-/// in <c>PathVeer.Core.Installation</c>. This bootstrapper's entire job is:
+/// This executable remains a thin, Authenticode-signable wrapper. It does NOT
+/// contain install/migration/state logic. The authoritative contract lives in
+/// the embedded <c>Install-PathVeer.ps1</c> (which in turn uses
+/// <c>PathVeer.Core.Installation</c>). This bootstrapper's job is to:
 ///
 ///   1. ensure it is running elevated (UAC prompt if not);
-///   2. locate the co-shipped package directory
-///      (<c>PathVeerSetup-&lt;ver&gt;-win-x64\PathVeer-&lt;ver&gt;</c>);
-///   3. hand control to the embedded PowerShell deployment script;
-///   4. report the script's exit status.
-///
-/// Keeping PowerShell as the single source of install truth means the
-/// bootstrapper and the dev/CI paths share identical upgrade/migration
-/// behavior, satisfying the "one deployment contract" requirement.
+///   2. ensure the required .NET runtime for the components is present;
+///   3. locate the co-shipped package directory;
+///   4. detect current install state and classify the scenario;
+///   5. present a normal Windows installer UI (or run /quiet unattended);
+///   6. invoke the embedded deployment script with structured output;
+///   7. translate the result into a user-facing state and a stable exit code.
 /// </summary>
 public static class Program
 {
     private const string ScriptResourceName =
         "PathVeer.Setup.Resources.Install-PathVeer.ps1";
+
+    private const string SingleInstanceMutexName =
+        @"Global\PathVeer.Setup.SingleInstance";
 
     private static readonly string[] PassthroughVerbs =
     [
@@ -35,7 +38,21 @@ public static class Program
 
     public static int Main(string[] args)
     {
+        // Single-instance protection: only one setup process should act on
+        // SCM / Program Files / ProgramData at a time (no broad app lock).
+        using var mutex = new Mutex(true, SingleInstanceMutexName, out bool created);
+        if (!created)
+        {
+            Console.Error.WriteLine(
+                "ERROR: another instance of PathVeer Setup is already running.");
+            return SetupExitCodes.InvalidArguments;
+        }
+
         Console.Title = "PathVeer Setup";
+
+        bool quiet = args.Any(a =>
+            string.Equals(a, "/quiet", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a, "--quiet", StringComparison.OrdinalIgnoreCase));
 
         if (args.Any(a =>
                 string.Equals(a, "--help", StringComparison.OrdinalIgnoreCase) ||
@@ -43,12 +60,12 @@ public static class Program
                 string.Equals(a, "/?", StringComparison.OrdinalIgnoreCase)))
         {
             PrintUsage();
-            return 0;
+            return SetupExitCodes.Success;
         }
 
         if (!IsAdministrator())
         {
-            return RelaunchElevated(args);
+            return RelaunchElevated(args, quiet);
         }
 
         string? packageDirectory = ResolvePackageDirectory(args);
@@ -57,103 +74,89 @@ public static class Program
             Console.Error.WriteLine(
                 "ERROR: could not locate the PathVeer package directory " +
                 "(expected a sibling 'PathVeer-<version>' folder).");
-            return 2;
+            return SetupExitCodes.PackageDirectoryNotFound;
         }
 
-        string scriptPath = ExtractScript();
+        string? scriptPath = ExtractScript();
         if (scriptPath is null)
         {
             Console.Error.WriteLine(
                 "ERROR: embedded deployment script was not found in this " +
                 "executable. The installer is corrupt.");
-            return 3;
+            return SetupExitCodes.ScriptResourceMissing;
         }
 
         Console.WriteLine($"PathVeer Setup {ThisVersion()}");
         Console.WriteLine($"Package: {packageDirectory}");
         Console.WriteLine();
 
-        return InvokeDeployment(scriptPath, packageDirectory, args);
+        // Phase 37.2 mandatory: the hosted components are framework-dependent.
+        var runtime = RuntimePrerequisite.Check();
+        if (!runtime.Satisfied)
+        {
+            Console.Error.WriteLine("ERROR: " + runtime.Message);
+            if (!quiet)
+            {
+                MessageBox.Show(
+                    runtime.Message,
+                    "PathVeer Setup — missing prerequisite",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+
+            return SetupExitCodes.RuntimePrerequisiteMissing;
+        }
+
+        var controller = new InstallController(scriptPath, packageDirectory);
+
+        if (quiet)
+        {
+            return RunQuiet(controller, args);
+        }
+
+        ApplicationConfiguration.Initialize();
+        using var form = new InstallForm(controller, ThisVersion());
+        Application.Run(form);
+        return form.DialogResult == DialogResult.Cancel
+            ? SetupExitCodes.UserCancelled
+            : SetupExitCodes.Success;
     }
 
-    private static int InvokeDeployment(
-        string scriptPath,
-        string packageDirectory,
-        string[] args)
+    private static int RunQuiet(InstallController controller, string[] args)
     {
-        List<string> psArgs =
-        [
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-File", scriptPath,
-            "-PackageDirectory", packageDirectory,
-        ];
+        // /quiet honor the same operation model with no window.
+        bool uninstall = args.Any(a =>
+            string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase));
+        bool purge = args.Any(a =>
+            string.Equals(a, "--purge-state", StringComparison.OrdinalIgnoreCase));
 
-        // Forward only known-safe verbs; never forward arbitrary input.
-        foreach (string a in args)
+        int exit;
+        if (uninstall)
         {
-            if (PassthroughVerbs.Contains(a, StringComparer.OrdinalIgnoreCase))
+            exit = controller.RunUninstall(
+                new UninstallOptions { PurgeState = purge }, registerShell: true);
+        }
+        else
+        {
+            var options = new InstallOptions
             {
-                psArgs.Add(a);
-            }
+                InstallTray = !args.Any(a =>
+                    string.Equals(a, "--no-tray", StringComparison.OrdinalIgnoreCase)),
+                LaunchTrayAfterInstall = false,
+                RegisterShell = true,
+            };
+            exit = controller.RunInstall(options);
         }
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "pwsh.exe",
-            ArgumentList = { },
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = false,
-        };
-
-        foreach (string a in psArgs)
-        {
-            startInfo.ArgumentList.Add(a);
-        }
-
-        // If pwsh is unavailable, fall back to Windows PowerShell.
-        if (!TryFindExecutable("pwsh.exe"))
-        {
-            startInfo.FileName = "powershell.exe";
-        }
-
-        using var process = new Process { StartInfo = startInfo };
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data is not null) Console.WriteLine(e.Data);
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null) Console.Error.WriteLine(e.Data);
-        };
-
-        try
-        {
-            process.Start();
-        }
-        catch (System.ComponentModel.Win32Exception ex)
-        {
-            Console.Error.WriteLine(
-                "ERROR: could not start PowerShell to run the installer: " +
-                ex.Message);
-            return 4;
-        }
-
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        process.WaitForExit();
-
-        return process.ExitCode;
+        Console.WriteLine(
+            exit == SetupExitCodes.Success ? "SUCCESS" : "FAILED:" + exit);
+        return exit;
     }
 
     private static string? ResolvePackageDirectory(string[] args)
     {
         string baseDir = AppContext.BaseDirectory;
 
-        // Try an explicit -PackageDirectory override first.
         for (int i = 0; i < args.Length - 1; i++)
         {
             if (string.Equals(
@@ -166,15 +169,10 @@ public static class Program
             }
         }
 
-        // The release layout co-locates the package beside the setup exe:
-        //   PathVeerSetup-1.0.0-win-x64/
-        //     PathVeerSetup-1.0.0-win-x64.exe
-        //     PathVeer-1.0.0/                <- package
         string? version = ThisVersion();
         string simple = Path.Combine(baseDir, $"PathVeer-{version}");
         if (Directory.Exists(simple)) return simple;
 
-        // Fallback: first sibling directory matching PathVeer-*.
         try
         {
             foreach (string dir in Directory
@@ -194,23 +192,26 @@ public static class Program
         return null;
     }
 
-    private static string ExtractScript()
+    private static string? ExtractScript()
     {
         var assembly = Assembly.GetExecutingAssembly();
         using Stream? stream = assembly.GetManifestResourceStream(
             ScriptResourceName);
         if (stream is null)
         {
-            throw new InvalidOperationException(
-                "Embedded deployment script not found in this executable.");
+            return null;
         }
 
-        string tempDir = Path.Combine(Path.GetTempPath(), "PathVeer.Setup");
+        // Unique, access-restricted temp location; verify before execution.
+        string tempDir = Path.Combine(
+            Path.GetTempPath(), "PathVeer.Setup." + Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
         string path = Path.Combine(tempDir, "Install-PathVeer.ps1");
 
-        using var fileStream = File.Create(path);
-        stream.CopyTo(fileStream);
+        using (var fileStream = File.Create(path))
+        {
+            stream.CopyTo(fileStream);
+        }
 
         return path;
     }
@@ -223,7 +224,7 @@ public static class Program
             WindowsBuiltInRole.Administrator);
     }
 
-    private static int RelaunchElevated(string[] args)
+    private static int RelaunchElevated(string[] args, bool quiet)
     {
         Console.WriteLine(
             "PathVeer Setup requires administrator privileges to install the " +
@@ -232,12 +233,12 @@ public static class Program
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = Environment.ProcessPath ??
-                       AppContext.BaseDirectory,
+            FileName = Environment.ProcessPath ?? AppContext.BaseDirectory,
             UseShellExecute = true,
             Verb = "runas",
         };
 
+        if (quiet) startInfo.ArgumentList.Add("/quiet");
         foreach (string a in args)
         {
             startInfo.ArgumentList.Add(a);
@@ -246,7 +247,7 @@ public static class Program
         try
         {
             using var process = Process.Start(startInfo);
-            if (process is null) return 5;
+            if (process is null) return SetupExitCodes.RelaunchFailed;
             process.WaitForExit();
             return process.ExitCode;
         }
@@ -254,7 +255,7 @@ public static class Program
         {
             Console.Error.WriteLine(
                 "Elevation was cancelled by the user. Installation aborted.");
-            return 6;
+            return SetupExitCodes.ElevationDenied;
         }
     }
 
@@ -262,8 +263,6 @@ public static class Program
     {
         string? version = typeof(Program).Assembly
             .GetName().Version?.ToString();
-        // AssemblyVersion is MAJOR.0.0.0; use InformationalVersion for the
-        // real prerelease-aware version when available.
         var attr = typeof(Program).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
         if (attr?.InformationalVersion is { } info)
@@ -275,40 +274,24 @@ public static class Program
         return version ?? "0.0.0";
     }
 
-    private static bool TryFindExecutable(string name)
-    {
-        string? pathEnv = Environment.GetEnvironmentVariable("PATH");
-        if (pathEnv is null) return false;
-        foreach (string dir in pathEnv.Split(
-                     Path.PathSeparator,
-                     StringSplitOptions.RemoveEmptyEntries))
-        {
-            string full = Path.Combine(dir, name);
-            if (File.Exists(full)) return true;
-        }
-
-        return false;
-    }
-
     private static void PrintUsage()
     {
         Console.WriteLine("PathVeer Setup — Windows installation bootstrapper");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  PathVeerSetup.exe [--uninstall] [--purge-state]");
-        Console.WriteLine("                   [--install-tray] [--status]");
+        Console.WriteLine("  PathVeerSetup.exe [options]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  (no args)     Fresh install / upgrade from the");
-        Console.WriteLine("                co-located PathVeer-<version> package");
-        Console.WriteLine("  --uninstall   Remove the Service and binaries,");
-        Console.WriteLine("                preserve %ProgramData%\\PathVeer");
-        Console.WriteLine("  --purge-state Also delete %ProgramData%\\PathVeer");
-        Console.WriteLine("                (explicit, destructive)");
-        Console.WriteLine("  --install-tray Register per-user Tray startup");
-        Console.WriteLine("  --status      Report installation state and exit");
+        Console.WriteLine("  (no args)  Interactive install / upgrade");
+        Console.WriteLine("  /quiet     Unattended mode (uses --install/--uninstall)");
+        Console.WriteLine("  --uninstall            Remove the Service and binaries,");
+        Console.WriteLine("                            preserve %ProgramData%\\PathVeer");
+        Console.WriteLine("  --purge-state           Also delete %ProgramData%\\PathVeer");
+        Console.WriteLine("  --install-tray          Register per-user Tray startup");
+        Console.WriteLine("  --no-tray               Do not register Tray startup (quiet)");
+        Console.WriteLine("  --status                Report installation state and exit");
         Console.WriteLine();
-        Console.WriteLine("All install/migration logic is delegated to the");
-        Console.WriteLine("embedded Install-PathVeer.ps1 deployment script.");
+        Console.WriteLine("All install/migration logic is delegated to the embedded");
+        Console.WriteLine("Install-PathVeer.ps1 deployment script.");
     }
 }

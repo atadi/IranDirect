@@ -5,15 +5,18 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
 
     <!--
-      Phase 37.1 — PathVeerSetup bootstrapper.
+      Phase 37.2 — PathVeerSetup consumer installer UI.
 
-      Self-contained single-file so a normal user receives a double-clickable
-      PathVeerSetup.exe with no .NET runtime prerequisite. This is the only
-      production packaging decision in 37.1; all actual install/upgrade/
-      migration/state logic remains in the PowerShell deployment contract
-      (Install-PathVeer.ps1) and PathVeer.Core.Installation.
+      WinForms is the smallest appropriate Windows UI toolkit for this
+      self-contained bootstrapper: it ships inside the .NET Windows Desktop
+      pack already present in the SDK, adds no external workload, behaves
+      correctly under High-DPI/accessibility, and keeps the bundle truly
+      single-file. The UI never implements install/migration/state logic;
+      it only collects intent, invokes the authoritative embedded
+      Install-PathVeer.ps1, and renders its structured progress/result.
     -->
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -21,6 +24,7 @@
     <PublishReadyToRun>true</PublishReadyToRun>
     <InvariantGlobalization>true</InvariantGlobalization>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,6 +32,7 @@
     <EmbeddedResource Include="Resources\Install-PathVeer.ps1">
       <LogicalName>PathVeer.Setup.Resources.Install-PathVeer.ps1</LogicalName>
     </EmbeddedResource>
+    <ProjectReference Include="..\PathVeer.Core\PathVeer.Core.csproj" />
   </ItemGroup>
 
 </Project>
