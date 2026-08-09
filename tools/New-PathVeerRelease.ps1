@@ -49,6 +49,10 @@ param(
     [string]$OutputDirectory,
 
     [Parameter(Mandatory = $false)]
+    [ValidateSet('stable', 'beta')]
+    [string]$Channel = 'stable',
+
+    [Parameter(Mandatory = $false)]
     [string]$RuntimeIdentifier = 'win-x64'
 )
 
@@ -63,6 +67,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 
 $PackageStep  = Join-Path $PSScriptRoot 'New-PathVeerPackage.ps1'
 $SignStep     = Join-Path $PSScriptRoot 'Sign-PathVeerArtifacts.ps1'
+$SignManifestStep = Join-Path $PSScriptRoot 'Sign-ReleaseManifest.ps1'
 
 $VersionedReleaseRoot = Join-Path $OutputDirectory "$Version"
 $ArchReleaseRoot      = Join-Path $VersionedReleaseRoot $RuntimeIdentifier
@@ -184,26 +189,55 @@ Get-ChildItem -Path $ArchReleaseRoot -Recurse -File |
 
 Set-Content -Path (Join-Path $ArchReleaseRoot 'checksums.txt') -Value $checksums -Encoding ASCII
 
+# Minimum direct-upgrade floor: same major.minor, patch 0 (pre-1.0 builds cannot
+# take a 1.0 installer directly). Kept simple for v1; tighten as migrations appear.
+$minUpgrade = if ($Version -match '^(\d+)\.(\d+)\.') { "$($Matches[1]).$($Matches[2]).0" } else { '1.0.0' }
+$installerUrl  = "https://releases.pathveer.com/windows/$Channel/PathVeerSetup-$Version-$RuntimeIdentifier.exe"
+$packageUrl    = "https://releases.pathveer.com/windows/$Channel/PathVeer-$Version-$RuntimeIdentifier.zip"
+
 $manifest = [ordered]@{
+    schemaVersion          = 1
     product                = 'PathVeer'
     version                = $Version
+    channel                = $Channel
     platform               = 'windows'
-    architecture           = $RuntimeIdentifier
-    runtime                = if ($Mode -eq 'Development/Unsigned') { 'self-contained' } else { 'self-contained' }
-    selfContained          = $true
-    installer              = $SetupExeName
-    installerSha256        = $setupHash
-    packageArchive         = $ZipName
-    packageArchiveSha256   = $zipHash
-    signed                 = $SignedFlag
-    minimumUpgradeVersion  = '1.0.0'
+    architecture           = 'x64'
     publishedAtUtc         = (Get-Date).ToUniversalTime().ToString('o')
+    minimumUpgradeVersion  = $minUpgrade
+    installer              = [ordered]@{
+        fileName = $SetupExeName
+        url      = $installerUrl
+        sha256   = $setupHash
+        size     = (Get-Item (Join-Path $ArchReleaseRoot $SetupExeName)).Length
+    }
+    packageArchive         = [ordered]@{
+        fileName = $ZipName
+        url      = $packageUrl
+        sha256   = $zipHash
+        size     = (Get-Item $zipPath).Length
+    }
+    signed                 = $SignedFlag
     releaseMode            = $Mode
     components             = @('Service', 'Cli', 'Tray')
 }
 
 $manifest | ConvertTo-Json -Depth 4 |
     Set-Content -Path (Join-Path $ArchReleaseRoot 'release-manifest.json') -Encoding UTF8
+
+# 5. Manifest signature (separate metadata key, ES256) — after generation so it
+# covers the final manifest bytes. Fail-closed under Release/Signed.
+$ManifestPath = Join-Path $ArchReleaseRoot 'release-manifest.json'
+if ($SignedMode) {
+    Write-Step "5/5 Signing release manifest (ES256)..."
+    & pwsh -NoLogo -NoProfile -File $SignManifestStep `
+        -ManifestPath $ManifestPath `
+        -KeyId 'pv-meta-2026' `
+        -FailIfUnavailable:$true
+    if ($LASTEXITCODE -ne 0) { throw "Manifest signing failed (Release/Signed requires a metadata signing key)." }
+}
+else {
+    Write-Step "5/5 Manifest signature SKIPPED (mode '$Mode')."
+}
 
 Write-Host ""
 Write-Host "SUCCESS: release built" -ForegroundColor Green
