@@ -1,4 +1,5 @@
 using PathVeer.Core;
+using PathVeer.Core.Installation;
 using PathVeer.Core.Configuration;
 using PathVeer.Core.CustomRoutes;
 using PathVeer.Core.Diagnostics;
@@ -61,7 +62,7 @@ public static class ServiceCompositionRoot
         {
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
-                "IranDirect/1.0");
+                ProductIdentity.UserAgent);
         });
         services.AddSingleton<ICountryPrefixSource>(
             serviceProvider =>
@@ -121,7 +122,7 @@ public static class ServiceCompositionRoot
         {
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
-                "IranDirect/1.0");
+                ProductIdentity.UserAgent);
         });
         services.AddSingleton(
             serviceProvider =>

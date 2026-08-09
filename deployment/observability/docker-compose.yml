@@ -37,17 +37,32 @@ volumes:
   # volumes intentionally KEEP their legacy `irandirect-*-data` names.
   # Renaming a named volume creates a NEW empty volume and silently orphans
   # existing Prometheus/Tempo/Grafana/Alertmanager state; data continuity
-  # outweighs brand consistency for opaque infrastructure identifiers.
-  # Persistent storage. Survives `docker compose down`; removed only by
-  # `docker compose down -v` (see README "Wipe data").
+  # --------------------------------------------------------------------
+  # PERSISTED VOLUMES — Phase 36.6/36.7 compatibility decision.
+  #
+  # The volume NAMES are intentionally the legacy `irandirect-*-data` values.
+  # They hold Prometheus/Tempo/Grafana/Alertmanager history that must survive
+  # the rebrand; renaming them would orphan that history. They were created by
+  # the old `irandirect-observability` compose project, so we declare them
+  # `external: true` and attach by name. This is what lets the current
+  # `pathveer-observability` project reuse them WITHOUT `docker compose down -v`
+  # (which would otherwise refuse/warn) and without depending on the deleted
+  # `C:\codespace\irandirect` checkout the old containers were bound to.
+  #
+  # Opaque infrastructure identifiers; brand consistency does not apply.
+  # --------------------------------------------------------------------
   prometheus-data:
     name: irandirect-prometheus-data
+    external: true
   tempo-data:
     name: irandirect-tempo-data
+    external: true
   grafana-data:
     name: irandirect-grafana-data
+    external: true
   alertmanager-data:
     name: irandirect-alertmanager-data
+    external: true
 
 services:
   # --------------------------------------------------------------------
