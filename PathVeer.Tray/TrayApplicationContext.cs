@@ -2,8 +2,10 @@ using PathVeer.Core;
 using PathVeer.Core.Configuration;
 using PathVeer.Core.Ipc;
 using PathVeer.Core.ServiceLifecycle;
+using PathVeer.Core.Update;
 using PathVeer.Core.Updates;
 using PathVeer.Core.Prefixes;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Principal;
@@ -35,6 +37,7 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _disableItem;
     private readonly ToolStripMenuItem _updateItem;
     private readonly ToolStripMenuItem _prefixUpdateCheckItem;
+    private readonly ToolStripMenuItem _appUpdateCheckItem;
     private readonly ToolStripMenuItem _repairItem;
     private readonly ToolStripMenuItem _configItem;
     private readonly ToolStripMenuItem _customRoutesItem;
@@ -99,6 +102,8 @@ public sealed class TrayApplicationContext :
             "Update prefixes");
         _prefixUpdateCheckItem = new ToolStripMenuItem(
             PrefixUpdateMenuPolicy.MenuItemText);
+        _appUpdateCheckItem = new ToolStripMenuItem(
+            "Check for app updates…");
         _repairItem = new ToolStripMenuItem(
             "Repair routes");
         _configItem = new ToolStripMenuItem(
@@ -187,6 +192,10 @@ public sealed class TrayApplicationContext :
             async (_, _) =>
                 await ExecuteCommandAsync(PathVeerCommand.Repair);
 
+        _appUpdateCheckItem.Click +=
+            async (_, _) =>
+                await CheckAppUpdatesAsync();
+
         _configItem.Click +=
             async (_, _) => await ShowConfigurationAsync();
 
@@ -225,6 +234,7 @@ public sealed class TrayApplicationContext :
         menu.Items.Add(_disableItem);
         menu.Items.Add(_updateItem);
         menu.Items.Add(_prefixUpdateCheckItem);
+        menu.Items.Add(_appUpdateCheckItem);
         menu.Items.Add(_repairItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_configItem);
@@ -542,6 +552,100 @@ finally
 
             await PollAsync();
         }
+    }
+
+    private async Task CheckAppUpdatesAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        SetBusy(true);
+
+        try
+        {
+            var source = TrayUpdateSourceFactory.Resolve();
+            if (source is null)
+            {
+                MessageBox.Show(
+                    "Automatic update checking is not yet configured. " +
+                    "It will be enabled when PathVeer distribution is published.",
+                    "PathVeer — app update check",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var verifier = BuildReleaseVerifier();
+            var installed = new InstalledVersionSource(
+                TrayUpdateSourceFactory.InstallManifestPath());
+            var checker = new UpdateChecker(source, verifier, installed);
+
+            var result = await checker.CheckAsync(UpdateChannel.Stable);
+            MessageBox.Show(
+                FormatAppUpdateResult(result),
+                "PathVeer — app update check",
+                MessageBoxButtons.OK,
+                result.State == UpdateCheckState.UpdateAvailable
+                    ? MessageBoxIcon.Information
+                    : MessageBoxIcon.Warning);
+        }
+        catch (Exception exception)
+        {
+            // Non-fatal: update-check failure must never affect routing.
+            MessageBox.Show(
+                "Unable to check for updates: " + exception.Message,
+                "PathVeer — app update check",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private static ReleaseSignatureVerifier BuildReleaseVerifier()
+    {
+        // 37.3: trust store for release-metadata keys. Production populates this
+        // from configuration; dev/unsigned mode tolerates an unsigned manifest.
+        // TODO(37.4): load trusted key set from signed configuration.
+        return new ReleaseSignatureVerifier(
+            new Dictionary<string, byte[]>(),
+            allowUnsigned: true);
+    }
+
+    private static string FormatAppUpdateResult(UpdateCheckResult result)
+    {
+        return result.State switch
+        {
+            UpdateCheckState.UpdateAvailable =>
+                $"PathVeer {result.Manifest?.Version} is available " +
+                $"(you have {result.InstalledVersion?.ToString() ?? "unknown"}).",
+            UpdateCheckState.NoUpdate =>
+                "PathVeer is up to date.",
+            UpdateCheckState.CurrentVersionNewer =>
+                "You have a newer version than the latest published release.",
+            UpdateCheckState.UnsupportedInstalledVersion =>
+                "Installed version could not be determined; cannot check safely.",
+            UpdateCheckState.MinimumUpgradeNotMet =>
+                "A direct upgrade from your version is not supported by this " +
+                "release. A manual reinstall may be required.",
+            UpdateCheckState.InvalidManifest =>
+                "The release information was malformed.",
+            UpdateCheckState.InvalidSignature =>
+                "The release information signature could not be verified.",
+            UpdateCheckState.IncompatibleArchitecture =>
+                "The available release does not match this machine architecture.",
+            UpdateCheckState.WrongProduct =>
+                "The release information is not for PathVeer.",
+            UpdateCheckState.WrongChannel =>
+                "No release is available for your update channel.",
+            UpdateCheckState.NetworkUnavailable =>
+                "Could not reach the update source.",
+            _ => result.Detail ?? "Update check completed."
+        };
     }
 
     private async Task<ServiceResponse?> RefreshStatusAsync(
