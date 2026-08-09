@@ -225,7 +225,7 @@ public class NamedPipeCommandServer
     {
         // Independent server-side dispatch span. The named-pipe server runs in
         // a separate process from the client, so this cannot be parented to the
-        // client IranDirect.IpcRequest root without changing the wire protocol.
+        // client PathVeer.IpcRequest root without changing the wire protocol.
         using IpcDispatchTelemetry.IpcDispatchScope dispatch =
             IpcDispatchTelemetry.Start(request.Command);
 

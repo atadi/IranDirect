@@ -127,7 +127,7 @@ public sealed class CustomRouteRefreshTelemetryTests
         var listener = new ActivityListener
         {
             ShouldListenTo = s =>
-                s.Name == IranDirectTelemetry.SourceName,
+                s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = a => started.Enqueue(a),
@@ -144,7 +144,7 @@ public sealed class CustomRouteRefreshTelemetryTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
             {
                 meterListener.EnableMeasurementEvents(instrument);
             }
@@ -152,7 +152,7 @@ public sealed class CustomRouteRefreshTelemetryTests
         listener.SetMeasurementEventCallback<long>(
             (instrument, value, tags, state) =>
             {
-                if (instrument.Name == IranDirectMetricNames.DnsLookups)
+                if (instrument.Name == PathVeerMetricNames.DnsLookups)
                 {
                     lookups.Enqueue(value);
                 }
@@ -161,7 +161,7 @@ public sealed class CustomRouteRefreshTelemetryTests
             (instrument, value, tags, state) =>
             {
                 if (instrument.Name ==
-                    IranDirectMetricNames.DnsLookupDuration)
+                    PathVeerMetricNames.DnsLookupDuration)
                 {
                     durations.Enqueue(value);
                 }
@@ -208,22 +208,22 @@ public sealed class CustomRouteRefreshTelemetryTests
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.CustomRouteRefresh));
+                PathVeerActivityNames.CustomRouteRefresh));
         Assert.Equal(
-            IranDirectTagValues.OperationCustomRouteRefresh,
+            PathVeerTagValues.OperationCustomRouteRefresh,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Operation).Value);
+                t.Key == PathVeerTagNames.Operation).Value);
 
         Assert.Contains(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.DnsCacheRead);
+                PathVeerActivityNames.DnsCacheRead);
 
         // Fresh cache: no DNS lookup child and no lookup counter.
         Assert.DoesNotContain(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.DnsResolve);
+                PathVeerActivityNames.DnsResolve);
         Assert.Empty(lookups);
         Assert.Empty(durations);
     }
@@ -267,27 +267,27 @@ public sealed class CustomRouteRefreshTelemetryTests
         Assert.Contains(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.DnsCacheRead);
+                PathVeerActivityNames.DnsCacheRead);
         Activity resolve = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.DnsResolve));
+                PathVeerActivityNames.DnsResolve));
         Assert.Contains(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.DnsCacheWrite);
+                PathVeerActivityNames.DnsCacheWrite);
 
         Assert.Equal(1, lookups.Count);
         Assert.Equal(1, durations.Count);
 
         Assert.Equal(
-            IranDirectTagValues.OperationDnsResolve,
+            PathVeerTagValues.OperationDnsResolve,
             resolve.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Operation).Value);
+                t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.SourceCustom,
+            PathVeerTagValues.SourceCustom,
             resolve.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Source).Value);
+                t.Key == PathVeerTagNames.Source).Value);
     }
 
     [Fact]
@@ -315,15 +315,15 @@ public sealed class CustomRouteRefreshTelemetryTests
         Assert.Contains(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.DnsCacheRead);
+                PathVeerActivityNames.DnsCacheRead);
         Assert.Contains(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.DnsResolve);
+                PathVeerActivityNames.DnsResolve);
         Assert.Contains(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.DnsCacheWrite);
+                PathVeerActivityNames.DnsCacheWrite);
 
         Assert.Equal(1, lookups.Count);
         Assert.Equal(1, durations.Count);
@@ -331,11 +331,11 @@ public sealed class CustomRouteRefreshTelemetryTests
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.CustomRouteRefresh));
+                PathVeerActivityNames.CustomRouteRefresh));
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
     }
 
     [Fact]
@@ -367,28 +367,28 @@ public sealed class CustomRouteRefreshTelemetryTests
         Activity resolve = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.DnsResolve));
+                PathVeerActivityNames.DnsResolve));
         Assert.Equal(
-            IranDirectTagValues.Failure,
+            PathVeerTagValues.Failure,
             resolve.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureTimeout,
+            PathVeerTagValues.FailureTimeout,
             resolve.Tags.Single(t =>
-                t.Key == IranDirectTagNames.FailureCategory).Value);
+                t.Key == PathVeerTagNames.FailureCategory).Value);
 
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.CustomRouteRefresh));
+                PathVeerActivityNames.CustomRouteRefresh));
         Assert.Equal(
-            IranDirectTagValues.Failure,
+            PathVeerTagValues.Failure,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureDns,
+            PathVeerTagValues.FailureDns,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.FailureCategory).Value);
+                t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -433,35 +433,35 @@ public sealed class CustomRouteRefreshTelemetryTests
         Activity resolve = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.DnsResolve));
+                PathVeerActivityNames.DnsResolve));
         Assert.Equal(
-            IranDirectTagValues.Failure,
+            PathVeerTagValues.Failure,
             resolve.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureTimeout,
+            PathVeerTagValues.FailureTimeout,
             resolve.Tags.Single(t =>
-                t.Key == IranDirectTagNames.FailureCategory).Value);
+                t.Key == PathVeerTagNames.FailureCategory).Value);
 
         // The root is Ok because stale data was served.
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.CustomRouteRefresh));
+                PathVeerActivityNames.CustomRouteRefresh));
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
 
         // cache_state=stale on the cache read and the failure cache write.
         Assert.All(
             stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.DnsCacheRead
-                || a.OperationName == IranDirectActivityNames.DnsCacheWrite),
+                a.OperationName == PathVeerActivityNames.DnsCacheRead
+                || a.OperationName == PathVeerActivityNames.DnsCacheWrite),
             a => Assert.Equal(
-                IranDirectTagValues.CacheStale,
+                PathVeerTagValues.CacheStale,
                 a.Tags.Single(t =>
-                    t.Key == IranDirectTagNames.CacheState).Value));
+                    t.Key == PathVeerTagNames.CacheState).Value));
 
         // One lookup attempt -> one counter increment, one duration sample,
         // and no second (duplicate) failed-workflow metric.
@@ -500,10 +500,10 @@ public sealed class CustomRouteRefreshTelemetryTests
                 a.OperationName,
                 new[]
                 {
-                    IranDirectActivityNames.DnsCacheRead,
-                    IranDirectActivityNames.DnsResolve,
-                    IranDirectActivityNames.DnsCacheWrite,
-                    IranDirectActivityNames.CustomRouteRefresh
+                    PathVeerActivityNames.DnsCacheRead,
+                    PathVeerActivityNames.DnsResolve,
+                    PathVeerActivityNames.DnsCacheWrite,
+                    PathVeerActivityNames.CustomRouteRefresh
                 });
         }
     }

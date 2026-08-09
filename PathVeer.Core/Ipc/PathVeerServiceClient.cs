@@ -145,7 +145,7 @@ public sealed class PathVeerServiceClient :
                 string? failureCategory =
                     (!response.Success &&
                      response.ErrorCode == "INVALID_RESPONSE")
-                        ? IranDirectTagValues.FailureInvalidResponse
+                        ? PathVeerTagValues.FailureInvalidResponse
                         : null;
 
                 root.Complete(

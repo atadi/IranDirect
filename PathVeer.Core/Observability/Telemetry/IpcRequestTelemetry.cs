@@ -5,12 +5,12 @@ using PathVeer.Core.Ipc;
 namespace PathVeer.Core.Observability.Telemetry;
 
 /// <summary>
-/// IPC request/response telemetry: one <c>IranDirect.IpcRequest</c> client root
+/// IPC request/response telemetry: one <c>PathVeer.IpcRequest</c> client root
 /// Activity per <see cref="PathVeerServiceClient.SendAsync"/> attempt, with
 /// <c>Ipc.Connect</c>, <c>Ipc.Send</c>, and <c>Ipc.Receive</c> child Activities
 /// created only around the operations that actually execute. Exactly one
-/// <c>irandirect.ipc.requests</c> counter increment and one
-/// <c>irandirect.ipc.request.duration</c> histogram sample per request attempt.
+/// <c>pathveer.ipc.requests</c> counter increment and one
+/// <c>pathveer.ipc.request.duration</c> histogram sample per request attempt.
 ///
 /// Privacy: no pipe name, payload, serialized request/response, command
 /// arguments, route identities, or exception message is attached. The only
@@ -23,37 +23,37 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// </summary>
 public static class IpcRequestTelemetry
 {
-    private static readonly Counter<long> s_requests = IranDirectTelemetry
+    private static readonly Counter<long> s_requests = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.IpcRequests,
+            PathVeerMetricNames.IpcRequests,
             unit: "{request}",
             description: "IPC request attempts started by the client.");
 
-    private static readonly Histogram<double> s_duration = IranDirectTelemetry
+    private static readonly Histogram<double> s_duration = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.IpcRequestDuration,
+            PathVeerMetricNames.IpcRequestDuration,
             unit: "ms",
             description: "Elapsed client-owned time of one IPC request.");
 
     internal static IpcRequestScope Start(PathVeerCommand command)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.IpcRequest,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.IpcRequest,
             ActivityKind.Client);
 
         activity?.SetTag(
-            IranDirectTagNames.Operation,
-            IranDirectTagValues.OperationIpcRequest);
+            PathVeerTagNames.Operation,
+            PathVeerTagValues.OperationIpcRequest);
         activity?.SetTag(
-            IranDirectTagNames.IpcCommand,
+            PathVeerTagNames.IpcCommand,
             TelemetryOutcomeMapper.Map(command));
 
         s_requests.Add(1,
             new KeyValuePair<string, object?>(
-                IranDirectTagNames.Operation,
-                IranDirectTagValues.OperationIpcRequest),
+                PathVeerTagNames.Operation,
+                PathVeerTagValues.OperationIpcRequest),
             new KeyValuePair<string, object?>(
-                IranDirectTagNames.IpcCommand,
+                PathVeerTagNames.IpcCommand,
                 TelemetryOutcomeMapper.Map(command)));
 
         return new IpcRequestScope(activity);
@@ -69,16 +69,16 @@ public static class IpcRequestTelemetry
             s_duration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome),
+                    PathVeerTagNames.Outcome, outcome),
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.FailureCategory, failureCategory));
+                    PathVeerTagNames.FailureCategory, failureCategory));
         }
         else
         {
             s_duration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome));
+                    PathVeerTagNames.Outcome, outcome));
         }
     }
 
@@ -97,26 +97,26 @@ public static class IpcRequestTelemetry
 
         public IpcChildScope StartConnect() =>
             StartChild(
-                IranDirectActivityNames.IpcConnect,
-                IranDirectTagValues.OperationIpcConnect);
+                PathVeerActivityNames.IpcConnect,
+                PathVeerTagValues.OperationIpcConnect);
 
         public IpcChildScope StartSend() =>
             StartChild(
-                IranDirectActivityNames.IpcSend,
-                IranDirectTagValues.OperationIpcSend);
+                PathVeerActivityNames.IpcSend,
+                PathVeerTagValues.OperationIpcSend);
 
         public IpcChildScope StartReceive() =>
             StartChild(
-                IranDirectActivityNames.IpcReceive,
-                IranDirectTagValues.OperationIpcReceive);
+                PathVeerActivityNames.IpcReceive,
+                PathVeerTagValues.OperationIpcReceive);
 
         internal IpcChildScope StartChild(
             string name,
             string operation)
         {
-            Activity? child = IranDirectTelemetry.ActivitySource
+            Activity? child = PathVeerTelemetry.ActivitySource
                 .StartActivity(name, ActivityKind.Client);
-            child?.SetTag(IranDirectTagNames.Operation, operation);
+            child?.SetTag(PathVeerTagNames.Operation, operation);
             return new IpcChildScope(child);
         }
 
@@ -126,7 +126,7 @@ public static class IpcRequestTelemetry
         public void CompleteTimeout() =>
             Complete(
                 TelemetryOutcome.Timeout,
-                IranDirectTagValues.FailureTimeout);
+                PathVeerTagValues.FailureTimeout);
 
         public void CompleteCancelled() =>
             Complete(TelemetryOutcome.Cancelled, null);
@@ -152,7 +152,7 @@ public static class IpcRequestTelemetry
             if (_activity is not null)
             {
                 _activity.SetTag(
-                    IranDirectTagNames.Outcome, outcomeString);
+                    PathVeerTagNames.Outcome, outcomeString);
                 if (outcome == TelemetryOutcome.Cancelled)
                 {
                     // Cancellation is not an error: leave status Unset and
@@ -164,7 +164,7 @@ public static class IpcRequestTelemetry
                     if (failureCategory is not null)
                     {
                         _activity.SetTag(
-                            IranDirectTagNames.FailureCategory,
+                            PathVeerTagNames.FailureCategory,
                             failureCategory);
                     }
                 }
@@ -212,7 +212,7 @@ public static class IpcRequestTelemetry
         public void CompleteTimeout() =>
             Complete(
                 TelemetryOutcome.Timeout,
-                IranDirectTagValues.FailureTimeout);
+                PathVeerTagValues.FailureTimeout);
 
         public void CompleteCancelled() =>
             Complete(TelemetryOutcome.Cancelled, null);
@@ -238,7 +238,7 @@ public static class IpcRequestTelemetry
             if (_activity is not null)
             {
                 _activity.SetTag(
-                    IranDirectTagNames.Outcome, outcomeString);
+                    PathVeerTagNames.Outcome, outcomeString);
                 if (outcome == TelemetryOutcome.Cancelled)
                 {
                     // Cancellation is not an error: leave status Unset.
@@ -249,7 +249,7 @@ public static class IpcRequestTelemetry
                     if (failureCategory is not null)
                     {
                         _activity.SetTag(
-                            IranDirectTagNames.FailureCategory,
+                            PathVeerTagNames.FailureCategory,
                             failureCategory);
                     }
                 }
@@ -269,8 +269,8 @@ public static class IpcRequestTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.OutcomeUnknown);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.OutcomeUnknown);
             _activity?.Dispose();
         }
     }

@@ -17,7 +17,7 @@ namespace PathVeer.Service.Observability;
 ///
 /// This is the ONLY place (outside tests) where OpenTelemetry packages are
 /// referenced. It attaches exporters to the existing, BCL-only
-/// <see cref="IranDirectTelemetry"/> ActivitySource and Meter. No workflow
+/// <see cref="PathVeerTelemetry"/> ActivitySource and Meter. No workflow
 /// instrumentation is added, and no Core business model references telemetry.
 ///
 /// Behavior:
@@ -25,7 +25,7 @@ namespace PathVeer.Service.Observability;
 ///   <item>When <c>Observability:Enabled</c> is false, nothing is registered
 ///   and existing Core telemetry stays a harmless no-op.</item>
 ///   <item>When enabled, tracing and/or metrics providers are registered for
-///   the single <c>IranDirect.Core</c> source/meter only.</item>
+///   the single <c>PathVeer.Core</c> source/meter only.</item>
 ///   <item>OTLP is attached only when explicitly enabled with a valid
 ///   endpoint.</item>
 ///   <item>The console exporter is attached only in Development AND when
@@ -45,12 +45,12 @@ public static class ObservabilityServiceCollectionExtensions
     private const string DevelopmentEnvironment = "Development";
 
     /// <summary>
-    /// Adds IranDirect OpenTelemetry hosting from the
+    /// Adds PathVeer OpenTelemetry hosting from the
     /// <c>Observability</c> configuration section. The host environment name
     /// is used as the deployment environment fallback and to gate the console
     /// exporter.
     /// </summary>
-    public static IServiceCollection AddIranDirectObservability(
+    public static IServiceCollection AddPathVeerObservability(
         this IServiceCollection services,
         IConfiguration configuration,
         string environmentName)
@@ -87,7 +87,7 @@ public static class ObservabilityServiceCollectionExtensions
 
         Resource resource = ObservabilityResourceBuilder.Create(
             options.ServiceName,
-            IranDirectTelemetry.Version,
+            PathVeerTelemetry.Version,
             resolvedEnvironment);
 
         if (options.TracingEnabled)
@@ -96,7 +96,7 @@ public static class ObservabilityServiceCollectionExtensions
             {
                 builder
                     .SetResourceBuilder(ResourceBuilder.CreateEmpty())
-                    .AddSource(IranDirectTelemetry.SourceName);
+                    .AddSource(PathVeerTelemetry.SourceName);
 
                 ConfigureSampling(builder, options.SamplingRatio);
 
@@ -120,7 +120,7 @@ public static class ObservabilityServiceCollectionExtensions
             {
                 builder
                     .SetResourceBuilder(ResourceBuilder.CreateEmpty())
-                    .AddMeter(IranDirectTelemetry.SourceName);
+                    .AddMeter(PathVeerTelemetry.SourceName);
 
                 if (options.Otlp.Enabled)
                 {

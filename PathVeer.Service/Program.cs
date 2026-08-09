@@ -27,7 +27,7 @@ builder.Services.AddPathVeerServiceComposition(
     builder.Configuration,
     dataDirectory);
 
-builder.Services.AddIranDirectObservability(
+builder.Services.AddPathVeerObservability(
     builder.Configuration,
     builder.Environment.EnvironmentName);
 

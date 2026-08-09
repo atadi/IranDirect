@@ -1,6 +1,6 @@
 # Observability Operations Guide
 
-How to operate the optional OpenTelemetry export layer in IranDirect.Service.
+How to operate the optional OpenTelemetry export layer in PathVeer.Service.
 
 ## Disabled by default
 
@@ -25,7 +25,7 @@ but is not exported anywhere.
 | `Observability:SamplingRatio` | `1.0` | Root span sampling ratio `0.0`–`1.0`. |
 | `Observability:ExportTimeoutSeconds` | `5` | OTLP per-export timeout (1–60). |
 | `Observability:ShutdownFlushTimeoutSeconds` | `5` | Bounded flush window on shutdown (1–30). |
-| `Observability:ServiceName` | `IranDirect.Service` | `service.name` resource attribute. |
+| `Observability:ServiceName` | `PathVeer.Service` | `service.name` resource attribute. |
 | `Observability:Environment` | `""` | `deployment.environment.name` (falls back to host env name). |
 | `Observability:Otlp:Enabled` | `false` | OTLP export switch. |
 | `Observability:Otlp:Endpoint` | `""` | Absolute `http(s)` collector URL. |
@@ -66,7 +66,7 @@ variable that holds the header string:
     "Enabled": true,
     "Endpoint": "https://otlp.collector.example:4318",
     "Protocol": "http/protobuf",
-    "HeadersEnvironmentVariable": "IRANDIRECT_OTLP_HEADERS"
+    "HeadersEnvironmentVariable": "PATHVEER_OTLP_HEADERS"
   }
 }
 ```
@@ -74,7 +74,7 @@ variable that holds the header string:
 Then supply the value out-of-band (CI secret, process environment):
 
 ```powershell
-$env:IRANDIRECT_OTLP_HEADERS = "Authorization=Bearer <token>"
+$env:PATHVEER_OTLP_HEADERS = "Authorization=Bearer <token>"
 ```
 
 - The header **value** never appears in configuration, logs, or exception
@@ -106,7 +106,7 @@ Example (Development only):
 
 Reported resource attributes (bounded, non-sensitive):
 
-- `service.name` = `IranDirect.Service` (configurable).
+- `service.name` = `PathVeer.Service` (configurable).
 - `service.version` = Core assembly informational version.
 - `deployment.environment.name` = configured environment or host env name.
 
@@ -169,18 +169,18 @@ If the OTLP collector is down or rejects exports:
 ```powershell
 # Development: console + local OTLP, headers from env
 $env:ASPNETCORE_ENVIRONMENT = "Development"
-$env:IRANDIRECT_OTLP_HEADERS = "Authorization=Bearer <dev-token>"
+$env:PATHVEER_OTLP_HEADERS = "Authorization=Bearer <dev-token>"
 # appsettings.Development.json:
 #   "Observability": { "Enabled": true,
 #     "Otlp": { "Enabled": true, "Endpoint": "http://localhost:4317",
-#               "HeadersEnvironmentVariable": "IRANDIRECT_OTLP_HEADERS" },
+#               "HeadersEnvironmentVariable": "PATHVEER_OTLP_HEADERS" },
 #     "Console": { "Enabled": true } }
 ```
 
 ## Alerting (Phase 33.4)
 
 The consumption stack evaluates alerts in **Prometheus** (group
-`irandirect_alerts`, 15 rules) and routes them through **Alertmanager** (fifth
+`pathveer_alerts`, 15 rules) and routes them through **Alertmanager** (fifth
 stack service). Alert *truth* lives in Prometheus; Grafana only links to alerts
 and runbooks and does not manage them.
 
@@ -207,20 +207,20 @@ Every alert links to `deployment/observability/runbooks/<name>.md`:
 
 | Alert | Runbook |
 |-------|---------|
-| `IranDirectServiceTelemetryAbsent` | `service-telemetry-absent.md` |
-| `IranDirectRuntimeCycleFailureRateHigh` / `…Critical` | `runtime-cycle-failures.md` |
-| `IranDirectRuntimeCycleLatencyHigh` | `runtime-cycle-latency.md` |
-| `IranDirectRouteOperationFailureRatioHigh` | `route-operation-failures.md` |
-| `IranDirectPrefixChecksFailing` | `prefix-check-failures.md` |
-| `IranDirectDnsLookupFailureRatioHigh` | `dns-lookup-failures.md` |
-| `IranDirectIpcTimeoutRatioHigh` | `ipc-timeouts.md` |
-| `IranDirectSupportExportFailures` | `support-export-failures.md` |
-| `IranDirectCollectorUnavailable` | `collector-unavailable.md` |
-| `IranDirectPrometheusTargetDown` | `prometheus-target-down.md` |
-| `IranDirectAlertmanagerUnavailable` | `alertmanager-unavailable.md` |
-| `IranDirectTempoUnavailable` | `tempo-unavailable.md` |
-| `IranDirectGrafanaUnavailable` | `grafana-unavailable.md` |
-| `IranDirectCollectCertificateOrAuthFailure` | `certificate-or-authentication-failure.md` |
+| `PathVeerServiceTelemetryAbsent` | `service-telemetry-absent.md` |
+| `PathVeerRuntimeCycleFailureRateHigh` / `…Critical` | `runtime-cycle-failures.md` |
+| `PathVeerRuntimeCycleLatencyHigh` | `runtime-cycle-latency.md` |
+| `PathVeerRouteOperationFailureRatioHigh` | `route-operation-failures.md` |
+| `PathVeerPrefixChecksFailing` | `prefix-check-failures.md` |
+| `PathVeerDnsLookupFailureRatioHigh` | `dns-lookup-failures.md` |
+| `PathVeerIpcTimeoutRatioHigh` | `ipc-timeouts.md` |
+| `PathVeerSupportExportFailures` | `support-export-failures.md` |
+| `PathVeerCollectorUnavailable` | `collector-unavailable.md` |
+| `PathVeerPrometheusTargetDown` | `prometheus-target-down.md` |
+| `PathVeerAlertmanagerUnavailable` | `alertmanager-unavailable.md` |
+| `PathVeerTempoUnavailable` | `tempo-unavailable.md` |
+| `PathVeerGrafanaUnavailable` | `grafana-unavailable.md` |
+| `PathVeerCollectCertificateOrAuthFailure` | `certificate-or-authentication-failure.md` |
 
 Procedure runbooks: `safe-restart.md`, `upgrade-and-rollback.md`. Coverage gap
 (documented, not alerted): `prometheus-storage-pressure.md` — no host/container
@@ -254,7 +254,7 @@ Key production changes:
   appear in config. The Service connects over `https://…:4317` and supplies the
   bearer token via `Observability:Otlp:HeadersEnvironmentVariable` (value from
   an out-of-band env var, never in appsettings). See
-  `IranDirect.Service/appsettings.Observability.Production.example.json`.
+  `PathVeer.Service/appsettings.Observability.Production.example.json`.
 - **Secrets.** Real secret files live in `production/secrets/` (git-ignored);
   `.env.production` is git-ignored too. Missing secret → container fails to
   start loudly. No secret value in any committed file.

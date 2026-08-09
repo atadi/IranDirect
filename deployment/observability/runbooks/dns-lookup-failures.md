@@ -1,9 +1,9 @@
-# Runbook: IranDirectDnsLookupFailureRatioHigh
+# Runbook: PathVeerDnsLookupFailureRatioHigh
 
-- **Alert:** `IranDirectDnsLookupFailureRatioHigh`
+- **Alert:** `PathVeerDnsLookupFailureRatioHigh`
 - **Severity:** warning
-- **Dashboard:** `irandirect-prefix-dns`
-- **Prometheus query:** `sum(rate(irandirect_dns_lookups_total{outcome!="success"}[15m])) / sum(rate(irandirect_dns_lookups_total[15m]))`
+- **Dashboard:** `pathveer-prefix-dns`
+- **Prometheus query:** `sum(rate(pathveer_dns_lookups_total{outcome!="success"}[15m])) / sum(rate(pathveer_dns_lookups_total[15m]))`
 
 ## What it means
 More than 20% of custom-route DNS lookups failed over 15m.
@@ -12,8 +12,8 @@ More than 20% of custom-route DNS lookups failed over 15m.
 Custom-route resolution is partially failing; some custom routes may not be correctly evaluated.
 
 ## Dashboard
-Open the `irandirect-prefix-dns` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `sum(rate(irandirect_dns_lookups_total{outcome!="success"}[15m])) / sum(rate(irandirect_dns_lookups_total[15m]))`
+Open the `pathveer-prefix-dns` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `sum(rate(pathveer_dns_lookups_total{outcome!="success"}[15m])) / sum(rate(pathveer_dns_lookups_total[15m]))`
 
 ## Symptoms
 Prefix/DNS dashboard 'DNS lookup rate (by outcome)' showing failure share.
@@ -40,7 +40,7 @@ DNS outcome history, resolver reachability result, sample resolution result (no 
 DNS lookup failure ratio returns below 20%.
 
 ## Related alerts
-IranDirectPrefixChecksFailing
+PathVeerPrefixChecksFailing
 
 ## Ownership
 Service / Network

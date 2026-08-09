@@ -1,10 +1,11 @@
 {
-  "uid": "irandirect-service-overview",
-  "title": "IranDirect / Service Overview",
-  "description": "Top-level health of IranDirect.Service: cycle throughput, outcomes, latency and route-operation reliability. Provisioned from git (Phase 33.3) - edit the JSON, not the UI.",
+  "uid": "pathveer-reliability-errors",
+  "title": "PathVeer / Reliability and Errors",
+  "description": "Operational triage: failures, cancellations, tail latency and telemetry pipeline health. Contains no alert rules - triage only.",
   "tags": [
-    "irandirect",
-    "overview",
+    "pathveer",
+    "reliability",
+    "triage",
     "provisioned"
   ],
   "schemaVersion": 39,
@@ -25,13 +26,13 @@
         "type": "query",
         "datasource": {
           "type": "prometheus",
-          "uid": "irandirect-prometheus"
+          "uid": "pathveer-prometheus"
         },
         "query": {
-          "query": "label_values(irandirect_runtime_cycles_started_total, deployment_environment_name)",
+          "query": "label_values(pathveer_runtime_cycles_started_total, deployment_environment_name)",
           "refId": "env"
         },
-        "definition": "label_values(irandirect_runtime_cycles_started_total, deployment_environment_name)",
+        "definition": "label_values(pathveer_runtime_cycles_started_total, deployment_environment_name)",
         "refresh": 2,
         "includeAll": true,
         "allValue": ".*",
@@ -46,9 +47,9 @@
       "title": "Explore traces in Tempo",
       "type": "link",
       "icon": "external link",
-      "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
+      "url": "/explore?left=%7B%22datasource%22:%22pathveer-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22PathVeer.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
       "targetBlank": true,
-      "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+      "tooltip": "Open Tempo filtered by service.name=PathVeer.Service"
     },
     {
       "title": "Alertmanager",
@@ -63,7 +64,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Service state",
+      "title": "Failure overview",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -76,11 +77,11 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Telemetry last seen",
-      "description": "Age of the most recent runtime-cycle sample. Rising steadily => the Service is not reporting.",
+      "title": "Cycle failure rate",
+      "description": "Failed reconciliation cycles per second. Empty until a cycle fails.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 5,
@@ -92,11 +93,208 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "time() - max(timestamp(irandirect_runtime_cycles_started_total{deployment_environment_name=~\"$env\"}))",
-          "legendFormat": "last seen",
+          "expr": "sum(rate(pathveer_runtime_cycles_failed_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "failures/s",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Route operation failure rate",
+      "description": "Failed native route system calls per second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pathveer-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(pathveer_routes_operations_failed_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "failures/s",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Cancellation rate",
+      "description": "Cycle cancellations per second; expected only around shutdown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pathveer-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(pathveer:runtime_cycle_cancelled_rate5m{deployment_environment_name=~\"$env\"})",
+          "legendFormat": "cancels/s",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Telemetry last seen",
+      "description": "Seconds since the last runtime-cycle sample. Growing => Service down or export broken.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pathveer-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - max(timestamp(pathveer_runtime_cycles_started_total{deployment_environment_name=~\"$env\"}))",
+          "legendFormat": "age",
           "range": false,
           "instant": true,
           "refId": "A"
@@ -145,214 +343,9 @@
       }
     },
     {
-      "id": 3,
-      "type": "stat",
-      "title": "Cycle start rate",
-      "description": "Runtime reconciliation cycles started per second (5m rate).",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "irandirect-prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 1
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "irandirect-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(irandirect:runtime_cycle_rate5m{deployment_environment_name=~\"$env\"})",
-          "legendFormat": "cycles/s",
-          "range": false,
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          },
-          "color": {
-            "mode": "thresholds"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "textMode": "auto",
-        "orientation": "auto"
-      }
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Cycle success ratio",
-      "description": "Completed cycles over started cycles (5m). Empty when idle - the rule guards division by zero.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "irandirect-prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 12,
-        "y": 1
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "irandirect-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "max(irandirect:runtime_cycle_success_ratio5m{deployment_environment_name=~\"$env\"})",
-          "legendFormat": "success",
-          "range": false,
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.9
-              },
-              {
-                "color": "green",
-                "value": 0.99
-              }
-            ]
-          },
-          "color": {
-            "mode": "thresholds"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "textMode": "auto",
-        "orientation": "auto"
-      }
-    },
-    {
-      "id": 5,
-      "type": "stat",
-      "title": "Cancellation ratio",
-      "description": "Cancelled cycles over started cycles (5m). Non-zero around shutdown is expected.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "irandirect-prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 18,
-        "y": 1
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "irandirect-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "max(irandirect:runtime_cycle_cancelled_ratio5m{deployment_environment_name=~\"$env\"})",
-          "legendFormat": "cancelled",
-          "range": false,
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.05
-              },
-              {
-                "color": "red",
-                "value": 0.25
-              }
-            ]
-          },
-          "color": {
-            "mode": "thresholds"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "textMode": "auto",
-        "orientation": "auto"
-      }
-    },
-    {
       "id": 6,
       "type": "row",
-      "title": "Throughput and outcomes",
+      "title": "Failures over time",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -365,11 +358,11 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Runtime cycles started (by trigger)",
-      "description": "Start rate split by what triggered the cycle (scheduled / repair / startup).",
+      "title": "Runtime cycle failures and cancellations",
+      "description": "Absolute failure and cancellation rates.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -381,14 +374,26 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_rate5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "{{trigger}}",
+          "expr": "sum(rate(pathveer_runtime_cycles_failed_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "failed",
           "range": true,
           "instant": false,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(pathveer_runtime_cycles_cancelled_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "cancelled",
+          "range": true,
+          "instant": false,
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -426,11 +431,11 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Runtime cycles completed (by outcome)",
-      "description": "Completion rate split by terminal outcome. `no_change` dominating is the healthy steady state.",
+      "title": "Route operation failures (by operation)",
+      "description": "Failed route system calls split by operation kind.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -442,11 +447,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_completed_rate5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "{{outcome}}",
+          "expr": "sum by (operation) (rate(pathveer_routes_operations_failed_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "{{operation}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -487,15 +492,15 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Cycle success / no-change ratio",
-      "description": "Success ratio against the share of cycles that found nothing to reconcile.",
+      "title": "DNS lookup failures",
+      "description": "Non-success DNS outcomes per second.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 15
       },
@@ -503,31 +508,19 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_success_ratio5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "success ratio",
+          "expr": "sum by (outcome) (rate(pathveer_dns_lookups_total{deployment_environment_name=~\"$env\",outcome!=\"success\"}[5m]))",
+          "legendFormat": "{{outcome}}",
           "range": true,
           "instant": false,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "irandirect-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_no_change_ratio5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "no-change ratio",
-          "range": true,
-          "instant": false,
-          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "reqps",
           "custom": {
             "drawStyle": "line",
             "lineWidth": 1,
@@ -560,27 +553,27 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Cycle cancellations",
-      "description": "Cancellation rate. Expected to spike only at service stop.",
+      "title": "IPC failures and timeouts",
+      "description": "Non-success IPC outcomes per second.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 15
       },
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_cancelled_rate5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "cancelled/s",
+          "expr": "sum by (outcome) (rate(pathveer_ipc_requests_total{deployment_environment_name=~\"$env\",outcome!=\"success\"}[5m]))",
+          "legendFormat": "{{outcome}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -620,8 +613,69 @@
     },
     {
       "id": 11,
+      "type": "timeseries",
+      "title": "Support export failures",
+      "description": "Failed support bundle exports per second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pathveer-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(pathveer_support_bundles_failed_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "legendFormat": "failed",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
       "type": "row",
-      "title": "Latency",
+      "title": "High latency",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -632,17 +686,17 @@
       "panels": []
     },
     {
-      "id": 12,
+      "id": 13,
       "type": "timeseries",
-      "title": "Runtime cycle duration p50/p95/p99",
-      "description": "Cycle wall-clock latency quantiles from the recording rules (milliseconds).",
+      "title": "p99 latency across operations",
+      "description": "Tail latency for every emitted duration family. Spikes here precede user-visible stalls.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 16,
+        "h": 9,
+        "w": 24,
         "x": 0,
         "y": 24
       },
@@ -650,11 +704,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_duration_p50_5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "p50",
+          "expr": "pathveer:runtime_cycle_duration_p99_5m{deployment_environment_name=~\"$env\"}",
+          "legendFormat": "runtime cycle p99",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -662,11 +716,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_duration_p95_5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "p95",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pathveer_runtime_planning_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "planning p99",
           "range": true,
           "instant": false,
           "refId": "B"
@@ -674,14 +728,26 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "irandirect:runtime_cycle_duration_p99_5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "p99",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pathveer_runtime_execution_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "execution p99",
           "range": true,
           "instant": false,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pathveer_routes_system_call_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "legendFormat": "route syscall p99",
+          "range": true,
+          "instant": false,
+          "refId": "D"
         }
       ],
       "fieldConfig": {
@@ -717,29 +783,42 @@
       }
     },
     {
-      "id": 13,
+      "id": 14,
+      "type": "row",
+      "title": "Pipeline health",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 15,
       "type": "stat",
-      "title": "Mean cycle duration",
-      "description": "rate(sum)/rate(count) - never an average of bucket values.",
+      "title": "Prometheus targets up",
+      "description": "Number of healthy scrape targets. Expect 2 (collector + prometheus).",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 24
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 34
       },
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "max(irandirect:runtime_cycle_duration_mean5m{deployment_environment_name=~\"$env\"})",
-          "legendFormat": "mean",
+          "expr": "sum(up)",
+          "legendFormat": "targets up",
           "range": false,
           "instant": true,
           "refId": "A"
@@ -747,7 +826,157 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Collector scrape health",
+      "description": "1 = the collector's Prometheus endpoint is being scraped successfully.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pathveer-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 34
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(up{job=\"otel-collector\"})",
+          "legendFormat": "collector up",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Scrape duration (collector)",
+      "description": "How long the collector scrape takes; rising values indicate cardinality growth.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pathveer-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 34
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(scrape_duration_seconds{job=\"otel-collector\"})",
+          "legendFormat": "scrape",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -780,164 +1009,29 @@
       }
     },
     {
-      "id": 14,
-      "type": "row",
-      "title": "Work shape",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 32
-      },
-      "collapsed": false,
-      "panels": []
-    },
-    {
-      "id": 15,
-      "type": "timeseries",
-      "title": "Changed routes per cycle (p95)",
-      "description": "95th percentile of routes changed per reconciliation cycle.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "irandirect-prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 0,
-        "y": 33
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "irandirect-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irandirect:runtime_changed_routes_p95_5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "p95 routes",
-          "range": true,
-          "instant": false,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "auto",
-            "spanNulls": false,
-            "axisLabel": ""
-          },
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 16,
-      "type": "timeseries",
-      "title": "Operations per cycle (p95)",
-      "description": "95th percentile of executed operations per cycle.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "irandirect-prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 33
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "irandirect-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irandirect:runtime_operations_per_cycle_p95_5m{deployment_environment_name=~\"$env\"}",
-          "legendFormat": "p95 operations",
-          "range": true,
-          "instant": false,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "auto",
-            "spanNulls": false,
-            "axisLabel": ""
-          },
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 17,
+      "id": 18,
       "type": "stat",
-      "title": "Route operation success ratio",
-      "description": "Succeeded over requested route system calls (5m, all operations).",
+      "title": "Series scraped (collector)",
+      "description": "Sample count from the last collector scrape - a cardinality smoke test.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 33
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 34
       },
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "max(irandirect:routes_operation_success_ratio5m:total{deployment_environment_name=~\"$env\"})",
-          "legendFormat": "success",
+          "expr": "max(scrape_samples_scraped{job=\"otel-collector\"})",
+          "legendFormat": "samples",
           "range": false,
           "instant": true,
           "refId": "A"
@@ -945,22 +1039,14 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "short",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "text",
                 "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.95
-              },
-              {
-                "color": "green",
-                "value": 0.999
               }
             ]
           },
@@ -986,36 +1072,97 @@
       }
     },
     {
-      "id": 18,
+      "id": 19,
+      "type": "timeseries",
+      "title": "Scrape target availability",
+      "description": "up{} over time for every target in the stack.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pathveer-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pathveer-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "up",
+          "legendFormat": "{{job}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": ""
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 20,
       "type": "row",
       "title": "Coverage notes",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 47
       },
       "collapsed": false,
       "panels": []
     },
     {
-      "id": 19,
+      "id": 21,
       "type": "text",
-      "title": "Gauges not currently emitted",
-      "description": "Why service-state gauge panels are absent from this dashboard.",
+      "title": "Scope and missing labels",
+      "description": "Why failure_category and Tempo panels are absent.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 48
       },
       "options": {
         "mode": "markdown",
-        "content": "**Not emitted by the running Service.** The Phase 32 telemetry contract reserves these names, but no instrument is created for them in production code (verified Phase 33.3 s2):\n\n- `irandirect.service.enabled`\n- `irandirect.runtime.worker.active`\n- `irandirect.prefix.known_count`\n- `irandirect.routes.inventory_count`\n- `irandirect.dns.cache_record_count`\n- `irandirect.prefix.consecutive_failures`\n\nPanels for these are intentionally **absent** rather than shown as a misleading zero. They will appear once the gauges are instrumented."
+        "content": "**Triage aid, not alerting.** Phase 33.3 ships no Grafana alert rules and no notification integrations.\n\n**`failure_category` is not available.** The tag is defined in the Phase 32 contract but does **not** appear on any live metric series, so failure-category breakdowns are omitted rather than written against a label that would never match. Failures are instead broken down by `outcome` and `operation`, which *are* exported.\n\n**Runtime cycle failures:** `pathveer_runtime_cycles_failed_total` is instrumented but was never observed - the panel stays empty until a cycle actually fails.\n\n**Tempo availability** is not queryable from Prometheus in this stack (Tempo publishes no scraped metrics here), so no Tempo panel is provided. Use the dashboard link above to reach Tempo directly."
       }
     },
     {
-      "id": 21,
+      "id": 23,
       "type": "text",
       "title": "Alert coverage & runbooks",
       "description": "How to reach alerts and runbooks for this dashboard.",
@@ -1027,7 +1174,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `IranDirectServiceTelemetryAbsent` \u2192 `deployment/observability/runbooks/service-telemetry-absent.md`\n- `IranDirectRuntimeCycleFailureRateHigh` \u2192 `deployment/observability/runbooks/runtime-cycle-failures.md`\n- `IranDirectRuntimeCycleFailureRateCritical` \u2192 `deployment/observability/runbooks/runtime-cycle-failures.md`\n- `IranDirectRuntimeCycleLatencyHigh` \u2192 `deployment/observability/runbooks/runtime-cycle-latency.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
+        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `PathVeerCollectorUnavailable` \u2192 `deployment/observability/runbooks/collector-unavailable.md`\n- `PathVeerPrometheusTargetDown` \u2192 `deployment/observability/runbooks/prometheus-target-down.md`\n- `PathVeerAlertmanagerUnavailable` \u2192 `deployment/observability/runbooks/alertmanager-unavailable.md`\n- `PathVeerTempoUnavailable` \u2192 `deployment/observability/runbooks/tempo-unavailable.md`\n- `PathVeerGrafanaUnavailable` \u2192 `deployment/observability/runbooks/grafana-unavailable.md`\n- `PathVeerCollectCertificateOrAuthFailure` \u2192 `deployment/observability/runbooks/certificate-or-authentication-failure.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
       }
     }
   ]

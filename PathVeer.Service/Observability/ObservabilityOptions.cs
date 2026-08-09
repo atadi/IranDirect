@@ -2,8 +2,8 @@ namespace PathVeer.Service.Observability;
 
 /// <summary>
 /// Configuration contract for optional OpenTelemetry hosting in the
-/// IranDirect Service. Telemetry is disabled by default; enabling it only
-/// attaches exporters to the existing <c>IranDirect.Core</c> ActivitySource and
+/// PathVeer Service. Telemetry is disabled by default; enabling it only
+/// attaches exporters to the existing <c>PathVeer.Core</c> ActivitySource and
 /// Meter. No workflow instrumentation is added here (that lives in Core).
 ///
 /// Secrets (OTLP headers/tokens) are never stored in configuration; they are
@@ -47,10 +47,10 @@ public sealed record ObservabilityOptions
 
     /// <summary>
     /// OpenTelemetry <c>service.name</c> resource attribute. Defaults to
-    /// <c>IranDirect.Service</c> when blank.
+    /// <c>PathVeer.Service</c> when blank.
     /// </summary>
     public string ServiceName { get; init; } =
-        "IranDirect.Service";
+        "PathVeer.Service";
 
     /// <summary>
     /// Deployment environment name (<c>deployment.environment.name</c>). When

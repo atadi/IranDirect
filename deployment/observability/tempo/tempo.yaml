@@ -1,4 +1,4 @@
-# Tempo configuration - IranDirect Phase 33.2.
+# Tempo configuration - PathVeer Phase 33.2.
 #
 # Single-binary Tempo with a filesystem backend and local blocks. No object
 # storage and no external search backend (Phase 33.1 s8). Retention is a

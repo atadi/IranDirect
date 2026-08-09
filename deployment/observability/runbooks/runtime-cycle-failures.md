@@ -1,9 +1,9 @@
-# Runbook: IranDirectRuntimeCycleFailureRateHigh / IranDirectRuntimeCycleFailureRateCritical
+# Runbook: PathVeerRuntimeCycleFailureRateHigh / PathVeerRuntimeCycleFailureRateCritical
 
-- **Alert:** `IranDirectRuntimeCycleFailureRateHigh / IranDirectRuntimeCycleFailureRateCritical`
+- **Alert:** `PathVeerRuntimeCycleFailureRateHigh / PathVeerRuntimeCycleFailureRateCritical`
 - **Severity:** warning / critical
-- **Dashboard:** `irandirect-reliability-errors`
-- **Prometheus query:** `sum(rate(irandirect_runtime_cycles_failed_total[10m])) / sum(rate(irandirect_runtime_cycles_started_total[10m]))`
+- **Dashboard:** `pathveer-reliability-errors`
+- **Prometheus query:** `sum(rate(pathveer_runtime_cycles_failed_total[10m])) / sum(rate(pathveer_runtime_cycles_started_total[10m]))`
 
 ## What it means
 A high share of runtime reconciliation cycles are failing (>10% warning, >30% critical over 10m).
@@ -12,8 +12,8 @@ A high share of runtime reconciliation cycles are failing (>10% warning, >30% cr
 Desired-state convergence is partially (warning) or largely (critical) failing. Routes may drift from the configured desired state.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `sum(rate(irandirect_runtime_cycles_failed_total[10m])) / sum(rate(irandirect_runtime_cycles_started_total[10m]))`
+Open the `pathveer-reliability-errors` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `sum(rate(pathveer_runtime_cycles_failed_total[10m])) / sum(rate(pathveer_runtime_cycles_started_total[10m]))`
 
 ## Symptoms
 Reliability dashboard 'Runtime cycle failures and cancellations' rising; success ratio dropping.
@@ -22,7 +22,7 @@ Reliability dashboard 'Runtime cycle failures and cancellations' rising; success
 Transient infrastructure during reconcile; planner/executor exception; downstream API throttling; a bad desired-state change being repeatedly rejected.
 
 ## Safe checks
-Open the Runtime Reconciliation dashboard; correlate failures with planning vs execution p95; check Tempo traces for the failing cycles (Explore -> service.name=IranDirect.Service).
+Open the Runtime Reconciliation dashboard; correlate failures with planning vs execution p95; check Tempo traces for the failing cycles (Explore -> service.name=PathVeer.Service).
 
 ## Corrective actions
 Identify the failing phase from traces. If a specific desired-state change is rejected, fix or roll back that change. If throttling, back off the reconcile trigger. Treat critical as a site-affecting incident.
@@ -40,7 +40,7 @@ Failing cycle traces in Tempo, the change that correlates with failure onset, su
 Failure ratio returns below 10% and cycles complete successfully.
 
 ## Related alerts
-IranDirectRuntimeCycleLatencyHigh, IranDirectRouteOperationFailureRatioHigh
+PathVeerRuntimeCycleLatencyHigh, PathVeerRouteOperationFailureRatioHigh
 
 ## Ownership
 Service / SRE

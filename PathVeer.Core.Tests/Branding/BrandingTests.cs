@@ -156,11 +156,14 @@ public sealed class BrandingTests
     }
 
     [Fact]
-    public void TelemetryIdentityFrozen()
+    public void TelemetryIdentityIsPathVeer()
     {
-        // Phase 36.6 owns telemetry rename; the source/meter identity stays
-        // IranDirect.Core until then.
-        Assert.Equal("IranDirect.Core", IranDirectTelemetry.SourceName);
+        // Phase 36.6 migrated the telemetry identity: the single
+        // ActivitySource/Meter name is PathVeer.Core (hard cutover, no
+        // dual publication under the legacy IranDirect.Core name).
+        Assert.Equal("PathVeer.Core", PathVeerTelemetry.SourceName);
+        Assert.Equal("PathVeer.Core", PathVeerTelemetry.ActivitySource.Name);
+        Assert.Equal("PathVeer.Core", PathVeerTelemetry.Meter.Name);
     }
 
     [Fact]

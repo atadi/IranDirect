@@ -5,14 +5,14 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// architecture. Span names are NEVER built dynamically and MUST NOT contain
 /// identities, prefixes, domains, paths, commands, or IDs.
 /// </summary>
-public static class IranDirectActivityNames
+public static class PathVeerActivityNames
 {
     // Root spans
-    public const string RuntimeCycle = "IranDirect.RuntimeCycle";
-    public const string PrefixUpdateCheck = "IranDirect.PrefixUpdateCheck";
-    public const string CustomRouteRefresh = "IranDirect.CustomRouteRefresh";
-    public const string IpcRequest = "IranDirect.IpcRequest";
-    public const string SupportBundleExport = "IranDirect.SupportBundleExport";
+    public const string RuntimeCycle = "PathVeer.RuntimeCycle";
+    public const string PrefixUpdateCheck = "PathVeer.PrefixUpdateCheck";
+    public const string CustomRouteRefresh = "PathVeer.CustomRouteRefresh";
+    public const string IpcRequest = "PathVeer.IpcRequest";
+    public const string SupportBundleExport = "PathVeer.SupportBundleExport";
 
     // Child spans
     public const string RuntimeObserve = "Runtime.Observe";

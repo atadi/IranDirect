@@ -40,7 +40,7 @@ route:
 
 inhibit_rules:
   - source_matchers:
-      - alertname = "IranDirectCollectorUnavailable"
+      - alertname = "PathVeerCollectorUnavailable"
     target_matchers:
       - component = "service"
   - source_matchers:
@@ -48,7 +48,7 @@ inhibit_rules:
     target_matchers:
       - severity = "warning"
   - source_matchers:
-      - alertname = "IranDirectPrometheusTargetDown"
+      - alertname = "PathVeerPrometheusTargetDown"
     target_matchers:
       - component = "infrastructure"
 

@@ -102,7 +102,7 @@ public sealed class RouteSystemCallTelemetryTests
     {
         var listener = new ActivityListener
         {
-            ShouldListenTo = s => s.Name == IranDirectTelemetry.SourceName,
+            ShouldListenTo = s => s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = a => started.Enqueue(a),
@@ -132,24 +132,24 @@ public sealed class RouteSystemCallTelemetryTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
                 meterListener.EnableMeasurementEvents(instrument);
         };
         listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
         {
             switch (instrument.Name)
             {
-                case IranDirectMetricNames.RoutesOperationsRequested:
+                case PathVeerMetricNames.RoutesOperationsRequested:
                     requested.Enqueue(value); break;
-                case IranDirectMetricNames.RoutesOperationsSucceeded:
+                case PathVeerMetricNames.RoutesOperationsSucceeded:
                     succeeded.Enqueue(value); break;
-                case IranDirectMetricNames.RoutesOperationsFailed:
+                case PathVeerMetricNames.RoutesOperationsFailed:
                     failed.Enqueue(value); break;
             }
         });
         listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
         {
-            if (instrument.Name == IranDirectMetricNames.RoutesSystemCallDuration)
+            if (instrument.Name == PathVeerMetricNames.RoutesSystemCallDuration)
                 durations.Enqueue(value);
         });
         listener.Start();
@@ -196,12 +196,12 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(1, api.EnumerateCallCount);
 
         Activity? enumerate = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesEnumerate);
+            a.OperationName == PathVeerActivityNames.RoutesEnumerate);
         Assert.NotNull(enumerate);
         Assert.Equal(ActivityKind.Internal, enumerate!.Kind);
         Assert.Equal(
-            IranDirectTagValues.OperationEnumerateRoutes,
-            enumerate.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
+            PathVeerTagValues.OperationEnumerateRoutes,
+            enumerate.Tags.Single(t => t.Key == PathVeerTagNames.Operation).Value);
 
         Assert.Equal(1, after.Requested - before.Requested);
         Assert.Equal(1, after.Succeeded - before.Succeeded);
@@ -266,16 +266,16 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(1, after.Failed - before.Failed);
 
         Activity? enumerate = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesEnumerate);
+            a.OperationName == PathVeerActivityNames.RoutesEnumerate);
         Assert.NotNull(enumerate);
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            enumerate!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            enumerate!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Error, enumerate.Status);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
+            PathVeerTagValues.FailureIo,
             enumerate.Tags.Single(t =>
-                t.Key == IranDirectTagNames.FailureCategory).Value);
+                t.Key == PathVeerTagNames.FailureCategory).Value);
         // The exception legitimately retains its message; telemetry must not
         // surface it on the span (verified by Enumerate_NoSensitiveTags).
     }
@@ -307,7 +307,7 @@ public sealed class RouteSystemCallTelemetryTests
 
         Assert.DoesNotContain(
             stopped,
-            a => a.OperationName == IranDirectActivityNames.RoutesEnumerate);
+            a => a.OperationName == PathVeerActivityNames.RoutesEnumerate);
     }
 
     [Fact]
@@ -326,12 +326,12 @@ public sealed class RouteSystemCallTelemetryTests
             () => manager.GetIpv4RoutesAsync());
 
         Activity? enumerate = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesEnumerate);
+            a.OperationName == PathVeerActivityNames.RoutesEnumerate);
         Assert.NotNull(enumerate);
         Assert.Equal(
-            IranDirectTagValues.FailureUnknown,
+            PathVeerTagValues.FailureUnknown,
             enumerate!.Tags.Single(t =>
-                t.Key == IranDirectTagNames.FailureCategory).Value);
+                t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -356,7 +356,7 @@ public sealed class RouteSystemCallTelemetryTests
         await manager.GetIpv4RoutesAsync();
 
         Activity? enumerate = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesEnumerate);
+            a.OperationName == PathVeerActivityNames.RoutesEnumerate);
         Assert.NotNull(enumerate);
         foreach (var tag in enumerate!.Tags)
         {
@@ -400,18 +400,18 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(1, api.AddCallCount);
 
         Activity? create = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesCreate);
+            a.OperationName == PathVeerActivityNames.RoutesCreate);
         Assert.NotNull(create);
         Assert.Equal(ActivityKind.Internal, create!.Kind);
         Assert.Equal(
-            IranDirectTagValues.OperationCreateRoutes,
-            create.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
+            PathVeerTagValues.OperationCreateRoutes,
+            create.Tags.Single(t => t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.ChangeKindCreate,
-            create.Tags.Single(t => t.Key == IranDirectTagNames.ChangeKind).Value);
+            PathVeerTagValues.ChangeKindCreate,
+            create.Tags.Single(t => t.Key == PathVeerTagNames.ChangeKind).Value);
         Assert.Equal(
-            IranDirectTagValues.RouteKindUnknown,
-            create.Tags.Single(t => t.Key == IranDirectTagNames.RouteKind).Value);
+            PathVeerTagValues.RouteKindUnknown,
+            create.Tags.Single(t => t.Key == PathVeerTagNames.RouteKind).Value);
 
         Assert.Equal(1, after.Requested - before.Requested);
         Assert.Equal(1, after.Succeeded - before.Succeeded);
@@ -454,7 +454,7 @@ public sealed class RouteSystemCallTelemetryTests
 
         // Exactly one Routes.Create activity regardless of batch size.
         Assert.Single(
-            stopped.Where(a => a.OperationName == IranDirectActivityNames.RoutesCreate));
+            stopped.Where(a => a.OperationName == PathVeerActivityNames.RoutesCreate));
     }
 
     [Fact]
@@ -474,10 +474,10 @@ public sealed class RouteSystemCallTelemetryTests
             [CreateRoute("198.51.100.7/32")]);
 
         Assert.All(
-            stopped.Where(a => a.OperationName == IranDirectActivityNames.RoutesCreate),
+            stopped.Where(a => a.OperationName == PathVeerActivityNames.RoutesCreate),
             a => Assert.Equal(
-                IranDirectTagValues.RouteKindUnknown,
-                a.Tags.Single(t => t.Key == IranDirectTagNames.RouteKind).Value));
+                PathVeerTagValues.RouteKindUnknown,
+                a.Tags.Single(t => t.Key == PathVeerTagNames.RouteKind).Value));
     }
 
     [Fact]
@@ -506,12 +506,12 @@ public sealed class RouteSystemCallTelemetryTests
         // surface it on the span (verified by Enumerate_NoSensitiveTags).
 
         Activity? create = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesCreate);
+            a.OperationName == PathVeerActivityNames.RoutesCreate);
         Assert.NotNull(create);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
+            PathVeerTagValues.FailureIo,
             create!.Tags.Single(t =>
-                t.Key == IranDirectTagNames.FailureCategory).Value);
+                t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -537,7 +537,7 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(0, failed.Count);
         Assert.DoesNotContain(
             stopped,
-            a => a.OperationName == IranDirectActivityNames.RoutesCreate);
+            a => a.OperationName == PathVeerActivityNames.RoutesCreate);
     }
 
     [Fact]
@@ -567,7 +567,7 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(0, after.Failed - before.Failed);
         Assert.DoesNotContain(
             stopped,
-            a => a.OperationName == IranDirectActivityNames.RoutesCreate);
+            a => a.OperationName == PathVeerActivityNames.RoutesCreate);
     }
 
     // ---- Delete ------------------------------------------------------------
@@ -598,17 +598,17 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(1, api.DeleteCallCount);
 
         Activity? delete = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesDelete);
+            a.OperationName == PathVeerActivityNames.RoutesDelete);
         Assert.NotNull(delete);
         Assert.Equal(
-            IranDirectTagValues.OperationDeleteRoutes,
-            delete!.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
+            PathVeerTagValues.OperationDeleteRoutes,
+            delete!.Tags.Single(t => t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.ChangeKindDelete,
-            delete.Tags.Single(t => t.Key == IranDirectTagNames.ChangeKind).Value);
+            PathVeerTagValues.ChangeKindDelete,
+            delete.Tags.Single(t => t.Key == PathVeerTagNames.ChangeKind).Value);
         Assert.Equal(
-            IranDirectTagValues.RouteKindUnknown,
-            delete.Tags.Single(t => t.Key == IranDirectTagNames.RouteKind).Value);
+            PathVeerTagValues.RouteKindUnknown,
+            delete.Tags.Single(t => t.Key == PathVeerTagNames.RouteKind).Value);
 
         Assert.Equal(1, after.Requested - before.Requested);
         Assert.Equal(1, after.Succeeded - before.Succeeded);
@@ -650,7 +650,7 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(1, after.Succeeded - before.Succeeded);
         Assert.Equal(1, after.DurationCount - before.DurationCount);
         Assert.Single(
-            stopped.Where(a => a.OperationName == IranDirectActivityNames.RoutesDelete));
+            stopped.Where(a => a.OperationName == PathVeerActivityNames.RoutesDelete));
     }
 
     [Fact]
@@ -677,7 +677,7 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(0, failed.Count);
         Assert.DoesNotContain(
             stopped,
-            a => a.OperationName == IranDirectActivityNames.RoutesDelete);
+            a => a.OperationName == PathVeerActivityNames.RoutesDelete);
     }
 
     [Fact]
@@ -706,7 +706,7 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(0, after.Succeeded - before.Succeeded);
         Assert.DoesNotContain(
             stopped,
-            a => a.OperationName == IranDirectActivityNames.RoutesDelete);
+            a => a.OperationName == PathVeerActivityNames.RoutesDelete);
     }
 
     // ---- Cancellation / no-listener / allocation --------------------------
@@ -737,14 +737,14 @@ public sealed class RouteSystemCallTelemetryTests
         Assert.Equal(0, failed.Count); // cancellation is not a failure
 
         Activity? create = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RoutesCreate);
+            a.OperationName == PathVeerActivityNames.RoutesCreate);
         Assert.NotNull(create);
         Assert.Equal(
-            IranDirectTagValues.Cancelled,
-            create!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Cancelled,
+            create!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Unset, create.Status);
         Assert.DoesNotContain(
-            create.Tags, t => t.Key == IranDirectTagNames.FailureCategory);
+            create.Tags, t => t.Key == PathVeerTagNames.FailureCategory);
     }
 
     [Fact]
@@ -783,7 +783,7 @@ public sealed class RouteSystemCallTelemetryTests
         // Exactly one Routes.Create activity for 50,000 routes => no
         // route-proportional telemetry allocation.
         Assert.Single(
-            stopped.Where(a => a.OperationName == IranDirectActivityNames.RoutesCreate));
+            stopped.Where(a => a.OperationName == PathVeerActivityNames.RoutesCreate));
         Assert.Equal(1, api.AddCallCount);
     }
 
@@ -812,11 +812,11 @@ public sealed class RouteSystemCallTelemetryTests
         // Reproduce the real runtime hierarchy using the exact production span
         // names: cycle -> execute -> routes. Planning is intentionally absent
         // (it is a sibling of execution, never an ancestor of route spans).
-        using (Activity? cycleScope = IranDirectTelemetry.ActivitySource.StartActivity(
-                   IranDirectActivityNames.RuntimeCycle, ActivityKind.Internal))
+        using (Activity? cycleScope = PathVeerTelemetry.ActivitySource.StartActivity(
+                   PathVeerActivityNames.RuntimeCycle, ActivityKind.Internal))
         {
-            using (Activity? execScope = IranDirectTelemetry.ActivitySource.StartActivity(
-                       IranDirectActivityNames.RuntimeExecute, ActivityKind.Internal))
+            using (Activity? execScope = PathVeerTelemetry.ActivitySource.StartActivity(
+                       PathVeerActivityNames.RuntimeExecute, ActivityKind.Internal))
             {
                 await manager.GetIpv4RoutesAsync();
                 await manager.AddRoutesAsync([CreateRoute()]);
@@ -825,17 +825,17 @@ public sealed class RouteSystemCallTelemetryTests
         }
 
         Activity? cycle = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Activity? execute = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(cycle);
         Assert.NotNull(execute);
 
         var routeSpans = stopped
             .Where(a => a.OperationName is
-                IranDirectActivityNames.RoutesEnumerate or
-                IranDirectActivityNames.RoutesCreate or
-                IranDirectActivityNames.RoutesDelete)
+                PathVeerActivityNames.RoutesEnumerate or
+                PathVeerActivityNames.RoutesCreate or
+                PathVeerActivityNames.RoutesDelete)
             .ToArray();
 
         Assert.Equal(3, routeSpans.Length);
@@ -864,11 +864,11 @@ public sealed class RouteSystemCallTelemetryTests
         // No extra child spans exist beyond the approved set.
         Assert.All(stopped, a => Assert.Contains(a.OperationName, new[]
         {
-            IranDirectActivityNames.RuntimeCycle,
-            IranDirectActivityNames.RuntimeExecute,
-            IranDirectActivityNames.RoutesEnumerate,
-            IranDirectActivityNames.RoutesCreate,
-            IranDirectActivityNames.RoutesDelete,
+            PathVeerActivityNames.RuntimeCycle,
+            PathVeerActivityNames.RuntimeExecute,
+            PathVeerActivityNames.RoutesEnumerate,
+            PathVeerActivityNames.RoutesCreate,
+            PathVeerActivityNames.RoutesDelete,
         }));
     }
 }

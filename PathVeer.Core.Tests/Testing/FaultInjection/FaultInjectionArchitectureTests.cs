@@ -52,13 +52,13 @@ public sealed class FaultInjectionArchitectureTests
     {
         string root = FindRepositoryRoot();
         string testingRoot = Path.Combine(
-            root, "IranDirect.Core", "Testing");
+            root, "PathVeer.Core", "Testing");
         string[] projectFolders =
         [
-            Path.Combine(root, "IranDirect.Cli"),
-            Path.Combine(root, "IranDirect.Core"),
-            Path.Combine(root, "IranDirect.Service"),
-            Path.Combine(root, "IranDirect.Tray")
+            Path.Combine(root, "PathVeer.Cli"),
+            Path.Combine(root, "PathVeer.Core"),
+            Path.Combine(root, "PathVeer.Service"),
+            Path.Combine(root, "PathVeer.Tray")
         ];
 
         return projectFolders
@@ -77,13 +77,13 @@ public sealed class FaultInjectionArchitectureTests
     {
         string root = FindRepositoryRoot();
         string testingRoot = Path.Combine(
-            root, "IranDirect.Core", "Testing");
+            root, "PathVeer.Core", "Testing");
         string[] runtimeFolders =
         [
-            Path.Combine(root, "IranDirect.Cli"),
-            Path.Combine(root, "IranDirect.Core"),
-            Path.Combine(root, "IranDirect.Service"),
-            Path.Combine(root, "IranDirect.Tray")
+            Path.Combine(root, "PathVeer.Cli"),
+            Path.Combine(root, "PathVeer.Core"),
+            Path.Combine(root, "PathVeer.Service"),
+            Path.Combine(root, "PathVeer.Tray")
         ];
 
         return runtimeFolders

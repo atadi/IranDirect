@@ -15,7 +15,7 @@
 #     sampling — the application telemetry contract is frozen.
 #
 # mTLS is intentionally NOT enabled here: one-way TLS + a bounded bearer token
-# is sufficient for IranDirect.Service → Collector. Client-cert mTLS is
+# is sufficient for PathVeer.Service → Collector. Client-cert mTLS is
 # documented in phase-33.5 as an option but adds operational burden without a
 # second, independent identity requirement.
 
@@ -49,7 +49,7 @@ processors:
   resource:
     attributes:
       - key: service.name
-        value: IranDirect.Service
+        value: PathVeer.Service
         action: insert
       - key: deployment.environment.name
         value: production

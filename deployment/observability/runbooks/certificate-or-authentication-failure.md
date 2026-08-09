@@ -1,9 +1,9 @@
-# Runbook: IranDirectCollectCertificateOrAuthFailure
+# Runbook: PathVeerCollectCertificateOrAuthFailure
 
-- **Alert:** `IranDirectCollectCertificateOrAuthFailure`
+- **Alert:** `PathVeerCollectCertificateOrAuthFailure`
 - **Severity:** warning
-- **Dashboard:** `irandirect-reliability-errors`
-- **Prometheus query:** `sum(rate(irandirect_runtime_cycles_started_total[15m])) < 0.0001 and max(timestamp(...)) > time()-300 and up{job="otel-collector"}==1`
+- **Dashboard:** `pathveer-reliability-errors`
+- **Prometheus query:** `sum(rate(pathveer_runtime_cycles_started_total[15m])) < 0.0001 and max(timestamp(...)) > time()-300 and up{job="otel-collector"}==1`
 
 ## What it means
 The collector is up but the Service stopped emitting cycles while recent telemetry exists - a possible OTLP auth/cert failure if collector auth is enabled.
@@ -12,8 +12,8 @@ The collector is up but the Service stopped emitting cycles while recent telemet
 If OTLP auth is enabled, telemetry export is being rejected; dashboards go stale and app alerts become unreliable.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `sum(rate(irandirect_runtime_cycles_started_total[15m])) < 0.0001 and max(timestamp(...)) > time()-300 and up{job="otel-collector"}==1`
+Open the `pathveer-reliability-errors` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `sum(rate(pathveer_runtime_cycles_started_total[15m])) < 0.0001 and max(timestamp(...)) > time()-300 and up{job="otel-collector"}==1`
 
 ## Symptoms
 Telemetry last seen grows while collector health is green; no new application series in Prometheus.
@@ -40,7 +40,7 @@ Collector OTLP 401/403 log lines (no token/cert), Service OTLP env var name, tel
 Application series resume incrementing in Prometheus.
 
 ## Related alerts
-IranDirectCollectorUnavailable, IranDirectServiceTelemetryAbsent
+PathVeerCollectorUnavailable, PathVeerServiceTelemetryAbsent
 
 ## Ownership
 Observability / Platform

@@ -1,8 +1,8 @@
-# Runbook: IranDirectGrafanaUnavailable
+# Runbook: PathVeerGrafanaUnavailable
 
-- **Alert:** `IranDirectGrafanaUnavailable`
+- **Alert:** `PathVeerGrafanaUnavailable`
 - **Severity:** warning
-- **Dashboard:** `irandirect-reliability-errors`
+- **Dashboard:** `pathveer-reliability-errors`
 - **Prometheus query:** `up{job="grafana"} == 0`
 
 ## What it means
@@ -12,7 +12,7 @@ Prometheus cannot scrape Grafana for 2m.
 Dashboards and the Alertmanager UI entry point are unavailable; metrics, traces, and alert evaluation continue unaffected.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
+Open the `pathveer-reliability-errors` dashboard in the PathVeer folder (Grafana).
 Prometheus query: `up{job="grafana"} == 0`
 
 ## Symptoms
@@ -40,7 +40,7 @@ Grafana logs, .env presence (no values), 'docker compose ps'.
 up{job="grafana"} returns 1 and http://localhost:3000 responds.
 
 ## Related alerts
-IranDirectPrometheusTargetDown
+PathVeerPrometheusTargetDown
 
 ## Ownership
 Observability / Platform

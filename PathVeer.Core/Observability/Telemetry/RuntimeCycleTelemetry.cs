@@ -5,9 +5,9 @@ using System.Threading;
 namespace PathVeer.Core.Observability.Telemetry;
 
 /// <summary>
-/// Runtime-cycle telemetry: one root <c>IranDirect.RuntimeCycle</c> activity
+/// Runtime-cycle telemetry: one root <c>PathVeer.RuntimeCycle</c> activity
 /// per cycle plus four counters and one duration histogram, all created once
-/// against the Phase 32.2 <see cref="IranDirectTelemetry.Meter"/>.
+/// against the Phase 32.2 <see cref="PathVeerTelemetry.Meter"/>.
 ///
 /// This type only instruments the top-level reconciliation cycle boundary. It
 /// does NOT create child spans, does NOT instrument planner internals, route
@@ -22,33 +22,33 @@ public static class RuntimeCycleTelemetry
 {
     private const string OperationValue = "runtime_cycle";
 
-    private static readonly Counter<long> s_cyclesStarted = IranDirectTelemetry
+    private static readonly Counter<long> s_cyclesStarted = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.RuntimeCyclesStarted,
+            PathVeerMetricNames.RuntimeCyclesStarted,
             unit: "{cycle}",
             description: "Number of runtime reconciliation cycles that started.");
 
-    private static readonly Counter<long> s_cyclesCompleted = IranDirectTelemetry
+    private static readonly Counter<long> s_cyclesCompleted = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.RuntimeCyclesCompleted,
+            PathVeerMetricNames.RuntimeCyclesCompleted,
             unit: "{cycle}",
             description: "Number of runtime reconciliation cycles that completed successfully or with no changes.");
 
-    private static readonly Counter<long> s_cyclesFailed = IranDirectTelemetry
+    private static readonly Counter<long> s_cyclesFailed = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.RuntimeCyclesFailed,
+            PathVeerMetricNames.RuntimeCyclesFailed,
             unit: "{cycle}",
             description: "Number of runtime reconciliation cycles that failed or timed out.");
 
-    private static readonly Counter<long> s_cyclesCancelled = IranDirectTelemetry
+    private static readonly Counter<long> s_cyclesCancelled = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.RuntimeCyclesCancelled,
+            PathVeerMetricNames.RuntimeCyclesCancelled,
             unit: "{cycle}",
             description: "Number of runtime reconciliation cycles cancelled by caller or service shutdown.");
 
-    private static readonly Histogram<double> s_cycleDuration = IranDirectTelemetry
+    private static readonly Histogram<double> s_cycleDuration = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.RuntimeCycleDuration,
+            PathVeerMetricNames.RuntimeCycleDuration,
             unit: "ms",
             description: "Duration of a runtime reconciliation cycle, in milliseconds.");
 
@@ -59,11 +59,11 @@ public static class RuntimeCycleTelemetry
     internal static string MapTrigger(TelemetryTrigger trigger) =>
         trigger switch
         {
-            TelemetryTrigger.Scheduled => IranDirectTagValues.TriggerScheduled,
-            TelemetryTrigger.Forced => IranDirectTagValues.TriggerForced,
-            TelemetryTrigger.Startup => IranDirectTagValues.TriggerStartup,
-            TelemetryTrigger.Repair => IranDirectTagValues.TriggerRepair,
-            _ => IranDirectTagValues.TriggerUnknown,
+            TelemetryTrigger.Scheduled => PathVeerTagValues.TriggerScheduled,
+            TelemetryTrigger.Forced => PathVeerTagValues.TriggerForced,
+            TelemetryTrigger.Startup => PathVeerTagValues.TriggerStartup,
+            TelemetryTrigger.Repair => PathVeerTagValues.TriggerRepair,
+            _ => PathVeerTagValues.TriggerUnknown,
         };
 
     /// <summary>
@@ -74,14 +74,14 @@ public static class RuntimeCycleTelemetry
     /// </summary>
     internal static RuntimeCycleTelemetryScope Start(TelemetryTrigger trigger)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.RuntimeCycle,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.RuntimeCycle,
             ActivityKind.Internal);
 
         if (activity is not null)
         {
-            activity.SetTag(IranDirectTagNames.Operation, OperationValue);
-            activity.SetTag(IranDirectTagNames.Trigger, MapTrigger(trigger));
+            activity.SetTag(PathVeerTagNames.Operation, OperationValue);
+            activity.SetTag(PathVeerTagNames.Trigger, MapTrigger(trigger));
         }
 
         return new RuntimeCycleTelemetryScope(activity, trigger);
@@ -96,18 +96,18 @@ public static class RuntimeCycleTelemetry
         {
             return
             [
-                new(IranDirectTagNames.Operation, OperationValue),
-                new(IranDirectTagNames.Trigger, MapTrigger(trigger)),
-                new(IranDirectTagNames.Outcome, outcome),
+                new(PathVeerTagNames.Operation, OperationValue),
+                new(PathVeerTagNames.Trigger, MapTrigger(trigger)),
+                new(PathVeerTagNames.Outcome, outcome),
             ];
         }
 
         return
         [
-            new(IranDirectTagNames.Operation, OperationValue),
-            new(IranDirectTagNames.Trigger, MapTrigger(trigger)),
-            new(IranDirectTagNames.Outcome, outcome),
-            new(IranDirectTagNames.FailureCategory, failureCategory),
+            new(PathVeerTagNames.Operation, OperationValue),
+            new(PathVeerTagNames.Trigger, MapTrigger(trigger)),
+            new(PathVeerTagNames.Outcome, outcome),
+            new(PathVeerTagNames.FailureCategory, failureCategory),
         ];
     }
 
@@ -116,8 +116,8 @@ public static class RuntimeCycleTelemetry
             1,
             new KeyValuePair<string, object?>[]
             {
-                new(IranDirectTagNames.Operation, OperationValue),
-                new(IranDirectTagNames.Trigger, MapTrigger(trigger)),
+                new(PathVeerTagNames.Operation, OperationValue),
+                new(PathVeerTagNames.Trigger, MapTrigger(trigger)),
             });
 
     internal static void RecordCompleted(
@@ -126,14 +126,14 @@ public static class RuntimeCycleTelemetry
         s_cyclesCompleted.Add(1, Tags(trigger, outcome));
 
     internal static void RecordCancelled(TelemetryTrigger trigger) =>
-        s_cyclesCancelled.Add(1, Tags(trigger, IranDirectTagValues.Cancelled));
+        s_cyclesCancelled.Add(1, Tags(trigger, PathVeerTagValues.Cancelled));
 
     internal static void RecordFailed(
         TelemetryTrigger trigger,
         string failureCategory) =>
         s_cyclesFailed.Add(
             1,
-            Tags(trigger, IranDirectTagValues.Failure, failureCategory));
+            Tags(trigger, PathVeerTagValues.Failure, failureCategory));
 
     internal static void RecordDuration(
         TelemetryTrigger trigger,
@@ -173,14 +173,14 @@ internal struct RuntimeCycleTelemetryScope : IDisposable
     public void CompleteSuccess(bool hasChanges)
     {
         string outcome = hasChanges
-            ? IranDirectTagValues.Success
-            : IranDirectTagValues.NoChange;
+            ? PathVeerTagValues.Success
+            : PathVeerTagValues.NoChange;
 
         RecordTerminal(outcome);
 
         if (_activity is not null)
         {
-            _activity.SetTag(IranDirectTagNames.Outcome, outcome);
+            _activity.SetTag(PathVeerTagNames.Outcome, outcome);
             _activity.SetStatus(ActivityStatusCode.Ok);
         }
     }
@@ -192,15 +192,15 @@ internal struct RuntimeCycleTelemetryScope : IDisposable
         string categoryString =
             TelemetryFailureCategoryMapper.ToCategoryString(category);
 
-        RecordTerminal(IranDirectTagValues.Failure, categoryString);
+        RecordTerminal(PathVeerTagValues.Failure, categoryString);
 
         if (_activity is not null)
         {
             _activity.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.Failure);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.Failure);
             _activity.SetTag(
-                IranDirectTagNames.FailureCategory,
+                PathVeerTagNames.FailureCategory,
                 TelemetryFailureCategoryMapper.ToCategoryString(category));
             // Phase 32.1 does not approve recording exception events; the
             // bounded failure_category is set, exception text is never used.
@@ -212,13 +212,13 @@ internal struct RuntimeCycleTelemetryScope : IDisposable
 
     public void CompleteCancelled()
     {
-        RecordTerminal(IranDirectTagValues.Cancelled);
+        RecordTerminal(PathVeerTagValues.Cancelled);
 
         if (_activity is not null)
         {
             _activity.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.Cancelled);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.Cancelled);
             // Cancellation is not an error. Leave status Unset; never set
             // failure_category for a cancellation outcome.
         }
@@ -234,15 +234,15 @@ internal struct RuntimeCycleTelemetryScope : IDisposable
 
         switch (outcome)
         {
-            case IranDirectTagValues.Success:
-            case IranDirectTagValues.NoChange:
+            case PathVeerTagValues.Success:
+            case PathVeerTagValues.NoChange:
                 RuntimeCycleTelemetry.RecordCompleted(_trigger, outcome);
                 break;
-            case IranDirectTagValues.Cancelled:
+            case PathVeerTagValues.Cancelled:
                 RuntimeCycleTelemetry.RecordCancelled(_trigger);
                 break;
-            case IranDirectTagValues.Failure:
-            case IranDirectTagValues.Timeout:
+            case PathVeerTagValues.Failure:
+            case PathVeerTagValues.Timeout:
                 RuntimeCycleTelemetry.RecordFailed(
                     _trigger,
                     failureCategory!);
@@ -274,7 +274,7 @@ internal struct RuntimeCycleTelemetryScope : IDisposable
         RuntimeCycleTelemetry.RecordDuration(
             _trigger,
             elapsedMs,
-            IranDirectTagValues.OutcomeUnknown);
+            PathVeerTagValues.OutcomeUnknown);
         _activity?.Dispose();
     }
 }

@@ -8,14 +8,14 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// Runtime change-set planning telemetry: one child <c>Runtime.PlanChanges</c>
 /// activity per planner invocation plus a planning-duration histogram and a
 /// changed-routes histogram, created once against the Phase 32.2
-/// <see cref="IranDirectTelemetry.Meter"/>.
+/// <see cref="PathVeerTelemetry.Meter"/>.
 ///
 /// This instruments exactly one production operation — the single invocation of
 /// <c>RuntimeChangeSetPlanner.Plan</c> inside the runtime reconciliation
 /// orchestration. It does NOT instrument the planner implementation, route
 /// operations, execution, prefix updates, DNS, IPC, or support exports.
 ///
-/// The planning activity is a child of <c>IranDirect.RuntimeCycle</c> whenever
+/// The planning activity is a child of <c>PathVeer.RuntimeCycle</c> whenever
 /// planning occurs inside an instrumented runtime cycle (it naturally nests
 /// under <see cref="Activity.Current"/>); if started without an active parent
 /// it simply becomes a root activity — no fake parent is manufactured.
@@ -26,17 +26,17 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// </summary>
 public static class RuntimePlanningTelemetry
 {
-    private const string OperationValue = IranDirectTagValues.OperationPlanChanges;
+    private const string OperationValue = PathVeerTagValues.OperationPlanChanges;
 
-    private static readonly Histogram<double> s_planningDuration = IranDirectTelemetry
+    private static readonly Histogram<double> s_planningDuration = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.RuntimePlanningDuration,
+            PathVeerMetricNames.RuntimePlanningDuration,
             unit: "ms",
             description: "Elapsed time spent producing the runtime change set.");
 
-    private static readonly Histogram<double> s_changedRoutes = IranDirectTelemetry
+    private static readonly Histogram<double> s_changedRoutes = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.RuntimeChangedRoutes,
+            PathVeerMetricNames.RuntimeChangedRoutes,
             unit: "{route}",
             description: "Number of planned runtime changes in a reconciliation.");
 
@@ -47,13 +47,13 @@ public static class RuntimePlanningTelemetry
     /// </summary>
     internal static RuntimePlanningTelemetryScope Start()
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.RuntimePlanChanges,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.RuntimePlanChanges,
             ActivityKind.Internal);
 
         if (activity is not null)
         {
-            activity.SetTag(IranDirectTagNames.Operation, OperationValue);
+            activity.SetTag(PathVeerTagNames.Operation, OperationValue);
         }
 
         return new RuntimePlanningTelemetryScope(activity);
@@ -67,16 +67,16 @@ public static class RuntimePlanningTelemetry
         {
             return
             [
-                new(IranDirectTagNames.Operation, OperationValue),
-                new(IranDirectTagNames.Outcome, outcome),
+                new(PathVeerTagNames.Operation, OperationValue),
+                new(PathVeerTagNames.Outcome, outcome),
             ];
         }
 
         return
         [
-            new(IranDirectTagNames.Operation, OperationValue),
-            new(IranDirectTagNames.Outcome, outcome),
-            new(IranDirectTagNames.FailureCategory, failureCategory),
+            new(PathVeerTagNames.Operation, OperationValue),
+            new(PathVeerTagNames.Outcome, outcome),
+            new(PathVeerTagNames.FailureCategory, failureCategory),
         ];
     }
 
@@ -115,14 +115,14 @@ internal struct RuntimePlanningTelemetryScope : IDisposable
     public void CompleteSuccess(int changeCount)
     {
         string outcome = changeCount > 0
-            ? IranDirectTagValues.Success
-            : IranDirectTagValues.NoChange;
+            ? PathVeerTagValues.Success
+            : PathVeerTagValues.NoChange;
 
         RecordTerminal(outcome);
 
         if (_activity is not null)
         {
-            _activity.SetTag(IranDirectTagNames.Outcome, outcome);
+            _activity.SetTag(PathVeerTagNames.Outcome, outcome);
             _activity.SetStatus(ActivityStatusCode.Ok);
         }
     }
@@ -134,15 +134,15 @@ internal struct RuntimePlanningTelemetryScope : IDisposable
         string categoryString =
             TelemetryFailureCategoryMapper.ToCategoryString(category);
 
-        RecordTerminal(IranDirectTagValues.Failure, categoryString);
+        RecordTerminal(PathVeerTagValues.Failure, categoryString);
 
         if (_activity is not null)
         {
             _activity.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.Failure);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.Failure);
             _activity.SetTag(
-                IranDirectTagNames.FailureCategory,
+                PathVeerTagNames.FailureCategory,
                 categoryString);
             // Phase 32.1 does not approve exception events; bounded
             // failure_category is set, exception text is never used.
@@ -177,7 +177,7 @@ internal struct RuntimePlanningTelemetryScope : IDisposable
         double elapsedMs = Stopwatch.GetElapsedTime(_startTimestamp)
             .TotalMilliseconds;
         RuntimePlanningTelemetry.RecordDuration(
-            IranDirectTagValues.OutcomeUnknown,
+            PathVeerTagValues.OutcomeUnknown,
             elapsedMs);
         _activity?.Dispose();
     }

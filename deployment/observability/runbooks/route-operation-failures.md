@@ -1,9 +1,9 @@
-# Runbook: IranDirectRouteOperationFailureRatioHigh
+# Runbook: PathVeerRouteOperationFailureRatioHigh
 
-- **Alert:** `IranDirectRouteOperationFailureRatioHigh`
+- **Alert:** `PathVeerRouteOperationFailureRatioHigh`
 - **Severity:** warning
-- **Dashboard:** `irandirect-runtime-reconciliation`
-- **Prometheus query:** `sum(rate(irandirect_routes_operations_failed_total[10m])) / sum(rate(irandirect_routes_operations_requested_total[10m]))`
+- **Dashboard:** `pathveer-runtime-reconciliation`
+- **Prometheus query:** `sum(rate(pathveer_routes_operations_failed_total[10m])) / sum(rate(pathveer_routes_operations_requested_total[10m]))`
 
 ## What it means
 More than 5% of native route system calls failed over 10m.
@@ -12,8 +12,8 @@ More than 5% of native route system calls failed over 10m.
 Route add/remove/update operations are partially failing; desired state is not fully applied.
 
 ## Dashboard
-Open the `irandirect-runtime-reconciliation` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `sum(rate(irandirect_routes_operations_failed_total[10m])) / sum(rate(irandirect_routes_operations_requested_total[10m]))`
+Open the `pathveer-runtime-reconciliation` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `sum(rate(pathveer_routes_operations_failed_total[10m])) / sum(rate(pathveer_routes_operations_requested_total[10m]))`
 
 ## Symptoms
 Runtime Reconciliation 'Route operation failures' panel rising; success ratio per operation dropping.
@@ -40,7 +40,7 @@ Per-operation success ratio, Tempo traces of failing calls, host routing state s
 Route operation failure ratio returns below 5%.
 
 ## Related alerts
-IranDirectRuntimeCycleFailureRateHigh
+PathVeerRuntimeCycleFailureRateHigh
 
 ## Ownership
 Service / SRE

@@ -264,7 +264,7 @@ public sealed class RuntimeExecutionTelemetryTests
     {
         var listener = new ActivityListener
         {
-            ShouldListenTo = s => s.Name == IranDirectTelemetry.SourceName,
+            ShouldListenTo = s => s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = a => started.Enqueue(a),
@@ -296,15 +296,15 @@ public sealed class RuntimeExecutionTelemetryTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
                 meterListener.EnableMeasurementEvents(instrument);
         };
         listener.SetMeasurementEventCallback<double>(
             (instrument, value, tags, _) =>
             {
-                if (instrument.Name == IranDirectMetricNames.RuntimeExecutionDuration)
+                if (instrument.Name == PathVeerMetricNames.RuntimeExecutionDuration)
                     durations.Enqueue(value);
-                else if (instrument.Name == IranDirectMetricNames.RuntimeOperationsPerCycle)
+                else if (instrument.Name == PathVeerMetricNames.RuntimeOperationsPerCycle)
                     operations.Enqueue(value);
             });
         listener.Start();
@@ -336,21 +336,21 @@ public sealed class RuntimeExecutionTelemetryTests
         Assert.True(result.IsSuccess);
 
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Activity? cycle = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a.OperationName == PathVeerActivityNames.RuntimeCycle);
 
         // Exactly one Runtime.Execute child activity, kind Internal.
         Assert.NotNull(execution);
         Assert.Equal(ActivityKind.Internal, execution!.Kind);
         Assert.Equal(
-            IranDirectTagValues.OperationExecute,
-            execution.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
+            PathVeerTagValues.OperationExecute,
+            execution.Tags.Single(t => t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
-            execution.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Success,
+            execution.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Ok, execution.Status);
 
         // Parent/child correlation (controller path with a faked decision
@@ -370,22 +370,22 @@ public sealed class RuntimeExecutionTelemetryTests
         Assert.Equal(2, startedByTrace.Length);
         Assert.Equal(2, stoppedByTrace.Length);
         Assert.Equal(
-            IranDirectActivityNames.RuntimeCycle, startedByTrace[0].OperationName);
+            PathVeerActivityNames.RuntimeCycle, startedByTrace[0].OperationName);
         Assert.Equal(
-            IranDirectActivityNames.RuntimeExecute, startedByTrace[1].OperationName);
+            PathVeerActivityNames.RuntimeExecute, startedByTrace[1].OperationName);
         Assert.Equal(
-            IranDirectActivityNames.RuntimeExecute, stoppedByTrace[0].OperationName);
+            PathVeerActivityNames.RuntimeExecute, stoppedByTrace[0].OperationName);
         Assert.Equal(
-            IranDirectActivityNames.RuntimeCycle, stoppedByTrace[1].OperationName);
+            PathVeerActivityNames.RuntimeCycle, stoppedByTrace[1].OperationName);
 
         // No extra child spans beyond the approved set.
         Assert.All(stopped, a =>
         {
             Assert.Contains(a.OperationName, new[]
             {
-                IranDirectActivityNames.RuntimeCycle,
-                IranDirectActivityNames.RuntimePlanChanges,
-                IranDirectActivityNames.RuntimeExecute,
+                PathVeerActivityNames.RuntimeCycle,
+                PathVeerActivityNames.RuntimePlanChanges,
+                PathVeerActivityNames.RuntimeExecute,
             });
         });
     }
@@ -490,11 +490,11 @@ public sealed class RuntimeExecutionTelemetryTests
         Assert.True(result.IsSuccess);
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
         Assert.Equal(
-            IranDirectTagValues.NoChange,
-            execution!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.NoChange,
+            execution!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Ok, execution.Status);
 
         // RuntimeExecutor returns NoExecutionRequired for an empty plan, so the
@@ -526,15 +526,15 @@ public sealed class RuntimeExecutionTelemetryTests
         Assert.False(result.IsSuccess);
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            execution!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            execution!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         // Failure is represented only by result status; no free-form error text
         // becomes a failure_category.
         Assert.DoesNotContain(
-            execution.Tags, t => t.Key == IranDirectTagNames.FailureCategory);
+            execution.Tags, t => t.Key == PathVeerTagNames.FailureCategory);
         Assert.Equal(ActivityStatusCode.Error, execution.Status);
     }
 
@@ -569,11 +569,11 @@ public sealed class RuntimeExecutionTelemetryTests
         Assert.False(result.IsSuccess);
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            execution!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            execution!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Error, execution.Status);
     }
 
@@ -591,14 +591,14 @@ public sealed class RuntimeExecutionTelemetryTests
             () => h.Controller.RunCycleAsync());
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            execution!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            execution!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
-            execution.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+            PathVeerTagValues.FailureIo,
+            execution.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory).Value);
         Assert.Equal(ActivityStatusCode.Error, execution.Status);
         foreach (var tag in execution.Tags)
             Assert.DoesNotContain("secret", tag.Value?.ToString());
@@ -619,11 +619,11 @@ public sealed class RuntimeExecutionTelemetryTests
             () => h.Controller.RunCycleAsync());
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
         Assert.Equal(
-            IranDirectTagValues.FailureRouting,
-            execution!.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+            PathVeerTagValues.FailureRouting,
+            execution!.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -640,11 +640,11 @@ public sealed class RuntimeExecutionTelemetryTests
             () => h.Controller.RunCycleAsync());
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
         Assert.Equal(
-            IranDirectTagValues.FailureUnknown,
-            execution!.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+            PathVeerTagValues.FailureUnknown,
+            execution!.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -661,13 +661,13 @@ public sealed class RuntimeExecutionTelemetryTests
             () => h.Controller.RunCycleAsync());
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
         Assert.Equal(
-            IranDirectTagValues.Cancelled,
-            execution!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Cancelled,
+            execution!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.DoesNotContain(
-            execution.Tags, t => t.Key == IranDirectTagNames.FailureCategory);
+            execution.Tags, t => t.Key == PathVeerTagNames.FailureCategory);
         Assert.Equal(ActivityStatusCode.Unset, execution.Status);
     }
 
@@ -714,7 +714,7 @@ public sealed class RuntimeExecutionTelemetryTests
         await h.Controller.RunCycleAsync();
 
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
         Assert.NotNull(execution);
 
         foreach (var tag in execution!.Tags)
@@ -737,16 +737,16 @@ public sealed class RuntimeExecutionTelemetryTests
                 tag.Key,
                 new[]
                 {
-                    IranDirectTagNames.Operation,
-                    IranDirectTagNames.Outcome,
-                    IranDirectTagNames.FailureCategory,
+                    PathVeerTagNames.Operation,
+                    PathVeerTagNames.Outcome,
+                    PathVeerTagNames.FailureCategory,
                 });
         }
     }
 
     // Proves the required runtime-cycle child-span hierarchy end-to-end through
     // the REAL production flow: the controller's RunCycleAsync starts the
-    // IranDirect.RuntimeCycle root, then its RuntimeDecisionBuilder invokes the
+    // PathVeer.RuntimeCycle root, then its RuntimeDecisionBuilder invokes the
     // REAL RuntimeReconciler (emitting Runtime.PlanChanges), and only after that
     // returns does the controller wrap ExecuteAsync with the REAL
     // Runtime.Execute producer. Because the planning scope is fully disposed
@@ -765,11 +765,11 @@ public sealed class RuntimeExecutionTelemetryTests
         await h.Controller.RunCycleAsync();
 
         Activity? cycle = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Activity? execution = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            a.OperationName == PathVeerActivityNames.RuntimeExecute);
 
         Assert.NotNull(cycle);
         Assert.NotNull(planning);
@@ -795,11 +795,11 @@ public sealed class RuntimeExecutionTelemetryTests
         Assert.Equal(3, startedByTrace.Length);
         Assert.Equal(3, stoppedByTrace.Length);
         Assert.Contains(
-            startedByTrace, a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            startedByTrace, a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.Contains(
-            startedByTrace, a => a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            startedByTrace, a => a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Assert.Contains(
-            startedByTrace, a => a.OperationName == IranDirectActivityNames.RuntimeExecute);
+            startedByTrace, a => a.OperationName == PathVeerActivityNames.RuntimeExecute);
 
         // Strict sibling ordering: planning must fully stop before execution
         // starts. There must be no overlap (no nesting).

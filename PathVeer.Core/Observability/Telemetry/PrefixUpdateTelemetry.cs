@@ -5,12 +5,12 @@ using PathVeer.Core.Prefixes;
 namespace PathVeer.Core.Observability.Telemetry;
 
 /// <summary>
-/// Prefix update-check telemetry: one <c>IranDirect.PrefixUpdateCheck</c>
+/// Prefix update-check telemetry: one <c>PathVeer.PrefixUpdateCheck</c>
 /// root Activity per <see cref="CountryPrefixUpdateChecker.CheckAsync"/>
 /// attempt, with optional <c>Prefix.HttpHead</c>, <c>Prefix.HttpGet</c>,
 /// <c>Prefix.Compare</c> child Activities. Exactly one
-/// <c>irandirect.prefix.checks</c> counter increment and one
-/// <c>irandirect.prefix.check.duration</c> histogram sample per root attempt.
+/// <c>pathveer.prefix.checks</c> counter increment and one
+/// <c>pathveer.prefix.check.duration</c> histogram sample per root attempt.
 ///
 /// Privacy: no URL, domain, prefix, ETag, Last-Modified, file path, response
 /// body, or exception message is attached. Child Activities carry only bounded
@@ -18,35 +18,35 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// </summary>
 public static class PrefixUpdateTelemetry
 {
-    private static readonly Counter<long> s_checks = IranDirectTelemetry.Meter
+    private static readonly Counter<long> s_checks = PathVeerTelemetry.Meter
         .CreateCounter<long>(
-            IranDirectMetricNames.PrefixChecks,
+            PathVeerMetricNames.PrefixChecks,
             unit: "{check}",
             description: "Prefix update-check attempts started.");
 
-    private static readonly Histogram<double> s_duration = IranDirectTelemetry
+    private static readonly Histogram<double> s_duration = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.PrefixCheckDuration,
+            PathVeerMetricNames.PrefixCheckDuration,
             unit: "ms",
             description: "Elapsed time of one prefix update-check attempt.");
 
     internal static PrefixCheckScope StartCheck(
         TelemetryTrigger trigger = TelemetryTrigger.Unknown)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.PrefixUpdateCheck,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.PrefixUpdateCheck,
             ActivityKind.Internal);
 
-        activity?.SetTag(IranDirectTagNames.Operation,
-            IranDirectTagValues.OperationPrefixUpdateCheck);
-        activity?.SetTag(IranDirectTagNames.Source,
-            IranDirectTagValues.SourceOfficial);
-        activity?.SetTag(IranDirectTagNames.Trigger,
+        activity?.SetTag(PathVeerTagNames.Operation,
+            PathVeerTagValues.OperationPrefixUpdateCheck);
+        activity?.SetTag(PathVeerTagNames.Source,
+            PathVeerTagValues.SourceOfficial);
+        activity?.SetTag(PathVeerTagNames.Trigger,
             ToTriggerString(trigger));
 
         s_checks.Add(1, new KeyValuePair<string, object?>(
-            IranDirectTagNames.Operation,
-            IranDirectTagValues.OperationPrefixUpdateCheck));
+            PathVeerTagNames.Operation,
+            PathVeerTagValues.OperationPrefixUpdateCheck));
 
         return new PrefixCheckScope(activity);
     }
@@ -55,11 +55,11 @@ public static class PrefixUpdateTelemetry
         trigger switch
         {
             TelemetryTrigger.Scheduled =>
-                IranDirectTagValues.TriggerScheduled,
-            TelemetryTrigger.Forced => IranDirectTagValues.TriggerForced,
-            TelemetryTrigger.Startup => IranDirectTagValues.TriggerStartup,
-            TelemetryTrigger.Repair => IranDirectTagValues.TriggerRepair,
-            _ => IranDirectTagValues.TriggerUnknown,
+                PathVeerTagValues.TriggerScheduled,
+            TelemetryTrigger.Forced => PathVeerTagValues.TriggerForced,
+            TelemetryTrigger.Startup => PathVeerTagValues.TriggerStartup,
+            TelemetryTrigger.Repair => PathVeerTagValues.TriggerRepair,
+            _ => PathVeerTagValues.TriggerUnknown,
         };
 
     internal static void RecordDuration(
@@ -72,22 +72,22 @@ public static class PrefixUpdateTelemetry
             s_duration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Operation,
-                    IranDirectTagValues.OperationPrefixUpdateCheck),
+                    PathVeerTagNames.Operation,
+                    PathVeerTagValues.OperationPrefixUpdateCheck),
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome),
+                    PathVeerTagNames.Outcome, outcome),
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.FailureCategory, failureCategory));
+                    PathVeerTagNames.FailureCategory, failureCategory));
         }
         else
         {
             s_duration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Operation,
-                    IranDirectTagValues.OperationPrefixUpdateCheck),
+                    PathVeerTagNames.Operation,
+                    PathVeerTagValues.OperationPrefixUpdateCheck),
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome));
+                    PathVeerTagNames.Outcome, outcome));
         }
     }
 
@@ -106,26 +106,26 @@ public static class PrefixUpdateTelemetry
 
         public PrefixChildScope StartHead() =>
             StartChild(
-                IranDirectActivityNames.PrefixHttpHead,
-                IranDirectTagValues.OperationPrefixHttpHead);
+                PathVeerActivityNames.PrefixHttpHead,
+                PathVeerTagValues.OperationPrefixHttpHead);
 
         public PrefixChildScope StartGet() =>
             StartChild(
-                IranDirectActivityNames.PrefixHttpGet,
-                IranDirectTagValues.OperationPrefixHttpGet);
+                PathVeerActivityNames.PrefixHttpGet,
+                PathVeerTagValues.OperationPrefixHttpGet);
 
         public PrefixChildScope StartCompare() =>
             StartChild(
-                IranDirectActivityNames.PrefixCompare,
-                IranDirectTagValues.OperationPrefixCompare);
+                PathVeerActivityNames.PrefixCompare,
+                PathVeerTagValues.OperationPrefixCompare);
 
         internal PrefixChildScope StartChild(
             string name,
             string operation)
         {
-            Activity? child = IranDirectTelemetry.ActivitySource
+            Activity? child = PathVeerTelemetry.ActivitySource
                 .StartActivity(name, ActivityKind.Internal);
-            child?.SetTag(IranDirectTagNames.Operation, operation);
+            child?.SetTag(PathVeerTagNames.Operation, operation);
             return new PrefixChildScope(child);
         }
 
@@ -167,7 +167,7 @@ public static class PrefixUpdateTelemetry
             if (_activity is not null)
             {
                 _activity.SetTag(
-                    IranDirectTagNames.Outcome, outcomeString);
+                    PathVeerTagNames.Outcome, outcomeString);
                 if (outcome == TelemetryOutcome.Cancelled)
                 {
                     // Cancellation is not an error: leave status Unset and
@@ -179,7 +179,7 @@ public static class PrefixUpdateTelemetry
                     if (failureCategory is not null)
                     {
                         _activity.SetTag(
-                            IranDirectTagNames.FailureCategory,
+                            PathVeerTagNames.FailureCategory,
                             failureCategory);
                     }
                 }
@@ -246,7 +246,7 @@ public static class PrefixUpdateTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Success);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Success);
             _activity?.SetStatus(ActivityStatusCode.Ok);
         }
 
@@ -263,11 +263,11 @@ public static class PrefixUpdateTelemetry
                 TelemetryFailureCategoryMapper.ToCategoryString(category);
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Failure);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Failure);
             _activity?.SetStatus(
                 ActivityStatusCode.Error, categoryString);
             _activity?.SetTag(
-                IranDirectTagNames.FailureCategory, categoryString);
+                PathVeerTagNames.FailureCategory, categoryString);
         }
 
         public void Dispose()
@@ -281,7 +281,7 @@ public static class PrefixUpdateTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.OutcomeUnknown);
+                PathVeerTagNames.Outcome, PathVeerTagValues.OutcomeUnknown);
             _activity?.Dispose();
         }
     }

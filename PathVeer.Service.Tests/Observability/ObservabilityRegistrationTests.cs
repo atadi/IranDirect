@@ -32,7 +32,7 @@ public sealed class ObservabilityRegistrationTests
         IConfiguration config = BuildConfig(
             new() { ["Observability:Enabled"] = "false" });
 
-        services.AddIranDirectObservability(config, "Production");
+        services.AddPathVeerObservability(config, "Production");
 
         using ServiceProvider provider = services.BuildServiceProvider();
         Assert.Null(provider.GetService<TracerProvider>());
@@ -45,7 +45,7 @@ public sealed class ObservabilityRegistrationTests
         ServiceCollection services = new();
         IConfiguration config = BuildConfig(new Dictionary<string, string?>());
 
-        services.AddIranDirectObservability(config, "Production");
+        services.AddPathVeerObservability(config, "Production");
 
         using ServiceProvider provider = services.BuildServiceProvider();
         Assert.Null(provider.GetService<TracerProvider>());
@@ -58,7 +58,7 @@ public sealed class ObservabilityRegistrationTests
         ServiceCollection services = new();
         IConfiguration config = BuildConfig(Enabled(tracing: true, metrics: false));
 
-        services.AddIranDirectObservability(config, "Production");
+        services.AddPathVeerObservability(config, "Production");
 
         using ServiceProvider provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetService<TracerProvider>());
@@ -71,7 +71,7 @@ public sealed class ObservabilityRegistrationTests
         ServiceCollection services = new();
         IConfiguration config = BuildConfig(Enabled(tracing: false, metrics: true));
 
-        services.AddIranDirectObservability(config, "Production");
+        services.AddPathVeerObservability(config, "Production");
 
         using ServiceProvider provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetService<MeterProvider>());
@@ -84,7 +84,7 @@ public sealed class ObservabilityRegistrationTests
         ServiceCollection services = new();
         IConfiguration config = BuildConfig(Enabled(tracing: true, metrics: true));
 
-        services.AddIranDirectObservability(config, "Production");
+        services.AddPathVeerObservability(config, "Production");
 
         using ServiceProvider provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetService<TracerProvider>());
@@ -99,7 +99,7 @@ public sealed class ObservabilityRegistrationTests
         ServiceCollection services = new();
         IConfiguration config = BuildConfig(Enabled(tracing: true, metrics: true));
 
-        services.AddIranDirectObservability(config, "Production");
+        services.AddPathVeerObservability(config, "Production");
 
         using ServiceProvider provider = services.BuildServiceProvider();
 
@@ -124,6 +124,6 @@ public sealed class ObservabilityRegistrationTests
             });
 
         Assert.Throws<ArgumentException>(() =>
-            services.AddIranDirectObservability(config, "Production"));
+            services.AddPathVeerObservability(config, "Production"));
     }
 }

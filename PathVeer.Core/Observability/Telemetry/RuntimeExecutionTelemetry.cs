@@ -9,7 +9,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// Runtime execution telemetry: one child <c>Runtime.Execute</c> activity per
 /// execution attempt plus an execution-duration histogram and an
 /// operations-per-cycle histogram, created once against the Phase 32.2
-/// <see cref="IranDirectTelemetry.Meter"/>.
+/// <see cref="PathVeerTelemetry.Meter"/>.
 ///
 /// This instruments exactly one production operation — the single invocation of
 /// <c>IRuntimeExecutor.ExecuteAsync</c> inside the runtime-cycle orchestration
@@ -17,7 +17,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// the executor implementation, per-step loops, prefix-group mutation loops,
 /// route handler implementations, or individual execution handlers.
 ///
-/// The execution activity is a child of <c>IranDirect.RuntimeCycle</c> whenever
+/// The execution activity is a child of <c>PathVeer.RuntimeCycle</c> whenever
 /// execution occurs inside an instrumented runtime cycle (it naturally nests
 /// under <see cref="Activity.Current"/>); if started without an active parent
 /// it simply becomes a root activity — no fake parent is manufactured.
@@ -28,17 +28,17 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// </summary>
 public static class RuntimeExecutionTelemetry
 {
-    private const string OperationValue = IranDirectTagValues.OperationExecute;
+    private const string OperationValue = PathVeerTagValues.OperationExecute;
 
-    private static readonly Histogram<double> s_executionDuration = IranDirectTelemetry
+    private static readonly Histogram<double> s_executionDuration = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.RuntimeExecutionDuration,
+            PathVeerMetricNames.RuntimeExecutionDuration,
             unit: "ms",
             description: "Elapsed time spent executing the runtime plan.");
 
-    private static readonly Histogram<double> s_operationsPerCycle = IranDirectTelemetry
+    private static readonly Histogram<double> s_operationsPerCycle = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.RuntimeOperationsPerCycle,
+            PathVeerMetricNames.RuntimeOperationsPerCycle,
             unit: "{operation}",
             description: "Number of runtime execution operations attempted in one cycle.");
 
@@ -49,13 +49,13 @@ public static class RuntimeExecutionTelemetry
     /// </summary>
     internal static RuntimeExecutionTelemetryScope Start(int operationCount)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.RuntimeExecute,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.RuntimeExecute,
             ActivityKind.Internal);
 
         if (activity is not null)
         {
-            activity.SetTag(IranDirectTagNames.Operation, OperationValue);
+            activity.SetTag(PathVeerTagNames.Operation, OperationValue);
         }
 
         return new RuntimeExecutionTelemetryScope(activity, operationCount);
@@ -69,16 +69,16 @@ public static class RuntimeExecutionTelemetry
         {
             return
             [
-                new(IranDirectTagNames.Operation, OperationValue),
-                new(IranDirectTagNames.Outcome, outcome),
+                new(PathVeerTagNames.Operation, OperationValue),
+                new(PathVeerTagNames.Outcome, outcome),
             ];
         }
 
         return
         [
-            new(IranDirectTagNames.Operation, OperationValue),
-            new(IranDirectTagNames.Outcome, outcome),
-            new(IranDirectTagNames.FailureCategory, failureCategory),
+            new(PathVeerTagNames.Operation, OperationValue),
+            new(PathVeerTagNames.Outcome, outcome),
+            new(PathVeerTagNames.FailureCategory, failureCategory),
         ];
     }
 
@@ -120,7 +120,7 @@ internal struct RuntimeExecutionTelemetryScope : IDisposable
     {
         if (result is null)
         {
-            RecordTerminal(IranDirectTagValues.OutcomeUnknown);
+            RecordTerminal(PathVeerTagValues.OutcomeUnknown);
             return;
         }
 
@@ -131,7 +131,7 @@ internal struct RuntimeExecutionTelemetryScope : IDisposable
 
         if (_activity is not null)
         {
-            _activity.SetTag(IranDirectTagNames.Outcome, outcomeString);
+            _activity.SetTag(PathVeerTagNames.Outcome, outcomeString);
 
             // Cancelled is not an error; leave status Unset and omit the
             // failure_category tag entirely.
@@ -161,15 +161,15 @@ internal struct RuntimeExecutionTelemetryScope : IDisposable
         string categoryString =
             TelemetryFailureCategoryMapper.ToCategoryString(category);
 
-        RecordTerminal(IranDirectTagValues.Failure, categoryString);
+        RecordTerminal(PathVeerTagValues.Failure, categoryString);
 
         if (_activity is not null)
         {
             _activity.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.Failure);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.Failure);
             _activity.SetTag(
-                IranDirectTagNames.FailureCategory,
+                PathVeerTagNames.FailureCategory,
                 categoryString);
             // Phase 32.1 does not approve exception events; bounded
             // failure_category is set, exception text is never used.
@@ -181,13 +181,13 @@ internal struct RuntimeExecutionTelemetryScope : IDisposable
 
     public void CompleteCancelled()
     {
-        RecordTerminal(IranDirectTagValues.Cancelled);
+        RecordTerminal(PathVeerTagValues.Cancelled);
 
         if (_activity is not null)
         {
             _activity.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.Cancelled);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.Cancelled);
             // Cancellation is not an error; leave status Unset and omit
             // failure_category.
         }
@@ -219,11 +219,11 @@ internal struct RuntimeExecutionTelemetryScope : IDisposable
         double elapsedMs = Stopwatch.GetElapsedTime(_startTimestamp)
             .TotalMilliseconds;
         RuntimeExecutionTelemetry.RecordDuration(
-            IranDirectTagValues.OutcomeUnknown,
+            PathVeerTagValues.OutcomeUnknown,
             elapsedMs);
         RuntimeExecutionTelemetry.RecordOperations(
             _operationCount,
-            IranDirectTagValues.OutcomeUnknown);
+            PathVeerTagValues.OutcomeUnknown);
         _activity?.Dispose();
     }
 }

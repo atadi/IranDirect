@@ -1,4 +1,4 @@
-# Alertmanager configuration - IranDirect Phase 33.4.
+# Alertmanager configuration - PathVeer Phase 33.4.
 #
 # LOCAL / DEVELOPMENT DEFAULT. Every alert is routed to the `null` receiver,
 # which delivers nowhere. This is intentional: the local stack must never
@@ -49,14 +49,14 @@ inhibit_rules:
   # Collector down makes all collector-derived application telemetry
   # unreliable - silence the application alerts while it is down.
   - source_matchers:
-      - alertname = "IranDirectCollectorUnavailable"
+      - alertname = "PathVeerCollectorUnavailable"
     target_matchers:
       - component = "service"
     equal: ["deployment_environment_name"]
   # A Prometheus target being down suppresses derivative alerts whose
   # truth depends on that target's scrape.
   - source_matchers:
-      - alertname = "IranDirectPrometheusTargetDown"
+      - alertname = "PathVeerPrometheusTargetDown"
     target_matchers:
       - component = "service"
     equal: ["deployment_environment_name"]

@@ -21,11 +21,11 @@ public sealed class TelemetryAllocationTests
     public void AccessingActivitySource_AllocatesNothingAfterInit()
     {
         // Warm up static initialization.
-        _ = IranDirectTelemetry.ActivitySource;
+        _ = PathVeerTelemetry.ActivitySource;
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++)
-            _ = IranDirectTelemetry.ActivitySource;
+            _ = PathVeerTelemetry.ActivitySource;
         long after = GC.GetAllocatedBytesForCurrentThread();
 
         Assert.Equal(0, after - before);
@@ -34,11 +34,11 @@ public sealed class TelemetryAllocationTests
     [Fact]
     public void AccessingMeter_AllocatesNothingAfterInit()
     {
-        _ = IranDirectTelemetry.Meter;
+        _ = PathVeerTelemetry.Meter;
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++)
-            _ = IranDirectTelemetry.Meter;
+            _ = PathVeerTelemetry.Meter;
         long after = GC.GetAllocatedBytesForCurrentThread();
 
         Assert.Equal(0, after - before);

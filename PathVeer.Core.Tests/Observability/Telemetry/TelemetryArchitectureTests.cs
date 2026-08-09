@@ -40,15 +40,15 @@ public sealed class TelemetryArchitectureTests
     [Fact]
     public void SingleActivitySourceAndMeterDefinition()
     {
-        var types = typeof(IranDirectTelemetry).Assembly.GetTypes();
+        var types = typeof(PathVeerTelemetry).Assembly.GetTypes();
         int sourceDefs = types.Count(t =>
             t.GetProperties(BindingFlags.Static | BindingFlags.Public)
              .Any(f => f.PropertyType == typeof(ActivitySource) &&
-                       f.Name == nameof(IranDirectTelemetry.ActivitySource)));
+                       f.Name == nameof(PathVeerTelemetry.ActivitySource)));
         int meterDefs = types.Count(t =>
             t.GetProperties(BindingFlags.Static | BindingFlags.Public)
              .Any(f => f.PropertyType == typeof(System.Diagnostics.Metrics.Meter) &&
-                       f.Name == nameof(IranDirectTelemetry.Meter)));
+                       f.Name == nameof(PathVeerTelemetry.Meter)));
 
         Assert.Equal(1, sourceDefs);
         Assert.Equal(1, meterDefs);
@@ -85,7 +85,7 @@ public sealed class TelemetryArchitectureTests
         // The foundation must expose only strongly-typed accessors, constants,
         // and bounded mappers — not StartActivity(name, Dictionary<...>) or
         // RecordMetric(name, params object[]).
-        var methods = typeof(IranDirectTelemetry).Assembly
+        var methods = typeof(PathVeerTelemetry).Assembly
             .GetTypes()
             .Where(t => t.Namespace != null &&
                         t.Namespace.Contains("Observability.Telemetry"))
@@ -141,19 +141,19 @@ public sealed class TelemetryArchitectureTests
     {
         // Prohibited tag names live in the test catalog consts only; assert the
         // production telemetry foundation never references them as actual tags.
-        string[] prohibited = IranDirectTagNames.Prohibited.ToArray();
+        string[] prohibited = PathVeerTagNames.Prohibited.ToArray();
         string foundationDir = Path.Combine(
             RepoRoot(), "PathVeer.Core/Observability/Telemetry");
         foreach (var file in Directory.GetFiles(foundationDir, "*.cs"))
         {
-            // IranDirectTagNames.cs defines the prohibited list itself, and
-            // IranDirectTagValues.cs / the mapper legitimately carry bounded
+            // PathVeerTagNames.cs defines the prohibited list itself, and
+            // PathVeerTagValues.cs / the mapper legitimately carry bounded
             // values (e.g. route_kind=endpoint). The contract under test is
             // that no workflow uses a prohibited name as a tag *name*; with no
             // instrumentation yet, the remaining files must be clean.
             string normalized = file.Replace('\\', '/');
-            if (normalized.EndsWith("IranDirectTagNames.cs") ||
-                normalized.EndsWith("IranDirectTagValues.cs") ||
+            if (normalized.EndsWith("PathVeerTagNames.cs") ||
+                normalized.EndsWith("PathVeerTagValues.cs") ||
                 normalized.EndsWith("TelemetryOutcomeMapper.cs") ||
                 normalized.EndsWith("TelemetryFailureCategoryMapper.cs"))
                 continue;
@@ -191,7 +191,7 @@ public sealed class TelemetryArchitectureTests
 
             string content = File.ReadAllText(file);
             if (content.Contains("StartActivity(") &&
-                content.Contains("IranDirectActivityNames.RuntimeCycle"))
+                content.Contains("PathVeerActivityNames.RuntimeCycle"))
                 runtimeCycleStarts++;
         }
 
@@ -244,7 +244,7 @@ public sealed class TelemetryArchitectureTests
     [Fact]
     public void Controller_OnlyApprovedRuntimeCycleInstrumentation()
     {
-        // The controller may only StartActivity(IranDirectActivityNames.RuntimeCycle)
+        // The controller may only StartActivity(PathVeerActivityNames.RuntimeCycle)
         // and call RuntimeCycleTelemetry.Start; it must not create instruments
         // or use any other telemetry name.
         string path = Path.Combine(RepoRoot(), "PathVeer.Core/PathVeerController.cs");
@@ -255,7 +255,7 @@ public sealed class TelemetryArchitectureTests
             content);
         Assert.DoesNotContain("new ActivitySource", content);
         Assert.DoesNotContain("Meter.Create", content);
-        Assert.DoesNotContain("StartActivity(IranDirectActivityNames.", content);
+        Assert.DoesNotContain("StartActivity(PathVeerActivityNames.", content);
     }
 
     private void AssertNoMatch(string pattern, string[] excludeDirs)
@@ -450,10 +450,10 @@ public sealed class TelemetryArchitectureTests
         string content = File.ReadAllText(path);
 
         // operation / outcome / failure_category only.
-        Assert.Contains("IranDirectTagNames.Operation", content);
-        Assert.Contains("IranDirectTagNames.Outcome", content);
+        Assert.Contains("PathVeerTagNames.Operation", content);
+        Assert.Contains("PathVeerTagNames.Outcome", content);
 
-        foreach (var tag in IranDirectTagNames.Prohibited)
+        foreach (var tag in PathVeerTagNames.Prohibited)
         {
             Assert.DoesNotContain($"\"{tag}\"", content);
         }
@@ -503,9 +503,9 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/RouteSystemCallTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectActivityNames.RoutesEnumerate", content);
-        Assert.Contains("IranDirectActivityNames.RoutesCreate", content);
-        Assert.Contains("IranDirectActivityNames.RoutesDelete", content);
+        Assert.Contains("PathVeerActivityNames.RoutesEnumerate", content);
+        Assert.Contains("PathVeerActivityNames.RoutesCreate", content);
+        Assert.Contains("PathVeerActivityNames.RoutesDelete", content);
     }
 
     [Fact]
@@ -525,13 +525,13 @@ public sealed class TelemetryArchitectureTests
         Assert.Equal(1, histograms); // system_call.duration
 
         Assert.Contains(
-            "IranDirectMetricNames.RoutesOperationsRequested", content);
+            "PathVeerMetricNames.RoutesOperationsRequested", content);
         Assert.Contains(
-            "IranDirectMetricNames.RoutesOperationsSucceeded", content);
+            "PathVeerMetricNames.RoutesOperationsSucceeded", content);
         Assert.Contains(
-            "IranDirectMetricNames.RoutesOperationsFailed", content);
+            "PathVeerMetricNames.RoutesOperationsFailed", content);
         Assert.Contains(
-            "IranDirectMetricNames.RoutesSystemCallDuration", content);
+            "PathVeerMetricNames.RoutesSystemCallDuration", content);
     }
 
     [Fact]
@@ -583,10 +583,10 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/RouteSystemCallTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectTagNames.Operation", content);
-        Assert.Contains("IranDirectTagNames.Outcome", content);
+        Assert.Contains("PathVeerTagNames.Operation", content);
+        Assert.Contains("PathVeerTagNames.Outcome", content);
 
-        foreach (var tag in IranDirectTagNames.Prohibited)
+        foreach (var tag in PathVeerTagNames.Prohibited)
         {
             Assert.DoesNotContain($"\"{tag}\"", content);
         }
@@ -692,10 +692,10 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/PrefixUpdateTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectActivityNames.PrefixUpdateCheck", content);
-        Assert.Contains("IranDirectActivityNames.PrefixHttpHead", content);
-        Assert.Contains("IranDirectActivityNames.PrefixHttpGet", content);
-        Assert.Contains("IranDirectActivityNames.PrefixCompare", content);
+        Assert.Contains("PathVeerActivityNames.PrefixUpdateCheck", content);
+        Assert.Contains("PathVeerActivityNames.PrefixHttpHead", content);
+        Assert.Contains("PathVeerActivityNames.PrefixHttpGet", content);
+        Assert.Contains("PathVeerActivityNames.PrefixCompare", content);
     }
 
     [Fact]
@@ -715,9 +715,9 @@ public sealed class TelemetryArchitectureTests
         Assert.Equal(1, histograms); // prefix.check.duration
 
         Assert.Contains(
-            "IranDirectMetricNames.PrefixChecks", content);
+            "PathVeerMetricNames.PrefixChecks", content);
         Assert.Contains(
-            "IranDirectMetricNames.PrefixCheckDuration", content);
+            "PathVeerMetricNames.PrefixCheckDuration", content);
     }
 
     [Fact]
@@ -728,12 +728,12 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/PrefixUpdateTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectTagNames.Operation", content);
-        Assert.Contains("IranDirectTagNames.Outcome", content);
-        Assert.Contains("IranDirectTagNames.Source", content);
-        Assert.Contains("IranDirectTagNames.Trigger", content);
+        Assert.Contains("PathVeerTagNames.Operation", content);
+        Assert.Contains("PathVeerTagNames.Outcome", content);
+        Assert.Contains("PathVeerTagNames.Source", content);
+        Assert.Contains("PathVeerTagNames.Trigger", content);
 
-        foreach (var tag in IranDirectTagNames.Prohibited)
+        foreach (var tag in PathVeerTagNames.Prohibited)
         {
             Assert.DoesNotContain($"\"{tag}\"", content);
         }
@@ -810,10 +810,10 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/CustomRouteRefreshTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectActivityNames.CustomRouteRefresh", content);
-        Assert.Contains("IranDirectActivityNames.DnsCacheRead", content);
-        Assert.Contains("IranDirectActivityNames.DnsResolve", content);
-        Assert.Contains("IranDirectActivityNames.DnsCacheWrite", content);
+        Assert.Contains("PathVeerActivityNames.CustomRouteRefresh", content);
+        Assert.Contains("PathVeerActivityNames.DnsCacheRead", content);
+        Assert.Contains("PathVeerActivityNames.DnsResolve", content);
+        Assert.Contains("PathVeerActivityNames.DnsCacheWrite", content);
     }
 
     [Fact]
@@ -832,10 +832,10 @@ public sealed class TelemetryArchitectureTests
         Assert.Equal(1, counters);  // dns.lookups
         Assert.Equal(1, histograms); // dns.lookup.duration
 
-        Assert.Contains("IranDirectMetricNames.DnsLookups", content);
-        Assert.Contains("IranDirectMetricNames.DnsLookupDuration", content);
-        Assert.DoesNotContain("IranDirectMetricNames.DnsRefreshes", content);
-        Assert.DoesNotContain("IranDirectMetricNames.DnsRefreshDuration", content);
+        Assert.Contains("PathVeerMetricNames.DnsLookups", content);
+        Assert.Contains("PathVeerMetricNames.DnsLookupDuration", content);
+        Assert.DoesNotContain("PathVeerMetricNames.DnsRefreshes", content);
+        Assert.DoesNotContain("PathVeerMetricNames.DnsRefreshDuration", content);
     }
 
     [Fact]
@@ -846,12 +846,12 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/CustomRouteRefreshTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectTagNames.Operation", content);
-        Assert.Contains("IranDirectTagNames.Outcome", content);
-        Assert.Contains("IranDirectTagNames.Source", content);
-        Assert.Contains("IranDirectTagNames.CacheState", content);
+        Assert.Contains("PathVeerTagNames.Operation", content);
+        Assert.Contains("PathVeerTagNames.Outcome", content);
+        Assert.Contains("PathVeerTagNames.Source", content);
+        Assert.Contains("PathVeerTagNames.CacheState", content);
 
-        foreach (var tag in IranDirectTagNames.Prohibited)
+        foreach (var tag in PathVeerTagNames.Prohibited)
         {
             Assert.DoesNotContain($"\"{tag}\"", content);
         }
@@ -939,7 +939,7 @@ public sealed class TelemetryArchitectureTests
         // All Ipc.* activities must originate from IpcRequestTelemetry. Count
         // production files that reference an Ipc activity name AND a
         // StartActivity( call. Exactly one file, exactly two StartActivity
-        // calls (the IranDirect.IpcRequest root + the shared StartChild(...)).
+        // calls (the PathVeer.IpcRequest root + the shared StartChild(...)).
         string root = RepoRoot();
         int files = 0;
         int startCalls = 0;
@@ -956,10 +956,10 @@ public sealed class TelemetryArchitectureTests
                 continue;
 
             string content = File.ReadAllText(file);
-            bool referencesIpc = content.Contains("IranDirectActivityNames.IpcRequest") ||
-                content.Contains("IranDirectActivityNames.IpcConnect") ||
-                content.Contains("IranDirectActivityNames.IpcSend") ||
-                content.Contains("IranDirectActivityNames.IpcReceive");
+            bool referencesIpc = content.Contains("PathVeerActivityNames.IpcRequest") ||
+                content.Contains("PathVeerActivityNames.IpcConnect") ||
+                content.Contains("PathVeerActivityNames.IpcSend") ||
+                content.Contains("PathVeerActivityNames.IpcReceive");
             if (referencesIpc && content.Contains("StartActivity("))
             {
                 files++;
@@ -980,10 +980,10 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/IpcRequestTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectActivityNames.IpcRequest", content);
-        Assert.Contains("IranDirectActivityNames.IpcConnect", content);
-        Assert.Contains("IranDirectActivityNames.IpcSend", content);
-        Assert.Contains("IranDirectActivityNames.IpcReceive", content);
+        Assert.Contains("PathVeerActivityNames.IpcRequest", content);
+        Assert.Contains("PathVeerActivityNames.IpcConnect", content);
+        Assert.Contains("PathVeerActivityNames.IpcSend", content);
+        Assert.Contains("PathVeerActivityNames.IpcReceive", content);
     }
 
     [Fact]
@@ -999,11 +999,11 @@ public sealed class TelemetryArchitectureTests
         int histograms = System.Text.RegularExpressions.Regex.Matches(
             content, @"CreateHistogram<double>").Count;
 
-        Assert.Equal(1, counters);  // irandirect.ipc.requests
-        Assert.Equal(1, histograms); // irandirect.ipc.request.duration
+        Assert.Equal(1, counters);  // pathveer.ipc.requests
+        Assert.Equal(1, histograms); // pathveer.ipc.request.duration
 
-        Assert.Contains("IranDirectMetricNames.IpcRequests", content);
-        Assert.Contains("IranDirectMetricNames.IpcRequestDuration", content);
+        Assert.Contains("PathVeerMetricNames.IpcRequests", content);
+        Assert.Contains("PathVeerMetricNames.IpcRequestDuration", content);
     }
 
     [Fact]
@@ -1014,11 +1014,11 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/IpcRequestTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectTagNames.Operation", content);
-        Assert.Contains("IranDirectTagNames.IpcCommand", content);
-        Assert.Contains("IranDirectTagNames.Outcome", content);
+        Assert.Contains("PathVeerTagNames.Operation", content);
+        Assert.Contains("PathVeerTagNames.IpcCommand", content);
+        Assert.Contains("PathVeerTagNames.Outcome", content);
 
-        foreach (var tag in IranDirectTagNames.Prohibited)
+        foreach (var tag in PathVeerTagNames.Prohibited)
         {
             Assert.DoesNotContain($"\"{tag}\"", content);
         }
@@ -1055,7 +1055,7 @@ public sealed class TelemetryArchitectureTests
                 continue;
 
             string content = File.ReadAllText(file);
-            if (content.Contains("IranDirectActivityNames.IpcDispatch") &&
+            if (content.Contains("PathVeerActivityNames.IpcDispatch") &&
                 content.Contains("StartActivity("))
             {
                 coreFiles++;
@@ -1096,7 +1096,7 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/IpcDispatchTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectActivityNames.IpcDispatch", content);
+        Assert.Contains("PathVeerActivityNames.IpcDispatch", content);
     }
 
     [Fact]
@@ -1141,11 +1141,11 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/SupportExportTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectActivityNames.SupportBundleExport", content);
-        Assert.Contains("IranDirectActivityNames.SupportCaptureSnapshot", content);
-        Assert.Contains("IranDirectActivityNames.SupportSerialize", content);
-        Assert.Contains("IranDirectActivityNames.SupportWriteJson", content);
-        Assert.Contains("IranDirectActivityNames.SupportCreateZip", content);
+        Assert.Contains("PathVeerActivityNames.SupportBundleExport", content);
+        Assert.Contains("PathVeerActivityNames.SupportCaptureSnapshot", content);
+        Assert.Contains("PathVeerActivityNames.SupportSerialize", content);
+        Assert.Contains("PathVeerActivityNames.SupportWriteJson", content);
+        Assert.Contains("PathVeerActivityNames.SupportCreateZip", content);
     }
 
     [Fact]
@@ -1164,9 +1164,9 @@ public sealed class TelemetryArchitectureTests
         Assert.Equal(2, counters);  // bundles.exported + bundles.failed
         Assert.Equal(1, histograms); // bundle.duration
 
-        Assert.Contains("IranDirectMetricNames.SupportBundlesExported", content);
-        Assert.Contains("IranDirectMetricNames.SupportBundlesFailed", content);
-        Assert.Contains("IranDirectMetricNames.SupportBundleDuration", content);
+        Assert.Contains("PathVeerMetricNames.SupportBundlesExported", content);
+        Assert.Contains("PathVeerMetricNames.SupportBundlesFailed", content);
+        Assert.Contains("PathVeerMetricNames.SupportBundleDuration", content);
     }
 
     [Fact]
@@ -1177,10 +1177,10 @@ public sealed class TelemetryArchitectureTests
             "PathVeer.Core/Observability/Telemetry/SupportExportTelemetry.cs");
         string content = File.ReadAllText(path);
 
-        Assert.Contains("IranDirectTagNames.Operation", content);
-        Assert.Contains("IranDirectTagNames.Outcome", content);
+        Assert.Contains("PathVeerTagNames.Operation", content);
+        Assert.Contains("PathVeerTagNames.Outcome", content);
 
-        foreach (var tag in IranDirectTagNames.Prohibited)
+        foreach (var tag in PathVeerTagNames.Prohibited)
         {
             Assert.DoesNotContain($"\"{tag}\"", content);
         }
@@ -1224,7 +1224,7 @@ public sealed class TelemetryArchitectureTests
         string content = File.ReadAllText(path);
 
         Assert.Contains("IpcDispatchTelemetry.Start(", content);
-        Assert.DoesNotContain("StartActivity(IranDirectActivityNames.", content);
+        Assert.DoesNotContain("StartActivity(PathVeerActivityNames.", content);
         Assert.DoesNotContain("Meter.Create", content);
         Assert.DoesNotContain("new ActivitySource", content);
     }
@@ -1234,10 +1234,10 @@ public sealed class TelemetryArchitectureTests
     {
         string activityNames = File.ReadAllText(Path.Combine(
             RepoRoot(),
-            "PathVeer.Core/Observability/Telemetry/IranDirectActivityNames.cs"));
+            "PathVeer.Core/Observability/Telemetry/PathVeerActivityNames.cs"));
         string metricNames = File.ReadAllText(Path.Combine(
             RepoRoot(),
-            "PathVeer.Core/Observability/Telemetry/IranDirectMetricNames.cs"));
+            "PathVeer.Core/Observability/Telemetry/PathVeerMetricNames.cs"));
 
         Assert.Contains("IpcRequest", activityNames);
         Assert.Contains("IpcConnect", activityNames);
@@ -1325,13 +1325,13 @@ public sealed class TelemetryArchitectureTests
     [Fact]
     public void CoreTelemetryContracts_RemainBclOnly()
     {
-        // IranDirectTelemetry and the telemetry helpers must not reference
+        // PathVeerTelemetry and the telemetry helpers must not reference
         // OpenTelemetry exporter/provider/sampler namespaces.
         string[] coreFiles =
         {
-            "PathVeer.Core/Observability/Telemetry/IranDirectTelemetry.cs",
-            "PathVeer.Core/Observability/Telemetry/IranDirectActivityNames.cs",
-            "PathVeer.Core/Observability/Telemetry/IranDirectMetricNames.cs",
+            "PathVeer.Core/Observability/Telemetry/PathVeerTelemetry.cs",
+            "PathVeer.Core/Observability/Telemetry/PathVeerActivityNames.cs",
+            "PathVeer.Core/Observability/Telemetry/PathVeerMetricNames.cs",
         };
 
         foreach (string file in coreFiles)
@@ -1485,13 +1485,13 @@ public sealed class TelemetryArchitectureTests
 
         int addMethods = 0;
         foreach (Match m in Regex.Matches(
-            content, @"public static IServiceCollection AddIranDirectObservability\("))
+            content, @"public static IServiceCollection AddPathVeerObservability\("))
         {
             addMethods++;
         }
         Assert.Equal(1, addMethods);
         Assert.Contains(
-            "AddIranDirectObservability",
+            "AddPathVeerObservability",
             File.ReadAllText(Path.Combine(
                 RepoRoot(), "PathVeer.Service/Program.cs")));
     }

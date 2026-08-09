@@ -1,9 +1,9 @@
 {
-  "uid": "irandirect-prefix-dns",
-  "title": "IranDirect / Prefix and DNS",
+  "uid": "pathveer-prefix-dns",
+  "title": "PathVeer / Prefix and DNS",
   "description": "Prefix update checks and custom-route DNS resolution: throughput, outcomes and latency. Prometheus-only; no domain, address or URL is ever exposed.",
   "tags": [
-    "irandirect",
+    "pathveer",
     "prefix",
     "dns",
     "provisioned"
@@ -26,13 +26,13 @@
         "type": "query",
         "datasource": {
           "type": "prometheus",
-          "uid": "irandirect-prometheus"
+          "uid": "pathveer-prometheus"
         },
         "query": {
-          "query": "label_values(irandirect_runtime_cycles_started_total, deployment_environment_name)",
+          "query": "label_values(pathveer_runtime_cycles_started_total, deployment_environment_name)",
           "refId": "env"
         },
-        "definition": "label_values(irandirect_runtime_cycles_started_total, deployment_environment_name)",
+        "definition": "label_values(pathveer_runtime_cycles_started_total, deployment_environment_name)",
         "refresh": 2,
         "includeAll": true,
         "allValue": ".*",
@@ -47,9 +47,9 @@
       "title": "Explore traces in Tempo",
       "type": "link",
       "icon": "external link",
-      "url": "/explore?left=%7B%22datasource%22:%22irandirect-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22IranDirect.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
+      "url": "/explore?left=%7B%22datasource%22:%22pathveer-tempo%22,%22queries%22:%5B%7B%22queryType%22:%22traceqlSearch%22,%22filters%22:%5B%7B%22id%22:%22svc%22,%22tag%22:%22service.name%22,%22operator%22:%22%3D%22,%22value%22:%5B%22PathVeer.Service%22%5D,%22valueType%22:%22string%22,%22scope%22:%22resource%22%7D%5D%7D%5D%7D",
       "targetBlank": true,
-      "tooltip": "Open Tempo filtered by service.name=IranDirect.Service"
+      "tooltip": "Open Tempo filtered by service.name=PathVeer.Service"
     },
     {
       "title": "Alertmanager",
@@ -81,7 +81,7 @@
       "description": "Prefix update checks per second, split by outcome.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -93,10 +93,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (outcome) (rate(irandirect_prefix_checks_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "expr": "sum by (outcome) (rate(pathveer_prefix_checks_total{deployment_environment_name=~\"$env\"}[5m]))",
           "legendFormat": "{{outcome}}",
           "range": true,
           "instant": false,
@@ -142,7 +142,7 @@
       "description": "Prefix check throughput split by the operation performed (HEAD/GET/compare/persist).",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -154,10 +154,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (operation) (rate(irandirect_prefix_checks_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "expr": "sum by (operation) (rate(pathveer_prefix_checks_total{deployment_environment_name=~\"$env\"}[5m]))",
           "legendFormat": "{{operation}}",
           "range": true,
           "instant": false,
@@ -203,7 +203,7 @@
       "description": "Prefix update check duration quantiles.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -215,10 +215,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(irandirect_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(pathveer_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
           "legendFormat": "p50",
           "range": true,
           "instant": false,
@@ -227,10 +227,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(irandirect_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pathveer_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
           "legendFormat": "p95",
           "range": true,
           "instant": false,
@@ -239,10 +239,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(irandirect_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pathveer_prefix_check_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
           "legendFormat": "p99",
           "range": true,
           "instant": false,
@@ -288,7 +288,7 @@
       "description": "rate(sum)/rate(count), guarded against divide-by-zero.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -300,10 +300,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(irandirect_prefix_check_duration_milliseconds_sum{deployment_environment_name=~\"$env\"}[5m])) / (sum(rate(irandirect_prefix_check_duration_milliseconds_count{deployment_environment_name=~\"$env\"}[5m])) > 0)",
+          "expr": "sum(rate(pathveer_prefix_check_duration_milliseconds_sum{deployment_environment_name=~\"$env\"}[5m])) / (sum(rate(pathveer_prefix_check_duration_milliseconds_count{deployment_environment_name=~\"$env\"}[5m])) > 0)",
           "legendFormat": "mean",
           "range": false,
           "instant": true,
@@ -364,7 +364,7 @@
       "description": "Custom-route DNS lookups per second by outcome. No domain or address is ever labelled.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -376,10 +376,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (outcome) (rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "expr": "sum by (outcome) (rate(pathveer_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m]))",
           "legendFormat": "{{outcome}}",
           "range": true,
           "instant": false,
@@ -425,7 +425,7 @@
       "description": "DNS work split by operation (resolve / cache read / cache write).",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -437,10 +437,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (operation) (rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m]))",
+          "expr": "sum by (operation) (rate(pathveer_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m]))",
           "legendFormat": "{{operation}}",
           "range": true,
           "instant": false,
@@ -486,7 +486,7 @@
       "description": "DNS resolution latency quantiles.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -498,10 +498,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(irandirect_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(pathveer_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
           "legendFormat": "p50",
           "range": true,
           "instant": false,
@@ -510,10 +510,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(irandirect_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pathveer_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
           "legendFormat": "p95",
           "range": true,
           "instant": false,
@@ -522,10 +522,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(irandirect_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pathveer_dns_lookup_duration_milliseconds_bucket{deployment_environment_name=~\"$env\"}[5m])))",
           "legendFormat": "p99",
           "range": true,
           "instant": false,
@@ -571,7 +571,7 @@
       "description": "rate(sum)/rate(count), guarded against divide-by-zero.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -583,10 +583,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(irandirect_dns_lookup_duration_milliseconds_sum{deployment_environment_name=~\"$env\"}[5m])) / (sum(rate(irandirect_dns_lookup_duration_milliseconds_count{deployment_environment_name=~\"$env\"}[5m])) > 0)",
+          "expr": "sum(rate(pathveer_dns_lookup_duration_milliseconds_sum{deployment_environment_name=~\"$env\"}[5m])) / (sum(rate(pathveer_dns_lookup_duration_milliseconds_count{deployment_environment_name=~\"$env\"}[5m])) > 0)",
           "legendFormat": "mean",
           "range": false,
           "instant": true,
@@ -634,7 +634,7 @@
       "description": "Share of DNS lookups whose outcome is not success. Empty while no lookups occur.",
       "datasource": {
         "type": "prometheus",
-        "uid": "irandirect-prometheus"
+        "uid": "pathveer-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -646,10 +646,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "irandirect-prometheus"
+            "uid": "pathveer-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\",outcome!=\"success\"}[5m])) / (sum(rate(irandirect_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m])) > 0)",
+          "expr": "sum(rate(pathveer_dns_lookups_total{deployment_environment_name=~\"$env\",outcome!=\"success\"}[5m])) / (sum(rate(pathveer_dns_lookups_total{deployment_environment_name=~\"$env\"}[5m])) > 0)",
           "legendFormat": "failure ratio",
           "range": true,
           "instant": false,
@@ -714,7 +714,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Expected to be empty on a freshly started stack.**\n\nEvery query on this dashboard targets a metric that *is* instrumented in production code but was **not observed** during Phase 33.3 verification, because the prefix-update and custom-route DNS code paths did not execute in the sampled window:\n\n- `irandirect_prefix_checks_total`, `irandirect_prefix_check_duration_milliseconds_*`\n- `irandirect_dns_lookups_total`, `irandirect_dns_lookup_duration_milliseconds_*`\n\nThese panels populate once a prefix update check or a custom-route DNS refresh runs. Empty panels here mean *no activity*, not a broken query.\n\n**Not shown at all:** `irandirect.prefix.known_count`, `irandirect.dns.cache_record_count` and `irandirect.prefix.consecutive_failures` have **no instrument** in production code, so no panel is provided.\n\n**Cache-state distribution is omitted.** The `cache_state` label does not appear on any live series. Per the phase brief, deriving it from traces is out of scope, so no fresh/stale/miss panel is included."
+        "content": "**Expected to be empty on a freshly started stack.**\n\nEvery query on this dashboard targets a metric that *is* instrumented in production code but was **not observed** during Phase 33.3 verification, because the prefix-update and custom-route DNS code paths did not execute in the sampled window:\n\n- `pathveer_prefix_checks_total`, `pathveer_prefix_check_duration_milliseconds_*`\n- `pathveer_dns_lookups_total`, `pathveer_dns_lookup_duration_milliseconds_*`\n\nThese panels populate once a prefix update check or a custom-route DNS refresh runs. Empty panels here mean *no activity*, not a broken query.\n\n**Not shown at all:** `pathveer.prefix.known_count`, `pathveer.dns.cache_record_count` and `pathveer.prefix.consecutive_failures` have **no instrument** in production code, so no panel is provided.\n\n**Cache-state distribution is omitted.** The `cache_state` label does not appear on any live series. Per the phase brief, deriving it from traces is out of scope, so no fresh/stale/miss panel is included."
       }
     },
     {
@@ -730,7 +730,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `IranDirectPrefixChecksFailing` \u2192 `deployment/observability/runbooks/prefix-check-failures.md`\n- `IranDirectDnsLookupFailureRatioHigh` \u2192 `deployment/observability/runbooks/dns-lookup-failures.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
+        "content": "**Alerts on this dashboard are evaluated by Prometheus**, not Grafana.\nAlertmanager (local default) routes everything to a no-op receiver; alerts are\nvisible at [Alertmanager UI](http://localhost:9095) and via the Prometheus\n**Alerts** page. Resolve/silence there.\n\n**Runbooks** (repo-relative paths):\n- `PathVeerPrefixChecksFailing` \u2192 `deployment/observability/runbooks/prefix-check-failures.md`\n- `PathVeerDnsLookupFailureRatioHigh` \u2192 `deployment/observability/runbooks/dns-lookup-failures.md`\n\nAll runbooks: `deployment/observability/runbooks/`"
       }
     }
   ]

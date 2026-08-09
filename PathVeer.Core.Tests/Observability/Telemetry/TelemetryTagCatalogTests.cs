@@ -8,17 +8,17 @@ public sealed class TelemetryTagCatalogTests
     [Fact]
     public void ApprovedTagNames_ExactAndSnakeCase()
     {
-        Assert.Equal("operation", IranDirectTagNames.Operation);
-        Assert.Equal("outcome", IranDirectTagNames.Outcome);
-        Assert.Equal("trigger", IranDirectTagNames.Trigger);
-        Assert.Equal("route_kind", IranDirectTagNames.RouteKind);
-        Assert.Equal("change_kind", IranDirectTagNames.ChangeKind);
-        Assert.Equal("source", IranDirectTagNames.Source);
-        Assert.Equal("cache_state", IranDirectTagNames.CacheState);
-        Assert.Equal("ipc_command", IranDirectTagNames.IpcCommand);
-        Assert.Equal("diagnostic_severity", IranDirectTagNames.DiagnosticSeverity);
-        Assert.Equal("service_state", IranDirectTagNames.ServiceState);
-        Assert.Equal("failure_category", IranDirectTagNames.FailureCategory);
+        Assert.Equal("operation", PathVeerTagNames.Operation);
+        Assert.Equal("outcome", PathVeerTagNames.Outcome);
+        Assert.Equal("trigger", PathVeerTagNames.Trigger);
+        Assert.Equal("route_kind", PathVeerTagNames.RouteKind);
+        Assert.Equal("change_kind", PathVeerTagNames.ChangeKind);
+        Assert.Equal("source", PathVeerTagNames.Source);
+        Assert.Equal("cache_state", PathVeerTagNames.CacheState);
+        Assert.Equal("ipc_command", PathVeerTagNames.IpcCommand);
+        Assert.Equal("diagnostic_severity", PathVeerTagNames.DiagnosticSeverity);
+        Assert.Equal("service_state", PathVeerTagNames.ServiceState);
+        Assert.Equal("failure_category", PathVeerTagNames.FailureCategory);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class TelemetryTagCatalogTests
             "url", "endpoint", "route_identity", "diagnostic_id",
             "execution_step_identity",
         };
-        Assert.Equal(expected, new HashSet<string>(IranDirectTagNames.Prohibited));
+        Assert.Equal(expected, new HashSet<string>(PathVeerTagNames.Prohibited));
     }
 
     [Theory]

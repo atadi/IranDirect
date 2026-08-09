@@ -1,8 +1,8 @@
-# Runbook: IranDirectPrometheusTargetDown
+# Runbook: PathVeerPrometheusTargetDown
 
-- **Alert:** `IranDirectPrometheusTargetDown`
+- **Alert:** `PathVeerPrometheusTargetDown`
 - **Severity:** warning
-- **Dashboard:** `irandirect-reliability-errors`
+- **Dashboard:** `pathveer-reliability-errors`
 - **Prometheus query:** `up{job=~"tempo|grafana|alertmanager"} == 0`
 
 ## What it means
@@ -12,7 +12,7 @@ One of the tempo/grafana/alertmanager scrape targets has been unreachable for 2m
 The down backend's data/dashboards are incomplete; for alertmanager, alert delivery stops (evaluation continues).
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
+Open the `pathveer-reliability-errors` dashboard in the PathVeer folder (Grafana).
 Prometheus query: `up{job=~"tempo|grafana|alertmanager"} == 0`
 
 ## Symptoms
@@ -40,7 +40,7 @@ Affected backend logs, 'docker compose ps', Prometheus Targets page.
 up for the target returns 1 and its data resumes.
 
 ## Related alerts
-IranDirectAlertmanagerUnavailable, IranDirectTempoUnavailable, IranDirectGrafanaUnavailable
+PathVeerAlertmanagerUnavailable, PathVeerTempoUnavailable, PathVeerGrafanaUnavailable
 
 ## Ownership
 Observability / Platform

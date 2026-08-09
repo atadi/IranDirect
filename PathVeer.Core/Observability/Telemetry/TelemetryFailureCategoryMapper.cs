@@ -15,18 +15,18 @@ public static class TelemetryFailureCategoryMapper
     public static string ToCategoryString(TelemetryFailureCategory category) =>
         category switch
         {
-            TelemetryFailureCategory.Io => IranDirectTagValues.FailureIo,
-            TelemetryFailureCategory.Timeout => IranDirectTagValues.FailureTimeout,
+            TelemetryFailureCategory.Io => PathVeerTagValues.FailureIo,
+            TelemetryFailureCategory.Timeout => PathVeerTagValues.FailureTimeout,
             TelemetryFailureCategory.Cancellation =>
-                IranDirectTagValues.FailureCancellation,
-            TelemetryFailureCategory.Http => IranDirectTagValues.FailureHttp,
-            TelemetryFailureCategory.Dns => IranDirectTagValues.FailureDns,
-            TelemetryFailureCategory.Routing => IranDirectTagValues.FailureRouting,
+                PathVeerTagValues.FailureCancellation,
+            TelemetryFailureCategory.Http => PathVeerTagValues.FailureHttp,
+            TelemetryFailureCategory.Dns => PathVeerTagValues.FailureDns,
+            TelemetryFailureCategory.Routing => PathVeerTagValues.FailureRouting,
             TelemetryFailureCategory.Serialization =>
-                IranDirectTagValues.FailureSerialization,
+                PathVeerTagValues.FailureSerialization,
             TelemetryFailureCategory.InvalidResponse =>
-                IranDirectTagValues.FailureInvalidResponse,
-            _ => IranDirectTagValues.FailureUnknown,
+                PathVeerTagValues.FailureInvalidResponse,
+            _ => PathVeerTagValues.FailureUnknown,
         };
 
     public static TelemetryFailureCategory Map(Exception exception) =>

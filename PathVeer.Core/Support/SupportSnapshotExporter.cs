@@ -83,9 +83,9 @@ public sealed class SupportSnapshotExporter :
         SupportExportTelemetry.SupportExportScope scope =
             createRootTelemetry
                 ? SupportExportTelemetry.Start(
-                    IranDirectTagValues.OperationSupportSnapshotExport)
+                    PathVeerTagValues.OperationSupportSnapshotExport)
                 : SupportExportTelemetry.StartNested(
-                    IranDirectTagValues.OperationSupportSnapshotExport);
+                    PathVeerTagValues.OperationSupportSnapshotExport);
         using (scope)
         {
         try

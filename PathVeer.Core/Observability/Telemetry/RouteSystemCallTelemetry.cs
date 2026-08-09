@@ -9,7 +9,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// route API call (enumerate / create / delete), an approved set of
 /// requested/succeeded/failed operation counters, and one system-call duration
 /// histogram — all created exactly once against the Phase 32.2
-/// <see cref="IranDirectTelemetry.Meter"/>.
+/// <see cref="PathVeerTelemetry.Meter"/>.
 ///
 /// This instruments the narrowest native boundary — the process submission to
 /// powershell.exe (enumerate) and netsh.exe (create/delete) inside
@@ -45,33 +45,33 @@ public static class RouteSystemCallTelemetry
         Endpoint = 2,
     }
 
-    private static readonly Counter<long> s_requested = IranDirectTelemetry
+    private static readonly Counter<long> s_requested = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.RoutesOperationsRequested,
+            PathVeerMetricNames.RoutesOperationsRequested,
             unit: "{operation}",
             description:
                 "Number of native route system calls requested " +
                 "(enumerate/create/delete), one increment per native call.");
 
-    private static readonly Counter<long> s_succeeded = IranDirectTelemetry
+    private static readonly Counter<long> s_succeeded = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.RoutesOperationsSucceeded,
+            PathVeerMetricNames.RoutesOperationsSucceeded,
             unit: "{operation}",
             description:
                 "Number of native route system calls that completed " +
                 "successfully or changed nothing.");
 
-    private static readonly Counter<long> s_failed = IranDirectTelemetry
+    private static readonly Counter<long> s_failed = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.RoutesOperationsFailed,
+            PathVeerMetricNames.RoutesOperationsFailed,
             unit: "{operation}",
             description:
                 "Number of native route system calls that failed or " +
                 "timed out.");
 
-    private static readonly Histogram<double> s_duration = IranDirectTelemetry
+    private static readonly Histogram<double> s_duration = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.RoutesSystemCallDuration,
+            PathVeerMetricNames.RoutesSystemCallDuration,
             unit: "ms",
             description:
                 "Elapsed time of a single native route system call, " +
@@ -84,8 +84,8 @@ public static class RouteSystemCallTelemetry
     /// </summary>
     internal static RouteSystemCallTelemetryScope StartEnumeration() =>
         Start(
-            IranDirectActivityNames.RoutesEnumerate,
-            IranDirectTagValues.OperationEnumerateRoutes,
+            PathVeerActivityNames.RoutesEnumerate,
+            PathVeerTagValues.OperationEnumerateRoutes,
             changeKind: null,
             routeKind: null);
 
@@ -95,9 +95,9 @@ public static class RouteSystemCallTelemetry
     internal static RouteSystemCallTelemetryScope StartCreate(
         RouteSystemCallKind routeKind) =>
         Start(
-            IranDirectActivityNames.RoutesCreate,
-            IranDirectTagValues.OperationCreateRoutes,
-            IranDirectTagValues.ChangeKindCreate,
+            PathVeerActivityNames.RoutesCreate,
+            PathVeerTagValues.OperationCreateRoutes,
+            PathVeerTagValues.ChangeKindCreate,
             ToRouteKindValue(routeKind));
 
     /// <summary>
@@ -106,9 +106,9 @@ public static class RouteSystemCallTelemetry
     internal static RouteSystemCallTelemetryScope StartDelete(
         RouteSystemCallKind routeKind) =>
         Start(
-            IranDirectActivityNames.RoutesDelete,
-            IranDirectTagValues.OperationDeleteRoutes,
-            IranDirectTagValues.ChangeKindDelete,
+            PathVeerActivityNames.RoutesDelete,
+            PathVeerTagValues.OperationDeleteRoutes,
+            PathVeerTagValues.ChangeKindDelete,
             ToRouteKindValue(routeKind));
 
     private static RouteSystemCallTelemetryScope Start(
@@ -117,17 +117,17 @@ public static class RouteSystemCallTelemetry
         string? changeKind,
         string? routeKind)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
             activityName,
             ActivityKind.Internal);
 
         if (activity is not null)
         {
-            activity.SetTag(IranDirectTagNames.Operation, operation);
+            activity.SetTag(PathVeerTagNames.Operation, operation);
             if (changeKind is not null)
-                activity.SetTag(IranDirectTagNames.ChangeKind, changeKind);
+                activity.SetTag(PathVeerTagNames.ChangeKind, changeKind);
             if (routeKind is not null)
-                activity.SetTag(IranDirectTagNames.RouteKind, routeKind);
+                activity.SetTag(PathVeerTagNames.RouteKind, routeKind);
         }
 
         // requested is recorded at start; it carries operation (and the
@@ -145,27 +145,27 @@ public static class RouteSystemCallTelemetry
         string? routeKind)
     {
         if (changeKind is null && routeKind is null)
-            return [new(IranDirectTagNames.Operation, operation)];
+            return [new(PathVeerTagNames.Operation, operation)];
 
         if (routeKind is null)
             return
             [
-                new(IranDirectTagNames.Operation, operation),
-                new(IranDirectTagNames.ChangeKind, changeKind!),
+                new(PathVeerTagNames.Operation, operation),
+                new(PathVeerTagNames.ChangeKind, changeKind!),
             ];
 
         if (changeKind is null)
             return
             [
-                new(IranDirectTagNames.Operation, operation),
-                new(IranDirectTagNames.RouteKind, routeKind),
+                new(PathVeerTagNames.Operation, operation),
+                new(PathVeerTagNames.RouteKind, routeKind),
             ];
 
         return
         [
-            new(IranDirectTagNames.Operation, operation),
-            new(IranDirectTagNames.ChangeKind, changeKind),
-            new(IranDirectTagNames.RouteKind, routeKind),
+            new(PathVeerTagNames.Operation, operation),
+            new(PathVeerTagNames.ChangeKind, changeKind),
+            new(PathVeerTagNames.RouteKind, routeKind),
         ];
     }
 
@@ -181,32 +181,32 @@ public static class RouteSystemCallTelemetry
             if (changeKind is null && routeKind is null)
                 return
                 [
-                    new(IranDirectTagNames.Operation, operation),
-                    new(IranDirectTagNames.Outcome, outcome),
+                    new(PathVeerTagNames.Operation, operation),
+                    new(PathVeerTagNames.Outcome, outcome),
                 ];
 
             if (routeKind is null)
                 return
                 [
-                    new(IranDirectTagNames.Operation, operation),
-                    new(IranDirectTagNames.Outcome, outcome),
-                    new(IranDirectTagNames.ChangeKind, changeKind!),
+                    new(PathVeerTagNames.Operation, operation),
+                    new(PathVeerTagNames.Outcome, outcome),
+                    new(PathVeerTagNames.ChangeKind, changeKind!),
                 ];
 
             if (changeKind is null)
                 return
                 [
-                    new(IranDirectTagNames.Operation, operation),
-                    new(IranDirectTagNames.Outcome, outcome),
-                    new(IranDirectTagNames.RouteKind, routeKind),
+                    new(PathVeerTagNames.Operation, operation),
+                    new(PathVeerTagNames.Outcome, outcome),
+                    new(PathVeerTagNames.RouteKind, routeKind),
                 ];
 
             return
             [
-                new(IranDirectTagNames.Operation, operation),
-                new(IranDirectTagNames.Outcome, outcome),
-                new(IranDirectTagNames.ChangeKind, changeKind),
-                new(IranDirectTagNames.RouteKind, routeKind),
+                new(PathVeerTagNames.Operation, operation),
+                new(PathVeerTagNames.Outcome, outcome),
+                new(PathVeerTagNames.ChangeKind, changeKind),
+                new(PathVeerTagNames.RouteKind, routeKind),
             ];
         }
 
@@ -214,46 +214,46 @@ public static class RouteSystemCallTelemetry
         if (changeKind is null && routeKind is null)
             return
             [
-                new(IranDirectTagNames.Operation, operation),
-                new(IranDirectTagNames.Outcome, outcome),
-                new(IranDirectTagNames.FailureCategory, failureCategory),
+                new(PathVeerTagNames.Operation, operation),
+                new(PathVeerTagNames.Outcome, outcome),
+                new(PathVeerTagNames.FailureCategory, failureCategory),
             ];
 
         if (routeKind is null)
             return
             [
-                new(IranDirectTagNames.Operation, operation),
-                new(IranDirectTagNames.Outcome, outcome),
-                new(IranDirectTagNames.ChangeKind, changeKind!),
-                new(IranDirectTagNames.FailureCategory, failureCategory),
+                new(PathVeerTagNames.Operation, operation),
+                new(PathVeerTagNames.Outcome, outcome),
+                new(PathVeerTagNames.ChangeKind, changeKind!),
+                new(PathVeerTagNames.FailureCategory, failureCategory),
             ];
 
         if (changeKind is null)
             return
             [
-                new(IranDirectTagNames.Operation, operation),
-                new(IranDirectTagNames.Outcome, outcome),
-                new(IranDirectTagNames.RouteKind, routeKind),
-                new(IranDirectTagNames.FailureCategory, failureCategory),
+                new(PathVeerTagNames.Operation, operation),
+                new(PathVeerTagNames.Outcome, outcome),
+                new(PathVeerTagNames.RouteKind, routeKind),
+                new(PathVeerTagNames.FailureCategory, failureCategory),
             ];
 
         return
         [
-            new(IranDirectTagNames.Operation, operation),
-            new(IranDirectTagNames.Outcome, outcome),
-            new(IranDirectTagNames.ChangeKind, changeKind),
-            new(IranDirectTagNames.RouteKind, routeKind),
-            new(IranDirectTagNames.FailureCategory, failureCategory),
+            new(PathVeerTagNames.Operation, operation),
+            new(PathVeerTagNames.Outcome, outcome),
+            new(PathVeerTagNames.ChangeKind, changeKind),
+            new(PathVeerTagNames.RouteKind, routeKind),
+            new(PathVeerTagNames.FailureCategory, failureCategory),
         ];
     }
 
     private static string ToRouteKindValue(RouteSystemCallKind kind) =>
         kind switch
         {
-            RouteSystemCallKind.Prefix => IranDirectTagValues.RouteKindPrefix,
+            RouteSystemCallKind.Prefix => PathVeerTagValues.RouteKindPrefix,
             RouteSystemCallKind.Endpoint =>
-                IranDirectTagValues.RouteKindEndpoint,
-            _ => IranDirectTagValues.RouteKindUnknown,
+                PathVeerTagValues.RouteKindEndpoint,
+            _ => PathVeerTagValues.RouteKindUnknown,
         };
 
     internal static void RecordDuration(
@@ -333,12 +333,12 @@ internal sealed class RouteSystemCallTelemetryScope : IDisposable
             Stopwatch.GetElapsedTime(_startTimestamp).TotalMilliseconds;
         RecordTerminal(
             elapsedMs, _operation, _changeKind, _routeKind,
-            IranDirectTagValues.Success, failureCategory: null,
+            PathVeerTagValues.Success, failureCategory: null,
             countAsSuccess: true);
 
         if (_activity is not null)
         {
-            _activity.SetTag(IranDirectTagNames.Outcome, IranDirectTagValues.Success);
+            _activity.SetTag(PathVeerTagNames.Outcome, PathVeerTagValues.Success);
             _activity.SetStatus(ActivityStatusCode.Ok);
         }
     }
@@ -352,12 +352,12 @@ internal sealed class RouteSystemCallTelemetryScope : IDisposable
             Stopwatch.GetElapsedTime(_startTimestamp).TotalMilliseconds;
         RecordTerminal(
             elapsedMs, _operation, _changeKind, _routeKind,
-            IranDirectTagValues.NoChange, failureCategory: null,
+            PathVeerTagValues.NoChange, failureCategory: null,
             countAsSuccess: true);
 
         if (_activity is not null)
         {
-            _activity.SetTag(IranDirectTagNames.Outcome, IranDirectTagValues.NoChange);
+            _activity.SetTag(PathVeerTagNames.Outcome, PathVeerTagValues.NoChange);
             _activity.SetStatus(ActivityStatusCode.Ok);
         }
     }
@@ -374,8 +374,8 @@ internal sealed class RouteSystemCallTelemetryScope : IDisposable
         string categoryString =
             TelemetryFailureCategoryMapper.ToCategoryString(category);
         string outcome = category == TelemetryFailureCategory.Timeout
-            ? IranDirectTagValues.Timeout
-            : IranDirectTagValues.Failure;
+            ? PathVeerTagValues.Timeout
+            : PathVeerTagValues.Failure;
 
         RecordTerminal(
             elapsedMs, _operation, _changeKind, _routeKind,
@@ -383,9 +383,9 @@ internal sealed class RouteSystemCallTelemetryScope : IDisposable
 
         if (_activity is not null)
         {
-            _activity.SetTag(IranDirectTagNames.Outcome, outcome);
+            _activity.SetTag(PathVeerTagNames.Outcome, outcome);
             _activity.SetTag(
-                IranDirectTagNames.FailureCategory, categoryString);
+                PathVeerTagNames.FailureCategory, categoryString);
             _activity.SetStatus(ActivityStatusCode.Error, categoryString);
         }
     }
@@ -399,13 +399,13 @@ internal sealed class RouteSystemCallTelemetryScope : IDisposable
             Stopwatch.GetElapsedTime(_startTimestamp).TotalMilliseconds;
         RecordTerminal(
             elapsedMs, _operation, _changeKind, _routeKind,
-            IranDirectTagValues.Cancelled, failureCategory: null,
+            PathVeerTagValues.Cancelled, failureCategory: null,
             countAsSuccess: false);
 
         if (_activity is not null)
         {
             _activity.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Cancelled);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Cancelled);
             // Cancellation is not an error: leave status Unset and omit the
             // failure_category tag entirely.
         }
@@ -429,7 +429,7 @@ internal sealed class RouteSystemCallTelemetryScope : IDisposable
                 operation, outcome, changeKind, routeKind);
         }
         else if (failureCategory is not null ||
-                 outcome == IranDirectTagValues.Failure)
+                 outcome == PathVeerTagValues.Failure)
         {
             RouteSystemCallTelemetry.RecordFailed(
                 operation, outcome, changeKind, routeKind, failureCategory);
@@ -452,7 +452,7 @@ internal sealed class RouteSystemCallTelemetryScope : IDisposable
         double elapsedMs =
             Stopwatch.GetElapsedTime(_startTimestamp).TotalMilliseconds;
         RouteSystemCallTelemetry.RecordDuration(
-            elapsedMs, _operation, IranDirectTagValues.Success, _changeKind,
+            elapsedMs, _operation, PathVeerTagValues.Success, _changeKind,
             _routeKind, failureCategory: null);
         _activity?.Dispose();
     }

@@ -1,8 +1,8 @@
-# Runbook: IranDirectTempoUnavailable
+# Runbook: PathVeerTempoUnavailable
 
-- **Alert:** `IranDirectTempoUnavailable`
+- **Alert:** `PathVeerTempoUnavailable`
 - **Severity:** warning
-- **Dashboard:** `irandirect-reliability-errors`
+- **Dashboard:** `pathveer-reliability-errors`
 - **Prometheus query:** `up{job="tempo"} == 0`
 
 ## What it means
@@ -12,7 +12,7 @@ Prometheus cannot scrape Tempo for 2m.
 Distributed traces are not queryable in Grafana; metrics and reconciliation are unaffected.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
+Open the `pathveer-reliability-errors` dashboard in the PathVeer folder (Grafana).
 Prometheus query: `up{job="tempo"} == 0`
 
 ## Symptoms
@@ -40,7 +40,7 @@ Tempo logs, 'docker compose ps', last successful scrape timestamp.
 up{job="tempo"} returns 1 and Tempo Explore returns traces.
 
 ## Related alerts
-IranDirectPrometheusTargetDown
+PathVeerPrometheusTargetDown
 
 ## Ownership
 Observability / Platform

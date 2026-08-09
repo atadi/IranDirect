@@ -8,7 +8,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// per parsed request handled by the named-pipe command server.
 ///
 /// This Activity is intentionally INDEPENDENT of the client
-/// <c>IranDirect.IpcRequest</c> root: the server runs in a separate process
+/// <c>PathVeer.IpcRequest</c> root: the server runs in a separate process
 /// and Activity context cannot cross the named pipe without changing the wire
 /// protocol (explicitly forbidden this phase). It is not parented to anything.
 ///
@@ -21,15 +21,15 @@ public static class IpcDispatchTelemetry
 {
     public static IpcDispatchScope Start(PathVeerCommand command)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.IpcDispatch,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.IpcDispatch,
             ActivityKind.Server);
 
         activity?.SetTag(
-            IranDirectTagNames.Operation,
-            IranDirectTagValues.OperationIpcDispatch);
+            PathVeerTagNames.Operation,
+            PathVeerTagValues.OperationIpcDispatch);
         activity?.SetTag(
-            IranDirectTagNames.IpcCommand,
+            PathVeerTagNames.IpcCommand,
             TelemetryOutcomeMapper.Map(command));
 
         return new IpcDispatchScope(activity);
@@ -56,7 +56,7 @@ public static class IpcDispatchTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Success);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Success);
             _activity?.SetStatus(ActivityStatusCode.Ok);
         }
 
@@ -72,10 +72,10 @@ public static class IpcDispatchTelemetry
                     TelemetryFailureCategoryMapper.Map(exception));
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Failure);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Failure);
             _activity?.SetStatus(ActivityStatusCode.Error);
             _activity?.SetTag(
-                IranDirectTagNames.FailureCategory, category);
+                PathVeerTagNames.FailureCategory, category);
         }
 
         public void Dispose()
@@ -87,8 +87,8 @@ public static class IpcDispatchTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.OutcomeUnknown);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.OutcomeUnknown);
             _activity?.Dispose();
         }
     }

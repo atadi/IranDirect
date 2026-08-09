@@ -26,7 +26,7 @@ public sealed class PrefixUpdateTelemetryTests
         var listener = new ActivityListener
         {
             ShouldListenTo = s =>
-                s.Name == IranDirectTelemetry.SourceName,
+                s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = a => started.Enqueue(a),
@@ -43,7 +43,7 @@ public sealed class PrefixUpdateTelemetryTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
             {
                 meterListener.EnableMeasurementEvents(instrument);
             }
@@ -52,7 +52,7 @@ public sealed class PrefixUpdateTelemetryTests
             (instrument, value, tags, state) =>
             {
                 if (instrument.Name ==
-                    IranDirectMetricNames.PrefixChecks)
+                    PathVeerMetricNames.PrefixChecks)
                 {
                     checks.Enqueue(value);
                 }
@@ -61,7 +61,7 @@ public sealed class PrefixUpdateTelemetryTests
             (instrument, value, tags, state) =>
             {
                 if (instrument.Name ==
-                    IranDirectMetricNames.PrefixCheckDuration)
+                    PathVeerMetricNames.PrefixCheckDuration)
                 {
                     durations.Enqueue(value);
                 }
@@ -212,48 +212,48 @@ public sealed class PrefixUpdateTelemetryTests
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixUpdateCheck));
+                PathVeerActivityNames.PrefixUpdateCheck));
         Assert.Equal(
-            IranDirectTagValues.OperationPrefixUpdateCheck,
+            PathVeerTagValues.OperationPrefixUpdateCheck,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Operation).Value);
+                t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.SourceOfficial,
+            PathVeerTagValues.SourceOfficial,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Source).Value);
+                t.Key == PathVeerTagNames.Source).Value);
         Assert.Equal(
-            IranDirectTagValues.TriggerUnknown,
+            PathVeerTagValues.TriggerUnknown,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Trigger).Value);
+                t.Key == PathVeerTagNames.Trigger).Value);
 
         Activity head = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixHttpHead));
+                PathVeerActivityNames.PrefixHttpHead));
         Assert.Equal(
-            IranDirectTagValues.OperationPrefixHttpHead,
+            PathVeerTagValues.OperationPrefixHttpHead,
             head.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Operation).Value);
+                t.Key == PathVeerTagNames.Operation).Value);
 
         Assert.DoesNotContain(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.PrefixHttpGet);
+                PathVeerActivityNames.PrefixHttpGet);
 
         // The 200 HEAD response exposes comparison metadata, so the Compare
         // child is emitted.
         Activity compare = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixCompare));
+                PathVeerActivityNames.PrefixCompare));
         Assert.Equal(
-            IranDirectTagValues.OperationPrefixCompare,
+            PathVeerTagValues.OperationPrefixCompare,
             compare.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Operation).Value);
+                t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             compare.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
 
         Assert.Single(checks);
         Assert.Single(durations);
@@ -296,15 +296,15 @@ public sealed class PrefixUpdateTelemetryTests
         Assert.Contains(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.PrefixHttpHead);
+                PathVeerActivityNames.PrefixHttpHead);
         Activity get = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixHttpGet));
+                PathVeerActivityNames.PrefixHttpGet));
         Assert.Equal(
-            IranDirectTagValues.OperationPrefixHttpGet,
+            PathVeerTagValues.OperationPrefixHttpGet,
             get.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Operation).Value);
+                t.Key == PathVeerTagNames.Operation).Value);
         Assert.Single(checks);
     }
 
@@ -340,24 +340,24 @@ public sealed class PrefixUpdateTelemetryTests
         Activity compare = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixCompare));
+                PathVeerActivityNames.PrefixCompare));
         Assert.Equal(
-            IranDirectTagValues.OperationPrefixCompare,
+            PathVeerTagValues.OperationPrefixCompare,
             compare.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Operation).Value);
+                t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             compare.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
 
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixUpdateCheck));
+                PathVeerActivityNames.PrefixUpdateCheck));
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
     }
 
     [Fact]
@@ -388,16 +388,16 @@ public sealed class PrefixUpdateTelemetryTests
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixUpdateCheck));
+                PathVeerActivityNames.PrefixUpdateCheck));
         Assert.Equal(
-            IranDirectTagValues.OutcomeUnknown,
+            PathVeerTagValues.OutcomeUnknown,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
 
         Assert.DoesNotContain(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.PrefixHttpHead);
+                PathVeerActivityNames.PrefixHttpHead);
         Assert.Single(checks);
         Assert.Single(durations);
     }
@@ -429,24 +429,24 @@ public sealed class PrefixUpdateTelemetryTests
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixUpdateCheck));
+                PathVeerActivityNames.PrefixUpdateCheck));
         Assert.Equal(
-            IranDirectTagValues.Failure,
+            PathVeerTagValues.Failure,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
 
         Activity head = Assert.Single(
             stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixHttpHead));
+                PathVeerActivityNames.PrefixHttpHead));
         Assert.Equal(
-            IranDirectTagValues.Failure,
+            PathVeerTagValues.Failure,
             head.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureHttp,
+            PathVeerTagValues.FailureHttp,
             head.Tags.Single(t =>
-                t.Key == IranDirectTagNames.FailureCategory).Value);
+                t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -480,17 +480,17 @@ public sealed class PrefixUpdateTelemetryTests
         Activity root = Assert.Single(
             started.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.PrefixUpdateCheck));
+                PathVeerActivityNames.PrefixUpdateCheck));
         Assert.Equal(
-            IranDirectTagValues.Failure,
+            PathVeerTagValues.Failure,
             root.Tags.Single(t =>
-                t.Key == IranDirectTagNames.Outcome).Value);
+                t.Key == PathVeerTagNames.Outcome).Value);
 
         // The fault is raised before any real HTTP request is attempted.
         Assert.DoesNotContain(
             stopped,
             a => a.OperationName ==
-                IranDirectActivityNames.PrefixHttpHead);
+                PathVeerActivityNames.PrefixHttpHead);
     }
 
     [Fact]

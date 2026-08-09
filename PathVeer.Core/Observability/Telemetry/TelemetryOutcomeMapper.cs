@@ -17,12 +17,12 @@ public static class TelemetryOutcomeMapper
     public static string ToOutcomeString(TelemetryOutcome outcome) =>
         outcome switch
         {
-            TelemetryOutcome.Success => IranDirectTagValues.Success,
-            TelemetryOutcome.Failure => IranDirectTagValues.Failure,
-            TelemetryOutcome.Cancelled => IranDirectTagValues.Cancelled,
-            TelemetryOutcome.Timeout => IranDirectTagValues.Timeout,
-            TelemetryOutcome.NoChange => IranDirectTagValues.NoChange,
-            _ => IranDirectTagValues.OutcomeUnknown,
+            TelemetryOutcome.Success => PathVeerTagValues.Success,
+            TelemetryOutcome.Failure => PathVeerTagValues.Failure,
+            TelemetryOutcome.Cancelled => PathVeerTagValues.Cancelled,
+            TelemetryOutcome.Timeout => PathVeerTagValues.Timeout,
+            TelemetryOutcome.NoChange => PathVeerTagValues.NoChange,
+            _ => PathVeerTagValues.OutcomeUnknown,
         };
 
     /// <summary>
@@ -66,12 +66,12 @@ public static class TelemetryOutcomeMapper
     public static string Map(DiagnosticSeverity severity) =>
         severity switch
         {
-            DiagnosticSeverity.Pass => IranDirectTagValues.SeverityPass,
-            DiagnosticSeverity.Info => IranDirectTagValues.SeverityPass,
-            DiagnosticSeverity.Warning => IranDirectTagValues.SeverityWarning,
-            DiagnosticSeverity.Fail => IranDirectTagValues.SeverityFailure,
-            DiagnosticSeverity.Error => IranDirectTagValues.SeverityFailure,
-            _ => IranDirectTagValues.SeverityUnknown,
+            DiagnosticSeverity.Pass => PathVeerTagValues.SeverityPass,
+            DiagnosticSeverity.Info => PathVeerTagValues.SeverityPass,
+            DiagnosticSeverity.Warning => PathVeerTagValues.SeverityWarning,
+            DiagnosticSeverity.Fail => PathVeerTagValues.SeverityFailure,
+            DiagnosticSeverity.Error => PathVeerTagValues.SeverityFailure,
+            _ => PathVeerTagValues.SeverityUnknown,
         };
 
     /// <summary>
@@ -83,13 +83,13 @@ public static class TelemetryOutcomeMapper
     public static string Map(CustomRouteDnsCacheState state) =>
         state switch
         {
-            CustomRouteDnsCacheState.Fresh => IranDirectTagValues.CacheFresh,
-            CustomRouteDnsCacheState.Stale => IranDirectTagValues.CacheStale,
-            CustomRouteDnsCacheState.Expired => IranDirectTagValues.CacheMiss,
-            CustomRouteDnsCacheState.Failed => IranDirectTagValues.CacheFailed,
-            CustomRouteDnsCacheState.Missing => IranDirectTagValues.CacheMiss,
-            CustomRouteDnsCacheState.Disabled => IranDirectTagValues.CacheFailed,
-            _ => IranDirectTagValues.CacheUnknown,
+            CustomRouteDnsCacheState.Fresh => PathVeerTagValues.CacheFresh,
+            CustomRouteDnsCacheState.Stale => PathVeerTagValues.CacheStale,
+            CustomRouteDnsCacheState.Expired => PathVeerTagValues.CacheMiss,
+            CustomRouteDnsCacheState.Failed => PathVeerTagValues.CacheFailed,
+            CustomRouteDnsCacheState.Missing => PathVeerTagValues.CacheMiss,
+            CustomRouteDnsCacheState.Disabled => PathVeerTagValues.CacheFailed,
+            _ => PathVeerTagValues.CacheUnknown,
         };
 
     /// <summary>
@@ -146,6 +146,6 @@ public static class TelemetryOutcomeMapper
             nameof(PathVeerCommand.ExecutionPreview),
         PathVeerCommand.SupportBundleExport =>
             nameof(PathVeerCommand.SupportBundleExport),
-        _ => IranDirectTagValues.OutcomeUnknown,
+        _ => PathVeerTagValues.OutcomeUnknown,
     };
 }

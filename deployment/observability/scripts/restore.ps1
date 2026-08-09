@@ -1,4 +1,4 @@
-<# IranDirect observability — restore script (Phase 33.5).
+<# PathVeer observability — restore script (Phase 33.5).
 #
 # Restores configuration (and optional state) from a backup archive produced by
 # backup.ps1. It NEVER overwrites the active stack's live volumes unless you
@@ -10,8 +10,8 @@
 # disposable -StackRoot with fresh volumes.
 #
 # Usage:
-#   .\restore.ps1 -Archive .\backups\irandirect-obs-backup-20260806-120000.tar.gz -StackRoot C:\deploy\irandirect-obs
-#   .\restore.ps1 -Archive ... -StackRoot C:\deploy\irandirect-obs -RestoreState
+#   .\restore.ps1 -Archive .\backups\pathveer-obs-backup-20260806-120000.tar.gz -StackRoot C:\deploy\pathveer-obs
+#   .\restore.ps1 -Archive ... -StackRoot C:\deploy\pathveer-obs -RestoreState
 #>
 
 [CmdletBinding()]
@@ -39,8 +39,8 @@ $required = @(
     "docker-compose.yml",
     "collector/otel-collector.yaml",
     "prometheus/prometheus.yml",
-    "prometheus/rules/irandirect-recording-rules.yml",
-    "prometheus/rules/irandirect-alert-rules.yml",
+    "prometheus/rules/pathveer-recording-rules.yml",
+    "prometheus/rules/pathveer-alert-rules.yml",
     "alertmanager/alertmanager.yml",
     "grafana/provisioning/dashboards/dashboards.yaml"
 )

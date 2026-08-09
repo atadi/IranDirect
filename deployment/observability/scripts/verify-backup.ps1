@@ -1,11 +1,11 @@
-<# IranDirect observability — backup verification (Phase 33.5).
+<# PathVeer observability — backup verification (Phase 33.5).
 #
 # Verifies a backup archive without restoring it: confirms the archive unpacks,
 # the manifest/checksum matches, required configuration files are present, and
 # NO secret material is present inside the archive.
 #
 # Usage:
-#   .\verify-backup.ps1 -Archive .\backups\irandirect-obs-backup-20260806-120000.tar.gz
+#   .\verify-backup.ps1 -Archive .\backups\pathveer-obs-backup-20260806-120000.tar.gz
 #>
 
 [CmdletBinding()]
@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path $Archive)) { throw "Archive not found: $Archive" }
 
-$tmp = Join-Path $env:TEMP ("irandirect-obs-verify-" + [System.Guid]::NewGuid().ToString("N"))
+$tmp = Join-Path $env:TEMP ("pathveer-obs-verify-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
     & tar -tzf $Archive | Set-Content -Path (Join-Path $tmp "listing.txt")
@@ -29,8 +29,8 @@ try {
         "docker-compose.yml",
         "collector/otel-collector.yaml",
         "prometheus/prometheus.yml",
-        "prometheus/rules/irandirect-recording-rules.yml",
-        "prometheus/rules/irandirect-alert-rules.yml",
+        "prometheus/rules/pathveer-recording-rules.yml",
+        "prometheus/rules/pathveer-alert-rules.yml",
         "alertmanager/alertmanager.yml",
         "grafana/provisioning/dashboards/dashboards.yaml"
     )

@@ -5,7 +5,7 @@ using System.Diagnostics.Metrics;
 using System.Reflection;
 
 /// <summary>
-/// Central, process-wide telemetry definitions for IranDirect.
+/// Central, process-wide telemetry definitions for PathVeer.
 ///
 /// This type defines exactly one <see cref="ActivitySource"/> and one
 /// <see cref="Meter"/>, both static and read-only. It contains no exporters,
@@ -14,14 +14,14 @@ using System.Reflection;
 /// composition root only.
 ///
 /// Naming convention: source and meter name are both the stable constant
-/// <c>IranDirect.Core</c>. The version is derived from the Core assembly so
+/// <c>PathVeer.Core</c>. The version is derived from the Core assembly so
 /// it stays in lock-step with the shipping binary and never diverges from a
 /// hand-maintained string.
 /// </summary>
-public static class IranDirectTelemetry
+public static class PathVeerTelemetry
 {
     /// <summary>The canonical OpenTelemetry source and meter name.</summary>
-    public const string SourceName = "IranDirect.Core";
+    public const string SourceName = "PathVeer.Core";
 
     /// <summary>
     /// Assembly-derived version. Uses the informational/assembly version of the
@@ -41,7 +41,7 @@ public static class IranDirectTelemetry
     {
         try
         {
-            Assembly assembly = typeof(IranDirectTelemetry).Assembly;
+            Assembly assembly = typeof(PathVeerTelemetry).Assembly;
             string? version = assembly.GetName().Version?.ToString();
             if (!string.IsNullOrEmpty(version))
                 return version;

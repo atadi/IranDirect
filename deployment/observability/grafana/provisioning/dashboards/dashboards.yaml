@@ -1,4 +1,4 @@
-# Grafana dashboard provisioning - IranDirect Phase 33.3.
+# Grafana dashboard provisioning - PathVeer Phase 33.3.
 #
 # Loads the five version-controlled dashboards from /var/lib/grafana/dashboards
 # (mounted read-only from ./grafana/dashboards by docker-compose.yml). No
@@ -8,9 +8,9 @@
 apiVersion: 1
 
 providers:
-  - name: IranDirect
+  - name: PathVeer
     orgId: 1
-    folder: IranDirect
+    folder: PathVeer
     type: file
     # Dashboards removed from disk are removed from Grafana too, so a deleted
     # file cannot linger as an orphaned dashboard.

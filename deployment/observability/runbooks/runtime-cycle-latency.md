@@ -1,9 +1,9 @@
-# Runbook: IranDirectRuntimeCycleLatencyHigh
+# Runbook: PathVeerRuntimeCycleLatencyHigh
 
-- **Alert:** `IranDirectRuntimeCycleLatencyHigh`
+- **Alert:** `PathVeerRuntimeCycleLatencyHigh`
 - **Severity:** warning
-- **Dashboard:** `irandirect-runtime-reconciliation`
-- **Prometheus query:** `irandirect:runtime_cycle_duration_p95_5m > 5000`
+- **Dashboard:** `pathveer-runtime-reconciliation`
+- **Prometheus query:** `pathveer:runtime_cycle_duration_p95_5m > 5000`
 
 ## What it means
 Runtime cycle p95 duration exceeds 5s for 15m. (5s is an assumed triage target, not a measured SLO.)
@@ -12,8 +12,8 @@ Runtime cycle p95 duration exceeds 5s for 15m. (5s is an assumed triage target, 
 Each reconciliation takes longer, so desired-state convergence lags. Under churn, changes propagate more slowly.
 
 ## Dashboard
-Open the `irandirect-runtime-reconciliation` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `irandirect:runtime_cycle_duration_p95_5m > 5000`
+Open the `pathveer-runtime-reconciliation` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `pathveer:runtime_cycle_duration_p95_5m > 5000`
 
 ## Symptoms
 Runtime Reconciliation 'Cycle duration p50/p95/p99' panel elevated; planning/execution p95 high.
@@ -40,7 +40,7 @@ Dashboard latency history, host resource usage at the time, Tempo traces of slow
 Cycle p95 returns below 5s and stays there.
 
 ## Related alerts
-IranDirectRuntimeCycleFailureRateHigh
+PathVeerRuntimeCycleFailureRateHigh
 
 ## Ownership
 Service / SRE

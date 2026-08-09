@@ -204,7 +204,7 @@ public sealed class RuntimeCycleTelemetryTests
     {
         var listener = new ActivityListener
         {
-            ShouldListenTo = s => s.Name == IranDirectTelemetry.SourceName,
+            ShouldListenTo = s => s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = a => started.Enqueue(a),
@@ -223,13 +223,13 @@ public sealed class RuntimeCycleTelemetryTests
             ConcurrentQueue<double> durations)
         {
             counters.TryGetValue(
-                IranDirectMetricNames.RuntimeCyclesStarted, out long s);
+                PathVeerMetricNames.RuntimeCyclesStarted, out long s);
             counters.TryGetValue(
-                IranDirectMetricNames.RuntimeCyclesCompleted, out long c);
+                PathVeerMetricNames.RuntimeCyclesCompleted, out long c);
             counters.TryGetValue(
-                IranDirectMetricNames.RuntimeCyclesFailed, out long f);
+                PathVeerMetricNames.RuntimeCyclesFailed, out long f);
             counters.TryGetValue(
-                IranDirectMetricNames.RuntimeCyclesCancelled, out long x);
+                PathVeerMetricNames.RuntimeCyclesCancelled, out long x);
             double sum = 0;
             foreach (double d in durations) sum += d;
             return new MetricCapture(s, c, f, x, durations.Count, sum);
@@ -256,7 +256,7 @@ public sealed class RuntimeCycleTelemetryTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
                 meterListener.EnableMeasurementEvents(instrument);
         };
         listener.SetMeasurementEventCallback<long>(
@@ -268,7 +268,7 @@ public sealed class RuntimeCycleTelemetryTests
         listener.SetMeasurementEventCallback<double>(
             (instrument, value, tags, _) =>
             {
-                if (instrument.Name == IranDirectMetricNames.RuntimeCycleDuration)
+                if (instrument.Name == PathVeerMetricNames.RuntimeCycleDuration)
                     durations.Enqueue(value);
             });
         listener.Start();
@@ -314,18 +314,18 @@ public sealed class RuntimeCycleTelemetryTests
         Assert.True(cap.DurationSum >= 0);
 
         Activity? activity = stopped.SingleOrDefault(
-            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
-        Assert.Equal(IranDirectActivityNames.RuntimeCycle, activity!.OperationName);
+        Assert.Equal(PathVeerActivityNames.RuntimeCycle, activity!.OperationName);
         Assert.Equal(ActivityKind.Internal, activity.Kind);
         Assert.Equal("runtime_cycle", activity.Tags.Single(
-            t => t.Key == IranDirectTagNames.Operation).Value);
+            t => t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.TriggerRepair,
-            activity.Tags.Single(t => t.Key == IranDirectTagNames.Trigger).Value);
+            PathVeerTagValues.TriggerRepair,
+            activity.Tags.Single(t => t.Key == PathVeerTagNames.Trigger).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
-            activity.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Success,
+            activity.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Ok, activity.Status);
     }
 
@@ -354,11 +354,11 @@ public sealed class RuntimeCycleTelemetryTests
         Assert.Equal(1, cap.DurationCount);
 
         Activity? activity = stopped.SingleOrDefault(
-            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
-            IranDirectTagValues.NoChange,
-            activity!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.NoChange,
+            activity!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Ok, activity.Status);
     }
 
@@ -389,16 +389,16 @@ public sealed class RuntimeCycleTelemetryTests
         Assert.Equal(1, cap.DurationCount);
 
         Activity? activity = stopped.SingleOrDefault(
-            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            activity!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            activity!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Error, activity.Status);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
+            PathVeerTagValues.FailureIo,
             activity.Tags.Single(
-                t => t.Key == IranDirectTagNames.FailureCategory).Value);
+                t => t.Key == PathVeerTagNames.FailureCategory).Value);
         foreach (var tag in activity.Tags)
             Assert.DoesNotContain("secret", tag.Value?.ToString());
     }
@@ -423,12 +423,12 @@ public sealed class RuntimeCycleTelemetryTests
             () => h.Controller.RunCycleAsync());
 
         Activity? activity = stopped.SingleOrDefault(
-            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
-            IranDirectTagValues.FailureRouting,
+            PathVeerTagValues.FailureRouting,
             activity!.Tags.Single(
-                t => t.Key == IranDirectTagNames.FailureCategory).Value);
+                t => t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -450,12 +450,12 @@ public sealed class RuntimeCycleTelemetryTests
             () => h.Controller.RunCycleAsync());
 
         Activity? activity = stopped.SingleOrDefault(
-            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
-            IranDirectTagValues.FailureUnknown,
+            PathVeerTagValues.FailureUnknown,
             activity!.Tags.Single(
-                t => t.Key == IranDirectTagNames.FailureCategory).Value);
+                t => t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -485,14 +485,14 @@ public sealed class RuntimeCycleTelemetryTests
         Assert.Equal(1, cap.DurationCount);
 
         Activity? activity = stopped.SingleOrDefault(
-            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
-            IranDirectTagValues.Cancelled,
-            activity!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Cancelled,
+            activity!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.DoesNotContain(
             activity.Tags,
-            t => t.Key == IranDirectTagNames.FailureCategory);
+            t => t.Key == PathVeerTagNames.FailureCategory);
         Assert.Equal(ActivityStatusCode.Unset, activity.Status);
     }
 
@@ -539,11 +539,11 @@ public sealed class RuntimeCycleTelemetryTests
         await h.Controller.EnableAsync();
 
         Activity? activity = stopped.SingleOrDefault(
-            a => a.OperationName == IranDirectActivityNames.RuntimeCycle);
+            a => a.OperationName == PathVeerActivityNames.RuntimeCycle);
         Assert.NotNull(activity);
         Assert.Equal(
-            IranDirectTagValues.TriggerForced,
-            activity!.Tags.Single(t => t.Key == IranDirectTagNames.Trigger).Value);
+            PathVeerTagValues.TriggerForced,
+            activity!.Tags.Single(t => t.Key == PathVeerTagNames.Trigger).Value);
     }
 
     [Fact]

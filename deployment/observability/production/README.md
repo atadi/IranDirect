@@ -1,4 +1,4 @@
-# IranDirect observability — Production overlay (Phase 33.5)
+# PathVeer observability — Production overlay (Phase 33.5)
 
 This directory contains the **production-hardening overlay** for the
 `deployment/observability` stack. The base `docker-compose.yml` stays the
@@ -17,7 +17,7 @@ production/
   prometheus/
     prometheus.production.yml                # prod Prometheus config (size cap + node-exporter)
     production-rules/
-      irandirect-host-alert-rules.yml        # storage/memory/inode alerts (needs node-exporter)
+      pathveer-host-alert-rules.yml        # storage/memory/inode alerts (needs node-exporter)
   alertmanager/
     alertmanager.production.example.yml      # email/webhook/PagerDuty routes, placeholders only
   certificates/
@@ -77,7 +77,7 @@ Compose merges the two files: services in the overlay override the base
   (ignored). Self-signed, untrusted — local handshake testing only.
 - The Service trusts the Collector's CA (Windows trust store, or available to
   the Service's TLS validation). Service config example:
-  `IranDirect.Service/appsettings.Observability.Production.example.json`.
+  `PathVeer.Service/appsettings.Observability.Production.example.json`.
 
 ## Host monitoring scope
 

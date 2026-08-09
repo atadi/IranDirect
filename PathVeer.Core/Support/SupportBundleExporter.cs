@@ -74,7 +74,7 @@ public sealed class SupportBundleExporter :
 
         using SupportExportTelemetry.SupportExportScope scope =
             SupportExportTelemetry.Start(
-                IranDirectTagValues.OperationSupportBundleExport);
+                PathVeerTagValues.OperationSupportBundleExport);
 
         try
         {

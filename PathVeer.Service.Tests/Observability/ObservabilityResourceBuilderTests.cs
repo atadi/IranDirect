@@ -18,12 +18,12 @@ public sealed class ObservabilityResourceBuilderTests
     public void Create_SetsServiceNameVersionAndEnvironment()
     {
         Resource resource = ObservabilityResourceBuilder.Create(
-            "IranDirect.Service",
+            "PathVeer.Service",
             "1.2.3.4",
             "Production");
 
         Assert.Equal(
-            "IranDirect.Service",
+            "PathVeer.Service",
             resource.Attributes
                 .First(a => a.Key == "service.name").Value as string);
         Assert.Equal(
@@ -41,7 +41,7 @@ public sealed class ObservabilityResourceBuilderTests
     public void Create_DoesNotGenerateInstanceId()
     {
         Resource resource = ObservabilityResourceBuilder.Create(
-            "IranDirect.Service", "1.0.0", "Production");
+            "PathVeer.Service", "1.0.0", "Production");
 
         Assert.DoesNotContain(
             resource.Attributes,
@@ -52,7 +52,7 @@ public sealed class ObservabilityResourceBuilderTests
     public void Create_NoForbiddenSensitiveAttributes()
     {
         Resource resource = ObservabilityResourceBuilder.Create(
-            "IranDirect.Service", "1.0.0", "Production");
+            "PathVeer.Service", "1.0.0", "Production");
 
         foreach (var attr in resource.Attributes)
         {
@@ -69,7 +69,7 @@ public sealed class ObservabilityResourceBuilderTests
             string.Empty, string.Empty, string.Empty);
 
         Assert.Equal(
-            "IranDirect.Service",
+            "PathVeer.Service",
             resource.Attributes
                 .First(a => a.Key == "service.name").Value as string);
         Assert.Equal(

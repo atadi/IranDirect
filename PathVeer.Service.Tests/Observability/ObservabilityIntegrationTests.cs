@@ -57,14 +57,14 @@ public sealed class ObservabilityIntegrationTests
         var exporter = new CollectingExporter<Activity>();
 
         using TracerProvider provider = Sdk.CreateTracerProviderBuilder()
-            .AddSource(IranDirectTelemetry.SourceName)
+            .AddSource(PathVeerTelemetry.SourceName)
             .AddProcessor(new BatchActivityExportProcessor(exporter))
             .Build();
 
         Activity? exported = null;
         using (Activity? activity =
-                   IranDirectTelemetry.ActivitySource.StartActivity(
-                       IranDirectActivityNames.RuntimeCycle))
+                   PathVeerTelemetry.ActivitySource.StartActivity(
+                       PathVeerActivityNames.RuntimeCycle))
         {
             activity?.SetTag("operation", "unknown");
             activity?.SetTag("outcome", "success");
@@ -74,12 +74,12 @@ public sealed class ObservabilityIntegrationTests
         exporter.Exported.TryDequeue(out exported);
 
         Assert.NotNull(exported);
-        Assert.Equal(IranDirectActivityNames.RuntimeCycle, exported!.OperationName);
+        Assert.Equal(PathVeerActivityNames.RuntimeCycle, exported!.OperationName);
         // Source name is exact and unchanged.
         Assert.Equal(
-            IranDirectTelemetry.SourceName, exported.Source?.Name);
+            PathVeerTelemetry.SourceName, exported.Source?.Name);
         Assert.Equal(
-            IranDirectTelemetry.Version, exported.Source?.Version);
+            PathVeerTelemetry.Version, exported.Source?.Version);
     }
 
     [Fact]
@@ -88,26 +88,26 @@ public sealed class ObservabilityIntegrationTests
         var exporter = new CollectingExporter<Metric>();
 
         using MeterProvider provider = Sdk.CreateMeterProviderBuilder()
-            .AddMeter(IranDirectTelemetry.SourceName)
+            .AddMeter(PathVeerTelemetry.SourceName)
             .AddReader(new PeriodicExportingMetricReader(exporter))
             .Build();
 
-        Counter<long> counter = IranDirectTelemetry.Meter
-            .CreateCounter<long>(IranDirectMetricNames.RuntimeCyclesStarted);
+        Counter<long> counter = PathVeerTelemetry.Meter
+            .CreateCounter<long>(PathVeerMetricNames.RuntimeCyclesStarted);
         counter.Add(1, new KeyValuePair<string, object?>("outcome", "success"));
 
         provider.ForceFlush();
         Assert.True(exporter.Exported.Count >= 1);
         Assert.Contains(
             exporter.Exported,
-            m => m.Name == IranDirectMetricNames.RuntimeCyclesStarted);
+            m => m.Name == PathVeerMetricNames.RuntimeCyclesStarted);
     }
 
     [Fact]
     public void DisabledMode_NoMatchingSource_ExportsNothing()
     {
         // A provider that listens to a different source must not capture the
-        // IranDirect.Core activity. This mirrors the disabled (no provider)
+        // PathVeer.Core activity. This mirrors the disabled (no provider)
         // behavior: export is gated by source registration.
         var exporter = new CollectingExporter<Activity>();
 
@@ -116,8 +116,8 @@ public sealed class ObservabilityIntegrationTests
             .AddProcessor(new BatchActivityExportProcessor(exporter))
             .Build();
 
-        using (IranDirectTelemetry.ActivitySource.StartActivity(
-                   IranDirectActivityNames.RuntimeCycle))
+        using (PathVeerTelemetry.ActivitySource.StartActivity(
+                   PathVeerActivityNames.RuntimeCycle))
         {
         }
 
@@ -135,7 +135,7 @@ public sealed class ObservabilityIntegrationTests
             new TraceIdRatioBasedSampler(ratio));
 
         using TracerProvider provider = Sdk.CreateTracerProviderBuilder()
-            .AddSource(IranDirectTelemetry.SourceName)
+            .AddSource(PathVeerTelemetry.SourceName)
             .SetSampler(sampler)
             .AddProcessor(new BatchActivityExportProcessor(exporter))
             .Build();
@@ -143,8 +143,8 @@ public sealed class ObservabilityIntegrationTests
         for (int i = 0; i < 50; i++)
         {
             using Activity? activity =
-                IranDirectTelemetry.ActivitySource.StartActivity(
-                    IranDirectActivityNames.RuntimeCycle);
+                PathVeerTelemetry.ActivitySource.StartActivity(
+                    PathVeerActivityNames.RuntimeCycle);
         }
 
         provider.ForceFlush();
@@ -167,25 +167,25 @@ public sealed class ObservabilityIntegrationTests
         var metricExporter = new CollectingExporter<Metric>();
 
         using TracerProvider tracer = Sdk.CreateTracerProviderBuilder()
-            .AddSource(IranDirectTelemetry.SourceName)
+            .AddSource(PathVeerTelemetry.SourceName)
             .SetSampler(new ParentBasedSampler(
                 new TraceIdRatioBasedSampler(0.0)))
             .AddProcessor(new BatchActivityExportProcessor(traceExporter))
             .Build();
 
         using MeterProvider meter = Sdk.CreateMeterProviderBuilder()
-            .AddMeter(IranDirectTelemetry.SourceName)
+            .AddMeter(PathVeerTelemetry.SourceName)
             .AddReader(new PeriodicExportingMetricReader(metricExporter))
             .Build();
 
-        Counter<long> counter = IranDirectTelemetry.Meter
-            .CreateCounter<long>(IranDirectMetricNames.IpcRequests);
+        Counter<long> counter = PathVeerTelemetry.Meter
+            .CreateCounter<long>(PathVeerMetricNames.IpcRequests);
         counter.Add(1);
 
         meter.ForceFlush();
         Assert.Contains(
             metricExporter.Exported,
-            m => m.Name == IranDirectMetricNames.IpcRequests);
+            m => m.Name == PathVeerMetricNames.IpcRequests);
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public sealed class ObservabilityIntegrationTests
         var exporter = new CollectingExporter<Activity>(throwOnExport: true);
 
         using TracerProvider provider = Sdk.CreateTracerProviderBuilder()
-            .AddSource(IranDirectTelemetry.SourceName)
+            .AddSource(PathVeerTelemetry.SourceName)
             .AddProcessor(new SimpleActivityExportProcessor(exporter))
             .Build();
 
@@ -207,8 +207,8 @@ public sealed class ObservabilityIntegrationTests
         try
         {
             using Activity? activity =
-                IranDirectTelemetry.ActivitySource.StartActivity(
-                    IranDirectActivityNames.RuntimeCycle);
+                PathVeerTelemetry.ActivitySource.StartActivity(
+                    PathVeerActivityNames.RuntimeCycle);
             completed = true;
         }
         catch (Exception ex)
@@ -226,13 +226,13 @@ public sealed class ObservabilityIntegrationTests
         var exporter = new CollectingExporter<Activity>();
 
         using TracerProvider provider = Sdk.CreateTracerProviderBuilder()
-            .AddSource(IranDirectTelemetry.SourceName)
+            .AddSource(PathVeerTelemetry.SourceName)
             .AddProcessor(new BatchActivityExportProcessor(exporter))
             .Build();
 
         using (Activity? activity =
-                   IranDirectTelemetry.ActivitySource.StartActivity(
-                       IranDirectActivityNames.RuntimeCycle))
+                   PathVeerTelemetry.ActivitySource.StartActivity(
+                       PathVeerActivityNames.RuntimeCycle))
         {
             activity?.SetTag("operation", "unknown");
             activity?.SetTag("outcome", "success");

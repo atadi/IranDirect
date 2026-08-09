@@ -1,4 +1,4 @@
-# IranDirect host/storage alert rules — PRODUCTION overlay (Phase 33.5).
+# PathVeer host/storage alert rules — PRODUCTION overlay (Phase 33.5).
 #
 # Loaded ONLY by the production Prometheus config (docker-compose.production.yml),
 # which scrapes node-exporter. These close the Phase 33.4 storage-pressure gap.
@@ -13,10 +13,10 @@
 # disposable stack before enabling in production (see phase-33.5 doc s10/s21).
 
 groups:
-  - name: irandirect_host_alerts
+  - name: pathveer_host_alerts
     rules:
       # A. Prometheus storage pressure — host root free ratio.
-      - alert: IranDirectPrometheusStoragePressure
+      - alert: PathVeerPrometheusStoragePressure
         expr: |
           (
             node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
@@ -34,9 +34,9 @@ groups:
             free space for 15 minutes. Old blocks will be evicted when the
             size cap is reached, silently shortening effective retention.
           runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
-          dashboard_url: "dashboards/irandirect-reliability-errors"
+          dashboard_url: "dashboards/pathveer-reliability-errors"
 
-      - alert: IranDirectPrometheusStoragePressureCritical
+      - alert: PathVeerPrometheusStoragePressureCritical
         expr: |
           (
             node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
@@ -54,10 +54,10 @@ groups:
             free space. Ingestion is at risk of halting; expand the volume or
             reduce retention immediately.
           runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
-          dashboard_url: "dashboards/irandirect-reliability-errors"
+          dashboard_url: "dashboards/pathveer-reliability-errors"
 
       # B. Host memory pressure (actionable only).
-      - alert: IranDirectHostMemoryPressure
+      - alert: PathVeerHostMemoryPressure
         expr: |
           (
             1 - (node_memory_MemAvailable_bytes / (node_memory_MemTotal_bytes > 0))
@@ -73,10 +73,10 @@ groups:
             minutes. Backend components may be OOM-killed; check for a leak or
             resize the host.
           runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
-          dashboard_url: "dashboards/irandirect-reliability-errors"
+          dashboard_url: "dashboards/pathveer-reliability-errors"
 
       # C. Inode exhaustion (useful on small/aging hosts).
-      - alert: IranDirectHostFilesystemInodesLow
+      - alert: PathVeerHostFilesystemInodesLow
         expr: |
           (
             node_filesystem_files_free{mountpoint="/", fstype!~"tmpfs|overlay"}
@@ -94,4 +94,4 @@ groups:
             space remaining, new files (including TSDB blocks and trace blocks)
             cannot be created. Investigate inode-heavy directories.
           runbook_url: "deployment/observability/runbooks/prometheus-storage-pressure.md"
-          dashboard_url: "dashboards/irandirect-reliability-errors"
+          dashboard_url: "dashboards/pathveer-reliability-errors"

@@ -4,7 +4,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// Bounded, enumerated tag values for the approved telemetry tags. Every value
 /// here MUST belong to a closed set; free-form values are never permitted.
 /// </summary>
-public static class IranDirectTagValues
+public static class PathVeerTagValues
 {
     // outcome
     public const string Success = "success";

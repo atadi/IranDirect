@@ -2,7 +2,7 @@
 
 - **Alert:** `(procedure, not an alert)`
 - **Severity:** n/a
-- **Dashboard:** `irandirect-reliability-errors`
+- **Dashboard:** `pathveer-reliability-errors`
 - **Prometheus query:** `n/a`
 
 ## What it means
@@ -12,7 +12,7 @@ How to upgrade or roll back a stack component image safely.
 Prevents a bad image bump from taking down observability.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
+Open the `pathveer-reliability-errors` dashboard in the PathVeer folder (Grafana).
 Prometheus query: `n/a`
 
 ## Symptoms

@@ -4,14 +4,14 @@ using System.Diagnostics.Metrics;
 namespace PathVeer.Core.Observability.Telemetry;
 
 /// <summary>
-/// Support export telemetry: one <c>IranDirect.SupportBundleExport</c> root
+/// Support export telemetry: one <c>PathVeer.SupportBundleExport</c> root
 /// Activity per user-visible support export invocation, with
 /// <c>Support.CaptureSnapshot</c>, <c>Support.Serialize</c>,
 /// <c>Support.WriteJson</c>, and <c>Support.CreateZip</c> child Activities.
 ///
-/// Exactly one <c>irandirect.support.bundles.exported</c> /
-/// <c>irandirect.support.bundles.failed</c> counter increment and one
-/// <c>irandirect.support.bundle.duration</c> histogram sample per export.
+/// Exactly one <c>pathveer.support.bundles.exported</c> /
+/// <c>pathveer.support.bundles.failed</c> counter increment and one
+/// <c>pathveer.support.bundle.duration</c> histogram sample per export.
 ///
 /// The JSON snapshot export and the ZIP bundle export are both user-visible
 /// workflows; they are distinguished by the bounded <c>operation</c> tag
@@ -30,36 +30,36 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// </summary>
 public static class SupportExportTelemetry
 {
-    private static readonly Counter<long> s_exported = IranDirectTelemetry
+    private static readonly Counter<long> s_exported = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.SupportBundlesExported,
+            PathVeerMetricNames.SupportBundlesExported,
             unit: "{export}",
             description: "Support bundle/snapshot exports completed.");
 
-    private static readonly Counter<long> s_failed = IranDirectTelemetry
+    private static readonly Counter<long> s_failed = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.SupportBundlesFailed,
+            PathVeerMetricNames.SupportBundlesFailed,
             unit: "{export}",
             description: "Support bundle/snapshot exports that failed.");
 
-    private static readonly Histogram<double> s_duration = IranDirectTelemetry
+    private static readonly Histogram<double> s_duration = PathVeerTelemetry
         .Meter.CreateHistogram<double>(
-            IranDirectMetricNames.SupportBundleDuration,
+            PathVeerMetricNames.SupportBundleDuration,
             unit: "ms",
             description: "Elapsed time of one support export.");
 
     /// <summary>
     /// Starts an owned support export root for a standalone snapshot or bundle
-    /// export. Creates the <c>IranDirect.SupportBundleExport</c> root, records
+    /// export. Creates the <c>PathVeer.SupportBundleExport</c> root, records
     /// the terminal <c>exported</c>/<c>failed</c> counter and
     /// <c>duration</c> histogram on completion, and owns the Activity lifetime.
     /// </summary>
     internal static SupportExportScope Start(string operation)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.SupportBundleExport,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.SupportBundleExport,
             ActivityKind.Internal);
-        activity?.SetTag(IranDirectTagNames.Operation, operation);
+        activity?.SetTag(PathVeerTagNames.Operation, operation);
 
         return new SupportExportScope(activity, operation, ownsRoot: true);
     }
@@ -88,16 +88,16 @@ public static class SupportExportTelemetry
             s_duration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome),
+                    PathVeerTagNames.Outcome, outcome),
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.FailureCategory, failureCategory));
+                    PathVeerTagNames.FailureCategory, failureCategory));
         }
         else
         {
             s_duration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome));
+                    PathVeerTagNames.Outcome, outcome));
         }
     }
 
@@ -123,23 +123,23 @@ public static class SupportExportTelemetry
 
         public SupportChildScope StartCaptureSnapshot() =>
             StartChild(
-                IranDirectActivityNames.SupportCaptureSnapshot,
-                IranDirectTagValues.OperationSupportCaptureSnapshot);
+                PathVeerActivityNames.SupportCaptureSnapshot,
+                PathVeerTagValues.OperationSupportCaptureSnapshot);
 
         public SupportChildScope StartSerialize() =>
             StartChild(
-                IranDirectActivityNames.SupportSerialize,
-                IranDirectTagValues.OperationSupportSerialize);
+                PathVeerActivityNames.SupportSerialize,
+                PathVeerTagValues.OperationSupportSerialize);
 
         public SupportChildScope StartWriteJson() =>
             StartChild(
-                IranDirectActivityNames.SupportWriteJson,
-                IranDirectTagValues.OperationSupportWriteJson);
+                PathVeerActivityNames.SupportWriteJson,
+                PathVeerTagValues.OperationSupportWriteJson);
 
         public SupportChildScope StartCreateZip() =>
             StartChild(
-                IranDirectActivityNames.SupportCreateZip,
-                IranDirectTagValues.OperationSupportCreateZip);
+                PathVeerActivityNames.SupportCreateZip,
+                PathVeerTagValues.OperationSupportCreateZip);
 
         internal SupportChildScope StartChild(
             string name,
@@ -147,9 +147,9 @@ public static class SupportExportTelemetry
         {
             // Children auto-parent to Activity.Current (the enclosing root when
             // nested, or the JSON root otherwise).
-            Activity? child = IranDirectTelemetry.ActivitySource
+            Activity? child = PathVeerTelemetry.ActivitySource
                 .StartActivity(name, ActivityKind.Internal);
-            child?.SetTag(IranDirectTagNames.Operation, operation);
+            child?.SetTag(PathVeerTagNames.Operation, operation);
             return new SupportChildScope(child);
         }
 
@@ -163,15 +163,15 @@ public static class SupportExportTelemetry
             if (_ownsRoot)
             {
                 _activity?.SetTag(
-                    IranDirectTagNames.Outcome, IranDirectTagValues.Success);
+                    PathVeerTagNames.Outcome, PathVeerTagValues.Success);
                 _activity?.SetStatus(ActivityStatusCode.Ok);
                 s_exported.Add(1,
                     new KeyValuePair<string, object?>(
-                        IranDirectTagNames.Operation, _operation));
+                        PathVeerTagNames.Operation, _operation));
                 RecordDuration(
                     Stopwatch.GetElapsedTime(_startTimestamp)
                         .TotalMilliseconds,
-                    IranDirectTagValues.Success,
+                    PathVeerTagValues.Success,
                     null);
             }
         }
@@ -193,19 +193,19 @@ public static class SupportExportTelemetry
                     TelemetryFailureCategoryMapper.Map(exception));
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Failure);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Failure);
             _activity?.SetStatus(ActivityStatusCode.Error);
             _activity?.SetTag(
-                IranDirectTagNames.FailureCategory, category);
+                PathVeerTagNames.FailureCategory, category);
             s_failed.Add(1,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Operation, _operation),
+                    PathVeerTagNames.Operation, _operation),
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.FailureCategory, category));
+                    PathVeerTagNames.FailureCategory, category));
             RecordDuration(
                 Stopwatch.GetElapsedTime(_startTimestamp)
                     .TotalMilliseconds,
-                IranDirectTagValues.Failure,
+                PathVeerTagValues.Failure,
                 category);
         }
 
@@ -225,12 +225,12 @@ public static class SupportExportTelemetry
             // the duration is still recorded exactly once for the started
             // export.
             _activity?.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.Cancelled);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.Cancelled);
             RecordDuration(
                 Stopwatch.GetElapsedTime(_startTimestamp)
                     .TotalMilliseconds,
-                IranDirectTagValues.Cancelled,
+                PathVeerTagValues.Cancelled,
                 null);
         }
 
@@ -253,12 +253,12 @@ public static class SupportExportTelemetry
 
             // Safety net: a forgotten terminal call is an unknown outcome.
             _activity?.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.OutcomeUnknown);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.OutcomeUnknown);
             RecordDuration(
                 Stopwatch.GetElapsedTime(_startTimestamp)
                     .TotalMilliseconds,
-                IranDirectTagValues.OutcomeUnknown,
+                PathVeerTagValues.OutcomeUnknown,
                 null);
             _activity?.Dispose();
         }
@@ -287,7 +287,7 @@ public static class SupportExportTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Success);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Success);
             _activity?.SetStatus(ActivityStatusCode.Ok);
         }
 
@@ -303,10 +303,10 @@ public static class SupportExportTelemetry
                     TelemetryFailureCategoryMapper.Map(exception));
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome, IranDirectTagValues.Failure);
+                PathVeerTagNames.Outcome, PathVeerTagValues.Failure);
             _activity?.SetStatus(ActivityStatusCode.Error);
             _activity?.SetTag(
-                IranDirectTagNames.FailureCategory, category);
+                PathVeerTagNames.FailureCategory, category);
         }
 
         public void Dispose()
@@ -318,8 +318,8 @@ public static class SupportExportTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.OutcomeUnknown);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.OutcomeUnknown);
             _activity?.Dispose();
         }
     }

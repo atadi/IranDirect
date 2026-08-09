@@ -26,7 +26,7 @@ public sealed class IpcRequestTelemetryTests
         var listener = new ActivityListener
         {
             ShouldListenTo = s =>
-                s.Name == IranDirectTelemetry.SourceName,
+                s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = a => started.Enqueue(a),
@@ -43,7 +43,7 @@ public sealed class IpcRequestTelemetryTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
             {
                 meterListener.EnableMeasurementEvents(instrument);
             }
@@ -51,7 +51,7 @@ public sealed class IpcRequestTelemetryTests
         listener.SetMeasurementEventCallback<long>(
             (instrument, value, tags, state) =>
             {
-                if (instrument.Name == IranDirectMetricNames.IpcRequests)
+                if (instrument.Name == PathVeerMetricNames.IpcRequests)
                 {
                     requests.Enqueue(value);
                 }
@@ -59,7 +59,7 @@ public sealed class IpcRequestTelemetryTests
         listener.SetMeasurementEventCallback<double>(
             (instrument, value, tags, state) =>
             {
-                if (instrument.Name == IranDirectMetricNames.IpcRequestDuration)
+                if (instrument.Name == PathVeerMetricNames.IpcRequestDuration)
                 {
                     durations.Enqueue(value);
                 }
@@ -89,33 +89,33 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
         Assert.Equal(
-            IranDirectTagValues.OperationIpcRequest,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
+            PathVeerTagValues.OperationIpcRequest,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
             TelemetryOutcomeMapper.Map(PathVeerCommand.Status),
-            root.Tags.Single(t => t.Key == IranDirectTagNames.IpcCommand).Value);
+            root.Tags.Single(t => t.Key == PathVeerTagNames.IpcCommand).Value);
 
         Activity connect = Assert.Single(
             stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcConnect));
+                a.OperationName == PathVeerActivityNames.IpcConnect));
         Activity send = Assert.Single(
             stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcSend));
+                a.OperationName == PathVeerActivityNames.IpcSend));
         Activity receive = Assert.Single(
             stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcReceive));
+                a.OperationName == PathVeerActivityNames.IpcReceive));
 
         Assert.Equal(
-            IranDirectTagValues.Success,
-            connect.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Success,
+            connect.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
-            send.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Success,
+            send.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
-            receive.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Success,
+            receive.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
 
         // Children are parented to the root.
         Assert.Equal(root.SpanId, connect.ParentSpanId);
@@ -153,32 +153,32 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
 
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         // A business-level failure with no telemetry-defined category carries
         // no failure_category tag.
         Assert.DoesNotContain(
             root.Tags,
-            t => t.Key == IranDirectTagNames.FailureCategory);
+            t => t.Key == PathVeerTagNames.FailureCategory);
 
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             Assert.Single(stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcConnect))
-                .Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                a.OperationName == PathVeerActivityNames.IpcConnect))
+                .Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             Assert.Single(stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcSend))
-                .Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                a.OperationName == PathVeerActivityNames.IpcSend))
+                .Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             Assert.Single(stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcReceive))
-                .Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                a.OperationName == PathVeerActivityNames.IpcReceive))
+                .Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
 
         AssertNoFreeFormTags(root, response.Message);
         Assert.Single(requests);
@@ -213,11 +213,11 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
 
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
 
         // Pin the established contract: do NOT hardcode io here.
         string expectedCategory =
@@ -227,19 +227,19 @@ public sealed class IpcRequestTelemetryTests
                         FaultInjectionPoint.NamedPipeSend)));
         Assert.Equal(
             expectedCategory,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+            root.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                 .Value);
 
         // No transport children were created.
         Assert.DoesNotContain(
             started,
-            a => a.OperationName == IranDirectActivityNames.IpcConnect);
+            a => a.OperationName == PathVeerActivityNames.IpcConnect);
         Assert.DoesNotContain(
             started,
-            a => a.OperationName == IranDirectActivityNames.IpcSend);
+            a => a.OperationName == PathVeerActivityNames.IpcSend);
         Assert.DoesNotContain(
             started,
-            a => a.OperationName == IranDirectActivityNames.IpcReceive);
+            a => a.OperationName == PathVeerActivityNames.IpcReceive);
         Assert.Equal(0, factory.ConnectCallCount);
 
         Assert.Single(requests);
@@ -274,27 +274,27 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
         Activity connect = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcConnect));
+                a.OperationName == PathVeerActivityNames.IpcConnect));
 
         // Connect timeout: outcome=timeout. The committed TelemetryOutcomeMapper
         // maps TimeoutException to (Timeout, category: null), so no
         // failure_category tag is attached (timeout is not a categorized fault).
         Assert.Equal(
-            IranDirectTagValues.Timeout,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Timeout,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.DoesNotContain(
             root.Tags,
-            t => t.Key == IranDirectTagNames.FailureCategory);
+            t => t.Key == PathVeerTagNames.FailureCategory);
 
         Assert.Equal(
-            IranDirectTagValues.Timeout,
-            connect.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Timeout,
+            connect.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.DoesNotContain(
             connect.Tags,
-            t => t.Key == IranDirectTagNames.FailureCategory);
+            t => t.Key == PathVeerTagNames.FailureCategory);
 
         Assert.Single(requests);
         Assert.Single(durations);
@@ -336,28 +336,28 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
         Assert.Equal(
-            IranDirectTagValues.Cancelled,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Cancelled,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Unset, root.Status);
         Assert.DoesNotContain(
             root.Tags,
-            t => t.Key == IranDirectTagNames.FailureCategory);
+            t => t.Key == PathVeerTagNames.FailureCategory);
 
         Activity connect = Assert.Single(
             stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcConnect));
+                a.OperationName == PathVeerActivityNames.IpcConnect));
         Assert.Equal(
-            IranDirectTagValues.Cancelled,
-            connect.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Cancelled,
+            connect.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
 
         Assert.DoesNotContain(
             started,
-            a => a.OperationName == IranDirectActivityNames.IpcSend);
+            a => a.OperationName == PathVeerActivityNames.IpcSend);
         Assert.DoesNotContain(
             started,
-            a => a.OperationName == IranDirectActivityNames.IpcReceive);
+            a => a.OperationName == PathVeerActivityNames.IpcReceive);
     }
 
     [Fact]
@@ -383,34 +383,34 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+            PathVeerTagValues.FailureIo,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                 .Value);
 
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             Assert.Single(stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcConnect))
-                .Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                a.OperationName == PathVeerActivityNames.IpcConnect))
+                .Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Activity send = Assert.Single(
             stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcSend));
+                a.OperationName == PathVeerActivityNames.IpcSend));
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            send.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            send.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
-            send.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+            PathVeerTagValues.FailureIo,
+            send.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                 .Value);
 
         Assert.DoesNotContain(
             started,
-            a => a.OperationName == IranDirectActivityNames.IpcReceive);
+            a => a.OperationName == PathVeerActivityNames.IpcReceive);
     }
 
     [Fact]
@@ -435,25 +435,25 @@ public sealed class IpcRequestTelemetryTests
                 .GetAwaiter().GetResult());
 
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             Assert.Single(stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcConnect))
-                .Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                a.OperationName == PathVeerActivityNames.IpcConnect))
+                .Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             Assert.Single(stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcSend))
-                .Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                a.OperationName == PathVeerActivityNames.IpcSend))
+                .Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
 
         Activity receive = Assert.Single(
             stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcReceive));
+                a.OperationName == PathVeerActivityNames.IpcReceive));
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            receive.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            receive.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
-            receive.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+            PathVeerTagValues.FailureIo,
+            receive.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                 .Value);
     }
 
@@ -477,21 +477,21 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(
-            IranDirectTagValues.FailureInvalidResponse,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+            PathVeerTagValues.FailureInvalidResponse,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                 .Value);
 
         // Transport children succeeded; only the response shape failed.
         Assert.Equal(
-            IranDirectTagValues.Success,
+            PathVeerTagValues.Success,
             Assert.Single(stopped.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcReceive))
-                .Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                a.OperationName == PathVeerActivityNames.IpcReceive))
+                .Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
     }
 
     [Fact]
@@ -511,16 +511,16 @@ public sealed class IpcRequestTelemetryTests
 
         Activity root = Assert.Single(
             started.Where(a =>
-                a.OperationName == IranDirectActivityNames.IpcRequest));
+                a.OperationName == PathVeerActivityNames.IpcRequest));
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
 
         string expected = TelemetryFailureCategoryMapper.ToCategoryString(
             TelemetryFailureCategoryMapper.Map(new JsonException()));
         Assert.Equal(
             expected,
-            root.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+            root.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                 .Value);
     }
 
@@ -547,7 +547,7 @@ public sealed class IpcRequestTelemetryTests
         {
             Assert.DoesNotContain(
                 tag.Key,
-                IranDirectTagNames.Prohibited,
+                PathVeerTagNames.Prohibited,
                 StringComparer.Ordinal);
             Assert.False(
                 tag.Key.Equals("reason", StringComparison.Ordinal) ||

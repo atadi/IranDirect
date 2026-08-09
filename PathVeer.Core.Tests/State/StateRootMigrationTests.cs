@@ -401,7 +401,7 @@ public sealed class StateRootMigrationTests
         // Service identity / pipe / telemetry are NOT touched by this phase.
         Assert.Equal("IranDirect", PathVeer.Core.ServiceLifecycle.LegacyServiceNames.ServiceName);
         Assert.Equal("IranDirect.Control.v1", PathVeer.Core.Ipc.PathVeerPipeNames.LegacyPipeName);
-        Assert.Equal("IranDirect.Core", PathVeer.Core.Observability.Telemetry.IranDirectTelemetry.SourceName);
+        Assert.Equal("PathVeer.Core", PathVeer.Core.Observability.Telemetry.PathVeerTelemetry.SourceName);
     }
 
     // --- Probe failure-injection across boundaries (§32) ---

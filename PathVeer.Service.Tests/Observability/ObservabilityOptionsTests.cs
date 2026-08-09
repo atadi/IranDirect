@@ -16,7 +16,7 @@ public sealed class ObservabilityOptionsTests
         Assert.Equal(1.0, options.SamplingRatio);
         Assert.Equal(5, options.ExportTimeoutSeconds);
         Assert.Equal(5, options.ShutdownFlushTimeoutSeconds);
-        Assert.Equal("IranDirect.Service", options.ServiceName);
+        Assert.Equal("PathVeer.Service", options.ServiceName);
         Assert.False(options.Otlp.Enabled);
         Assert.Equal(string.Empty, options.Otlp.Endpoint);
         Assert.Equal("grpc", options.Otlp.Protocol);

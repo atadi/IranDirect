@@ -1,9 +1,9 @@
-# Runbook: IranDirectSupportExportFailures
+# Runbook: PathVeerSupportExportFailures
 
-- **Alert:** `IranDirectSupportExportFailures`
+- **Alert:** `PathVeerSupportExportFailures`
 - **Severity:** warning
-- **Dashboard:** `irandirect-ipc-support`
-- **Prometheus query:** `sum(increase(irandirect_support_bundles_failed_total[30m])) >= 2`
+- **Dashboard:** `pathveer-ipc-support`
+- **Prometheus query:** `sum(increase(pathveer_support_bundles_failed_total[30m])) >= 2`
 
 ## What it means
 At least two support bundle exports failed in 30m.
@@ -12,8 +12,8 @@ At least two support bundle exports failed in 30m.
 Diagnostics collection is unreliable; remote assistance and post-incident analysis are impaired.
 
 ## Dashboard
-Open the `irandirect-ipc-support` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `sum(increase(irandirect_support_bundles_failed_total[30m])) >= 2`
+Open the `pathveer-ipc-support` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `sum(increase(pathveer_support_bundles_failed_total[30m])) >= 2`
 
 ## Symptoms
 IPC/Support dashboard 'Support exports over time' showing failed series; 'Support export failure ratio' elevated.
@@ -40,7 +40,7 @@ Support-export failure ratio, failure stage from dashboard, access symptom (no p
 Support bundle exports succeed; failed counter stops increasing.
 
 ## Related alerts
-IranDirectIpcTimeoutRatioHigh
+PathVeerIpcTimeoutRatioHigh
 
 ## Ownership
 Service / Support

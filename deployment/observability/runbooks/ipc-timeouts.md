@@ -1,9 +1,9 @@
-# Runbook: IranDirectIpcTimeoutRatioHigh
+# Runbook: PathVeerIpcTimeoutRatioHigh
 
-- **Alert:** `IranDirectIpcTimeoutRatioHigh`
+- **Alert:** `PathVeerIpcTimeoutRatioHigh`
 - **Severity:** warning
-- **Dashboard:** `irandirect-ipc-support`
-- **Prometheus query:** `sum(rate(irandirect_ipc_requests_total{outcome="timeout"}[10m])) / sum(rate(irandirect_ipc_requests_total[10m]))`
+- **Dashboard:** `pathveer-ipc-support`
+- **Prometheus query:** `sum(rate(pathveer_ipc_requests_total{outcome="timeout"}[10m])) / sum(rate(pathveer_ipc_requests_total[10m]))`
 
 ## What it means
 More than 5% of named-pipe IPC requests timed out over 10m.
@@ -12,8 +12,8 @@ More than 5% of named-pipe IPC requests timed out over 10m.
 CLI/Tray commands to the Service are partially failing to get a response; operators cannot drive the Service.
 
 ## Dashboard
-Open the `irandirect-ipc-support` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `sum(rate(irandirect_ipc_requests_total{outcome="timeout"}[10m])) / sum(rate(irandirect_ipc_requests_total[10m]))`
+Open the `pathveer-ipc-support` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `sum(rate(pathveer_ipc_requests_total{outcome="timeout"}[10m])) / sum(rate(pathveer_ipc_requests_total[10m]))`
 
 ## Symptoms
 IPC/Support dashboard 'IPC timeout and failure rate' rising; 'IPC timeout ratio' stat elevated.
@@ -40,7 +40,7 @@ IPC outcome history, Service host CPU at the time, client identity if known (no 
 IPC timeout ratio returns below 5%.
 
 ## Related alerts
-IranDirectSupportExportFailures
+PathVeerSupportExportFailures
 
 ## Ownership
 Service / SRE

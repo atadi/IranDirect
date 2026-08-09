@@ -1,6 +1,6 @@
-# IranDirect local observability stack (Phase 33.2).
+# PathVeer local observability stack (Phase 33.2).
 #
-# Consumes the telemetry already emitted by IranDirect.Service (Phases
+# Consumes the telemetry already emitted by PathVeer.Service (Phases
 # 32.2-32.9) without changing it. The OpenTelemetry Collector is the ONLY
 # endpoint the application talks to; Prometheus, Tempo and Grafana are never
 # addressed directly by the Service.
@@ -24,15 +24,20 @@
 #   Total planning figure: ~2 GB RAM, ~45 GB disk with headroom.
 # To enforce limits on a shared host, uncomment the `deploy.resources` blocks.
 
-name: irandirect-observability
+name: pathveer-observability
 
 networks:
   # Internal stack network. Backends are reachable by service name only.
   observability:
-    name: irandirect-observability
+    name: pathveer-observability
     driver: bridge
 
 volumes:
+  # Phase 36.6 decision: the product rebranded to PathVeer, but these named
+  # volumes intentionally KEEP their legacy `irandirect-*-data` names.
+  # Renaming a named volume creates a NEW empty volume and silently orphans
+  # existing Prometheus/Tempo/Grafana/Alertmanager state; data continuity
+  # outweighs brand consistency for opaque infrastructure identifiers.
   # Persistent storage. Survives `docker compose down`; removed only by
   # `docker compose down -v` (see README "Wipe data").
   prometheus-data:
@@ -50,7 +55,7 @@ services:
   # --------------------------------------------------------------------
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.115.1
-    container_name: irandirect-otel-collector
+    container_name: pathveer-otel-collector
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
@@ -84,7 +89,7 @@ services:
   # --------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:v3.0.1
-    container_name: irandirect-prometheus
+    container_name: pathveer-prometheus
     restart: unless-stopped
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -119,7 +124,7 @@ services:
   # --------------------------------------------------------------------
   tempo:
     image: grafana/tempo:2.6.1
-    container_name: irandirect-tempo
+    container_name: pathveer-tempo
     restart: unless-stopped
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     user: "0:0" # writes to the named volume; dev-only convenience
@@ -152,7 +157,7 @@ services:
   # --------------------------------------------------------------------
   alertmanager:
     image: prom/alertmanager:v0.27.0
-    container_name: irandirect-alertmanager
+    container_name: pathveer-alertmanager
     restart: unless-stopped
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
@@ -189,7 +194,7 @@ services:
   # --------------------------------------------------------------------
   grafana:
     image: grafana/grafana:11.4.0
-    container_name: irandirect-grafana
+    container_name: pathveer-grafana
     restart: unless-stopped
     environment:
       # Admin password is delivered via a mounted secret FILE (path from .env).

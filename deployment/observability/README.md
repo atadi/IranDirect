@@ -1,7 +1,7 @@
-# IranDirect local observability stack
+# PathVeer local observability stack
 
 Reproducible local development stack that receives the telemetry
-`IranDirect.Service` already emits (Phases 32.2–32.9). It adds **no**
+`PathVeer.Service` already emits (Phases 32.2–32.9). It adds **no**
 instrumentation: no new spans, no new metrics, no renamed Activity/Meter/tag.
 The stack is purely a consumer.
 
@@ -16,7 +16,7 @@ Implements the reference architecture selected in
 | `otel-collector` | `otel/opentelemetry-collector-contrib:0.115.1` | The **only** OTLP endpoint the Service talks to. Receives OTLP, batches, re-exports. |
 | `prometheus` | `prom/prometheus:v3.0.1` | Metric storage. Scrapes the collector every 15s, 30-day retention. Evaluates recording + alert rules. |
 | `tempo` | `grafana/tempo:2.6.1` | Trace storage. Filesystem backend, local blocks, 3-day dev retention. |
-| `grafana` | `grafana/grafana:11.4.0` | Dashboarding. Prometheus + Tempo datasources provisioned; five version-controlled dashboards auto-loaded into the `IranDirect` folder (Phase 33.3). |
+| `grafana` | `grafana/grafana:11.4.0` | Dashboarding. Prometheus + Tempo datasources provisioned; five version-controlled dashboards auto-loaded into the `PathVeer` folder (Phase 33.3). |
 | `alertmanager` | `prom/alertmanager:v0.27.0` | Alert routing/delivery (Phase 33.4). Receives alerts from Prometheus; local default routes everything to a no-op receiver (delivers nothing). |
 | `node-exporter` | `prom/node-exporter:v1.8.2` | **Production overlay only** (Phase 33.5). Host/storage metrics for disk-pressure, memory, and inode alerts; internal-only, read-only host mounts. |
 
@@ -85,6 +85,15 @@ Docker/host restart unless you explicitly stopped them.
 Configuration is bind-mounted read-only from this directory and is
 version-controlled; only the volumes above hold state.
 
+**Phase 36.6 volume-naming decision.** The product rebranded to PathVeer, but
+these named volumes deliberately keep their legacy `irandirect-*-data` names.
+Renaming a Docker named volume does not move data — it creates a new, empty
+volume and orphans the existing Prometheus TSDB, Tempo blocks, Grafana SQLite
+database and Alertmanager state. For opaque infrastructure identifiers, data
+continuity outweighs brand consistency, so the names are frozen. The Compose
+project and container names (`pathveer-observability`, `pathveer-prometheus`,
+…) *were* rebranded because they carry no persisted state.
+
 ## 6. Health checks
 
 Every service defines a compose health check; `docker compose up -d --wait`
@@ -109,7 +118,7 @@ curl -s 'http://localhost:9090/api/v1/query?query=up'
 ## 7. Expected telemetry flow
 
 ```
-IranDirect.Service (Windows host)
+PathVeer.Service (Windows host)
     │  OTLP gRPC → 127.0.0.1:4317   (only when Observability is enabled)
     ▼
 otel-collector
@@ -123,13 +132,13 @@ otel-collector
 
 What you should see once the Service runs with telemetry enabled:
 
-- Metrics named `irandirect_*` in Prometheus (the OTel `irandirect.*` names are
+- Metrics named `pathveer_*` in Prometheus (the OTel `pathveer.*` names are
   translated to `_` by the Prometheus exporter), e.g.
-  `irandirect_runtime_cycles_started`, `irandirect_runtime_cycle_duration_bucket`.
-- Traces in Tempo with `service.name = IranDirect.Service` and root spans
-  `IranDirect.RuntimeCycle`, `IranDirect.PrefixUpdateCheck`,
-  `IranDirect.CustomRouteRefresh`, `IranDirect.IpcRequest`,
-  `IranDirect.SupportBundleExport`, `Ipc.Dispatch`.
+  `pathveer_runtime_cycles_started`, `pathveer_runtime_cycle_duration_bucket`.
+- Traces in Tempo with `service.name = PathVeer.Service` and root spans
+  `PathVeer.RuntimeCycle`, `PathVeer.PrefixUpdateCheck`,
+  `PathVeer.CustomRouteRefresh`, `PathVeer.IpcRequest`,
+  `PathVeer.SupportBundleExport`, `Ipc.Dispatch`.
 
 Nothing appears until telemetry is explicitly enabled — that is by design.
 
@@ -139,18 +148,18 @@ Five dashboards are version-controlled and provisioned automatically — no manu
 import. They live in `grafana/dashboards/*.json` and are mounted read-only into
 the container at `/var/lib/grafana/dashboards`; the provider in
 `grafana/provisioning/dashboards/dashboards.yaml` loads them into the
-`IranDirect` folder with `allowUiUpdates: false` (edit the JSON, not the UI).
+`PathVeer` folder with `allowUiUpdates: false` (edit the JSON, not the UI).
 
 | UID | Title |
 |-----|-------|
-| `irandirect-service-overview` | IranDirect / Service Overview |
-| `irandirect-runtime-reconciliation` | IranDirect / Runtime Reconciliation |
-| `irandirect-prefix-dns` | IranDirect / Prefix and DNS |
-| `irandirect-ipc-support` | IranDirect / IPC and Support Export |
-| `irandirect-reliability-errors` | IranDirect / Reliability and Errors |
+| `pathveer-service-overview` | PathVeer / Service Overview |
+| `pathveer-runtime-reconciliation` | PathVeer / Runtime Reconciliation |
+| `pathveer-prefix-dns` | PathVeer / Prefix and DNS |
+| `pathveer-ipc-support` | PathVeer / IPC and Support Export |
+| `pathveer-reliability-errors` | PathVeer / Reliability and Errors |
 
-Recording rules live in `prometheus/rules/irandirect-recording-rules.yml`, one
-group `irandirect_recording` (30s). Prometheus loads them via `rule_files` in
+Recording rules live in `prometheus/rules/pathveer-recording-rules.yml`, one
+group `pathveer_recording` (30s). Prometheus loads them via `rule_files` in
 `prometheus.yml`, mounted read-only. The dashboards filter on
 `deployment_environment_name` via an `$env` variable.
 
@@ -158,16 +167,16 @@ Validate after any change:
 
 ```bash
 docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
-docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/irandirect-recording-rules.yml
+docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/pathveer-recording-rules.yml
 ```
 
 Inspect loaded rules: `curl -s 'http://localhost:9090/api/v1/rules'`.
-Inspect a dashboard: Grafana → Dashboards → IranDirect folder.
+Inspect a dashboard: Grafana → Dashboards → PathVeer folder.
 
 ### 8b. Alerts and Alertmanager (Phase 33.4)
 
-Fifteen alert rules live in `prometheus/rules/irandirect-alert-rules.yml`, one
-group `irandirect_alerts` (evaluated against the `development/service-authority`
+Fifteen alert rules live in `prometheus/rules/pathveer-alert-rules.yml`, one
+group `pathveer_alerts` (evaluated against the `development/service-authority`
 recording rules every 30s). Prometheus is the **source of alert truth**; Grafana
 does not manage alerts. Alertmanager (`prom/alertmanager:v0.27.0`) is the fifth
 service and the delivery layer.
@@ -187,7 +196,7 @@ from each dashboard's "Alert coverage & runbooks" panel).
 Validate after any change:
 
 ```bash
-docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/irandirect-alert-rules.yml
+docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/pathveer-alert-rules.yml
 docker compose exec -T alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
 ```
 
@@ -238,7 +247,7 @@ code paths run; they are valid-but-quiet, not broken. Several contract metrics
 running Service and are intentionally absent from every panel — see
 [the Phase 33.3 doc](../../docs/observability/phase-33.3-dashboards-and-recording-rules.md).
 
-## 9. Enabling observability in IranDirect.Service
+## 9. Enabling observability in PathVeer.Service
 
 Telemetry is **disabled by default and stays that way**. Nothing in this stack
 turns it on. To enable it for a local session, override the `Observability`
@@ -253,7 +262,7 @@ set Observability__Otlp__Endpoint=http://localhost:4317
 set Observability__Otlp__Protocol=grpc
 ```
 
-Or copy `IranDirect.Service/appsettings.Observability.Local.example.json` over
+Or copy `PathVeer.Service/appsettings.Observability.Local.example.json` over
 your local `appsettings.Development.json` (it is an **example** file and is not
 loaded automatically).
 
@@ -316,20 +325,20 @@ exercised by `dotnet test`. Verify this stack manually:
 6. Prometheus → Status → Targets: `otel-collector` is `UP`.
 7. Grafana → Connections → Data sources → Prometheus / Tempo → **Save & test**
    both succeed.
-8. Start `IranDirect.Service` with the overrides from §9. Within ~30s query
-   `irandirect_runtime_cycles_started` in Prometheus and search Tempo for
-   `service.name = IranDirect.Service`.
-8b. Grafana → Dashboards → `IranDirect` folder shows the five Phase 33.3
+8. Start `PathVeer.Service` with the overrides from §9. Within ~30s query
+   `pathveer_runtime_cycles_started` in Prometheus and search Tempo for
+   `service.name = PathVeer.Service`.
+8b. Grafana → Dashboards → `PathVeer` folder shows the five Phase 33.3
     dashboards; open **Service Overview** and confirm the cycle-rate / latency
     panels populate within ~1 minute.
 8c. `curl -s 'http://localhost:9090/api/v1/rules'` shows group
-    `irandirect_recording` with 20 rules and no `lastError` entries.
+    `pathveer_recording` with 20 rules and no `lastError` entries.
 8d. `curl -s 'http://localhost:9090/api/v1/rules'` also shows group
-    `irandirect_alerts` with 15 rules and no `lastError` entries.
+    `pathveer_alerts` with 15 rules and no `lastError` entries.
 8e. `curl -s 'http://localhost:9090/api/v1/alertmanagers'` lists
     `http://alertmanager:9093/...` as an active alertmanager.
 8f. Stop `otel-collector` (`docker compose stop otel-collector`) for >2m; confirm
-    `IranDirectCollectorUnavailable` fires in Prometheus and appears in
+    `PathVeerCollectorUnavailable` fires in Prometheus and appears in
     `curl -s 'http://localhost:9095/api/v2/alerts'`; restart the collector and
     confirm the alert clears.
 9. Set `Observability__Enabled=false`, restart the Service, confirm normal

@@ -13,7 +13,7 @@ namespace PathVeer.Core.Tests.Observability.Telemetry;
 /// <see cref="SupportBundleExporter"/>.
 ///
 /// Key contract: a bundle export internally drives the snapshot exporter, but
-/// must NOT produce two <c>IranDirect.SupportBundleExport</c> roots or double
+/// must NOT produce two <c>PathVeer.SupportBundleExport</c> roots or double
 /// the export counters (the nested snapshot work attaches to the enclosing
 /// bundle root as children).
 /// </summary>
@@ -31,7 +31,7 @@ public sealed class SupportExportTelemetryTests
         var listener = new ActivityListener
         {
             ShouldListenTo = s =>
-                s.Name == IranDirectTelemetry.SourceName,
+                s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 sampling,
             ActivityStarted = a => started.Enqueue(a),
@@ -49,7 +49,7 @@ public sealed class SupportExportTelemetryTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
             {
                 meterListener.EnableMeasurementEvents(instrument);
             }
@@ -58,12 +58,12 @@ public sealed class SupportExportTelemetryTests
             (instrument, value, tags, state) =>
             {
                 if (instrument.Name ==
-                    IranDirectMetricNames.SupportBundlesExported)
+                    PathVeerMetricNames.SupportBundlesExported)
                 {
                     exported.Enqueue(value);
                 }
                 else if (instrument.Name ==
-                    IranDirectMetricNames.SupportBundlesFailed)
+                    PathVeerMetricNames.SupportBundlesFailed)
                 {
                     failed.Enqueue(value);
                 }
@@ -72,7 +72,7 @@ public sealed class SupportExportTelemetryTests
             (instrument, value, tags, state) =>
             {
                 if (instrument.Name ==
-                    IranDirectMetricNames.SupportBundleDuration)
+                    PathVeerMetricNames.SupportBundleDuration)
                 {
                     durations.Enqueue(value);
                 }
@@ -109,27 +109,27 @@ public sealed class SupportExportTelemetryTests
             Activity root = Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportBundleExport));
+                    PathVeerActivityNames.SupportBundleExport));
             Assert.Equal(
-                IranDirectTagValues.OperationSupportSnapshotExport,
-                root.Tags.Single(t => t.Key == IranDirectTagNames.Operation)
+                PathVeerTagValues.OperationSupportSnapshotExport,
+                root.Tags.Single(t => t.Key == PathVeerTagNames.Operation)
                     .Value);
             Assert.Equal(
                 ActivityStatusCode.Ok, root.Status);
 
             Assert.Single(stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.SupportCaptureSnapshot));
+                PathVeerActivityNames.SupportCaptureSnapshot));
             Assert.Single(stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.SupportSerialize));
+                PathVeerActivityNames.SupportSerialize));
             Assert.Single(stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.SupportWriteJson));
+                PathVeerActivityNames.SupportWriteJson));
             Assert.DoesNotContain(
                 stopped,
                 a => a.OperationName ==
-                IranDirectActivityNames.SupportCreateZip);
+                PathVeerActivityNames.SupportCreateZip);
 
             Assert.Single(exported);
             Assert.Empty(failed);
@@ -206,34 +206,34 @@ public sealed class SupportExportTelemetryTests
             Activity root = Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportBundleExport));
+                    PathVeerActivityNames.SupportBundleExport));
             Assert.Equal(
-                IranDirectTagValues.OperationSupportBundleExport,
-                root.Tags.Single(t => t.Key == IranDirectTagNames.Operation)
+                PathVeerTagValues.OperationSupportBundleExport,
+                root.Tags.Single(t => t.Key == PathVeerTagNames.Operation)
                     .Value);
 
             // CaptureSnapshot/Serialize/WriteJson come from the nested
             // snapshot exporter and attach to the single bundle root.
             Assert.Single(stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.SupportCaptureSnapshot));
+                PathVeerActivityNames.SupportCaptureSnapshot));
             Assert.Single(stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.SupportSerialize));
+                PathVeerActivityNames.SupportSerialize));
             Assert.Single(stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.SupportWriteJson));
+                PathVeerActivityNames.SupportWriteJson));
             Assert.Single(stopped.Where(a =>
                 a.OperationName ==
-                IranDirectActivityNames.SupportCreateZip));
+                PathVeerActivityNames.SupportCreateZip));
 
             // Each child is parented to the single bundle root.
             foreach (var name in new[]
                      {
-                         IranDirectActivityNames.SupportCaptureSnapshot,
-                         IranDirectActivityNames.SupportSerialize,
-                         IranDirectActivityNames.SupportWriteJson,
-                         IranDirectActivityNames.SupportCreateZip,
+                         PathVeerActivityNames.SupportCaptureSnapshot,
+                         PathVeerActivityNames.SupportSerialize,
+                         PathVeerActivityNames.SupportWriteJson,
+                         PathVeerActivityNames.SupportCreateZip,
                      })
             {
                 Activity child = Assert.Single(
@@ -286,11 +286,11 @@ public sealed class SupportExportTelemetryTests
             Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportBundleExport));
+                    PathVeerActivityNames.SupportBundleExport));
             Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportCreateZip));
+                    PathVeerActivityNames.SupportCreateZip));
         }
         finally
         {
@@ -326,14 +326,14 @@ public sealed class SupportExportTelemetryTests
             Activity root = Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportBundleExport));
+                    PathVeerActivityNames.SupportBundleExport));
             Assert.Equal(
-                IranDirectTagValues.Failure,
-                root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome)
+                PathVeerTagValues.Failure,
+                root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome)
                     .Value);
             Assert.Equal(
-                IranDirectTagValues.FailureIo,
-                root.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+                PathVeerTagValues.FailureIo,
+                root.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                     .Value);
 
             Assert.Empty(exported);
@@ -375,14 +375,14 @@ public sealed class SupportExportTelemetryTests
             Activity root = Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportBundleExport));
+                    PathVeerActivityNames.SupportBundleExport));
             Assert.Equal(
-                IranDirectTagValues.Failure,
-                root.Tags.Single(t => t.Key == IranDirectTagNames.Outcome)
+                PathVeerTagValues.Failure,
+                root.Tags.Single(t => t.Key == PathVeerTagNames.Outcome)
                     .Value);
             Assert.Equal(
-                IranDirectTagValues.FailureIo,
-                root.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory)
+                PathVeerTagValues.FailureIo,
+                root.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory)
                     .Value);
         }
         finally
@@ -418,7 +418,7 @@ public sealed class SupportExportTelemetryTests
     public void SnapshotExport_StandaloneInsideUnrelatedActivity_CreatesOwnRoot()
     {
         // A standalone snapshot export must still create its own
-        // IranDirect.SupportBundleExport root even when an unrelated Activity is
+        // PathVeer.SupportBundleExport root even when an unrelated Activity is
         // ambient. Orchestration must not depend on Activity.Current.
         string directory = CreateTempDirectory();
         try
@@ -449,14 +449,14 @@ public sealed class SupportExportTelemetryTests
             Activity root = Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportBundleExport));
+                    PathVeerActivityNames.SupportBundleExport));
             // Exactly one support root is produced regardless of the ambient
             // Activity; the exporter creates its own root rather than relying
             // on or reusing ambient telemetry state.
             Assert.NotNull(unrelated);
             Assert.Equal(
-                IranDirectTagValues.OperationSupportSnapshotExport,
-                root.Tags.Single(t => t.Key == IranDirectTagNames.Operation)
+                PathVeerTagValues.OperationSupportSnapshotExport,
+                root.Tags.Single(t => t.Key == PathVeerTagNames.Operation)
                     .Value);
             Assert.Single(exported);
         }
@@ -494,11 +494,11 @@ public sealed class SupportExportTelemetryTests
             Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportBundleExport));
+                    PathVeerActivityNames.SupportBundleExport));
             Assert.Single(
                 started.Where(a =>
                     a.OperationName ==
-                    IranDirectActivityNames.SupportCreateZip));
+                    PathVeerActivityNames.SupportCreateZip));
         }
         finally
         {
@@ -583,7 +583,7 @@ public sealed class SupportExportTelemetryTests
                 Assert.Single(
                     started.Where(a =>
                         a.OperationName ==
-                        IranDirectActivityNames.SupportBundleExport));
+                        PathVeerActivityNames.SupportBundleExport));
             }
             Assert.Single(exported);
             Assert.Empty(failed);

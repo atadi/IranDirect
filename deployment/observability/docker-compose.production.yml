@@ -1,4 +1,4 @@
-# IranDirect observability stack — PRODUCTION overlay (Phase 33.5).
+# PathVeer observability stack — PRODUCTION overlay (Phase 33.5).
 #
 # Intended to be merged ON TOP OF docker-compose.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
@@ -21,14 +21,19 @@
 # Secrets are referenced, never embedded. See production/README.md and
 # .env.production.example. Actual secret files live under secrets/ (git-ignored).
 
-name: irandirect-observability
+name: pathveer-observability
 
 networks:
   observability:
-    name: irandirect-observability
+    name: pathveer-observability
     driver: bridge
 
 volumes:
+  # Phase 36.6 decision: the product rebranded to PathVeer, but these named
+  # volumes intentionally KEEP their legacy `irandirect-*-data` names.
+  # Renaming a named volume creates a NEW empty volume and silently orphans
+  # existing Prometheus/Tempo/Grafana/Alertmanager state; data continuity
+  # outweighs brand consistency for opaque infrastructure identifiers.
   prometheus-data:
     name: irandirect-prometheus-data
   tempo-data:
@@ -145,7 +150,7 @@ services:
   # --------------------------------------------------------------------
   node-exporter:
     image: prom/node-exporter:v1.8.2
-    container_name: irandirect-node-exporter
+    container_name: pathveer-node-exporter
     restart: always
     command:
       - "--path.procfs=/host/proc"

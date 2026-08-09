@@ -13,96 +13,96 @@ public static class TelemetryTagValidator
 {
     private static readonly HashSet<string> s_approved = new()
     {
-        IranDirectTagNames.Operation,
-        IranDirectTagNames.Outcome,
-        IranDirectTagNames.Trigger,
-        IranDirectTagNames.RouteKind,
-        IranDirectTagNames.ChangeKind,
-        IranDirectTagNames.Source,
-        IranDirectTagNames.CacheState,
-        IranDirectTagNames.IpcCommand,
-        IranDirectTagNames.DiagnosticSeverity,
-        IranDirectTagNames.ServiceState,
-        IranDirectTagNames.FailureCategory,
+        PathVeerTagNames.Operation,
+        PathVeerTagNames.Outcome,
+        PathVeerTagNames.Trigger,
+        PathVeerTagNames.RouteKind,
+        PathVeerTagNames.ChangeKind,
+        PathVeerTagNames.Source,
+        PathVeerTagNames.CacheState,
+        PathVeerTagNames.IpcCommand,
+        PathVeerTagNames.DiagnosticSeverity,
+        PathVeerTagNames.ServiceState,
+        PathVeerTagNames.FailureCategory,
     };
 
     private static readonly HashSet<string> s_prohibited = new(
-        IranDirectTagNames.Prohibited);
+        PathVeerTagNames.Prohibited);
 
     // Bounded value sets per approved tag. Kept as explicit membership sets so
     // validation is O(1) and requires no reflection.
     private static readonly Dictionary<string, HashSet<string>> s_values = new()
     {
-        [IranDirectTagNames.Outcome] = new()
+        [PathVeerTagNames.Outcome] = new()
         {
-            IranDirectTagValues.Success,
-            IranDirectTagValues.Failure,
-            IranDirectTagValues.Cancelled,
-            IranDirectTagValues.Timeout,
-            IranDirectTagValues.NoChange,
-            IranDirectTagValues.OutcomeUnknown,
+            PathVeerTagValues.Success,
+            PathVeerTagValues.Failure,
+            PathVeerTagValues.Cancelled,
+            PathVeerTagValues.Timeout,
+            PathVeerTagValues.NoChange,
+            PathVeerTagValues.OutcomeUnknown,
         },
-        [IranDirectTagNames.Trigger] = new()
+        [PathVeerTagNames.Trigger] = new()
         {
-            IranDirectTagValues.TriggerScheduled,
-            IranDirectTagValues.TriggerForced,
-            IranDirectTagValues.TriggerCli,
-            IranDirectTagValues.TriggerTray,
-            IranDirectTagValues.TriggerStartup,
-            IranDirectTagValues.TriggerRepair,
-            IranDirectTagValues.TriggerUnknown,
+            PathVeerTagValues.TriggerScheduled,
+            PathVeerTagValues.TriggerForced,
+            PathVeerTagValues.TriggerCli,
+            PathVeerTagValues.TriggerTray,
+            PathVeerTagValues.TriggerStartup,
+            PathVeerTagValues.TriggerRepair,
+            PathVeerTagValues.TriggerUnknown,
         },
-        [IranDirectTagNames.RouteKind] = new()
+        [PathVeerTagNames.RouteKind] = new()
         {
-            IranDirectTagValues.RouteKindPrefix,
-            IranDirectTagValues.RouteKindEndpoint,
-            IranDirectTagValues.RouteKindUnknown,
+            PathVeerTagValues.RouteKindPrefix,
+            PathVeerTagValues.RouteKindEndpoint,
+            PathVeerTagValues.RouteKindUnknown,
         },
-        [IranDirectTagNames.ChangeKind] = new()
+        [PathVeerTagNames.ChangeKind] = new()
         {
-            IranDirectTagValues.ChangeKindCreate,
-            IranDirectTagValues.ChangeKindDelete,
-            IranDirectTagValues.ChangeKindUnknown,
+            PathVeerTagValues.ChangeKindCreate,
+            PathVeerTagValues.ChangeKindDelete,
+            PathVeerTagValues.ChangeKindUnknown,
         },
-        [IranDirectTagNames.Source] = new()
+        [PathVeerTagNames.Source] = new()
         {
-            IranDirectTagValues.SourceOfficial,
-            IranDirectTagValues.SourceCustom,
-            IranDirectTagValues.SourceCache,
-            IranDirectTagValues.SourceUnknown,
+            PathVeerTagValues.SourceOfficial,
+            PathVeerTagValues.SourceCustom,
+            PathVeerTagValues.SourceCache,
+            PathVeerTagValues.SourceUnknown,
         },
-        [IranDirectTagNames.CacheState] = new()
+        [PathVeerTagNames.CacheState] = new()
         {
-            IranDirectTagValues.CacheFresh,
-            IranDirectTagValues.CacheStale,
-            IranDirectTagValues.CacheMiss,
-            IranDirectTagValues.CacheFailed,
-            IranDirectTagValues.CacheUnknown,
+            PathVeerTagValues.CacheFresh,
+            PathVeerTagValues.CacheStale,
+            PathVeerTagValues.CacheMiss,
+            PathVeerTagValues.CacheFailed,
+            PathVeerTagValues.CacheUnknown,
         },
-        [IranDirectTagNames.DiagnosticSeverity] = new()
+        [PathVeerTagNames.DiagnosticSeverity] = new()
         {
-            IranDirectTagValues.SeverityPass,
-            IranDirectTagValues.SeverityWarning,
-            IranDirectTagValues.SeverityFailure,
-            IranDirectTagValues.SeverityUnknown,
+            PathVeerTagValues.SeverityPass,
+            PathVeerTagValues.SeverityWarning,
+            PathVeerTagValues.SeverityFailure,
+            PathVeerTagValues.SeverityUnknown,
         },
-        [IranDirectTagNames.ServiceState] = new()
+        [PathVeerTagNames.ServiceState] = new()
         {
-            IranDirectTagValues.ServiceEnabledState,
-            IranDirectTagValues.ServiceDisabledState,
-            IranDirectTagValues.ServiceUnknown,
+            PathVeerTagValues.ServiceEnabledState,
+            PathVeerTagValues.ServiceDisabledState,
+            PathVeerTagValues.ServiceUnknown,
         },
-        [IranDirectTagNames.FailureCategory] = new()
+        [PathVeerTagNames.FailureCategory] = new()
         {
-            IranDirectTagValues.FailureIo,
-            IranDirectTagValues.FailureTimeout,
-            IranDirectTagValues.FailureCancellation,
-            IranDirectTagValues.FailureHttp,
-            IranDirectTagValues.FailureDns,
-            IranDirectTagValues.FailureRouting,
-            IranDirectTagValues.FailureSerialization,
-            IranDirectTagValues.FailureInvalidResponse,
-            IranDirectTagValues.FailureUnknown,
+            PathVeerTagValues.FailureIo,
+            PathVeerTagValues.FailureTimeout,
+            PathVeerTagValues.FailureCancellation,
+            PathVeerTagValues.FailureHttp,
+            PathVeerTagValues.FailureDns,
+            PathVeerTagValues.FailureRouting,
+            PathVeerTagValues.FailureSerialization,
+            PathVeerTagValues.FailureInvalidResponse,
+            PathVeerTagValues.FailureUnknown,
         },
     };
 

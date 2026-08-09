@@ -1,13 +1,13 @@
-# Runbook: IranDirectPrometheusStoragePressure (+ host pressure alerts)
+# Runbook: PathVeerPrometheusStoragePressure (+ host pressure alerts)
 
 - **Alerts:**
-  - `IranDirectPrometheusStoragePressure` (warning, host root free < 15% / 15m)
-  - `IranDirectPrometheusStoragePressureCritical` (critical, host root free < 5% / 5m)
-  - `IranDirectHostMemoryPressure` (warning, host memory used > 90% / 15m)
-  - `IranDirectHostFilesystemInodesLow` (warning, host root inodes < 10% / 15m)
+  - `PathVeerPrometheusStoragePressure` (warning, host root free < 15% / 15m)
+  - `PathVeerPrometheusStoragePressureCritical` (critical, host root free < 5% / 5m)
+  - `PathVeerHostMemoryPressure` (warning, host memory used > 90% / 15m)
+  - `PathVeerHostFilesystemInodesLow` (warning, host root inodes < 10% / 15m)
 - **Severity:** warning / critical (storage); warning (memory, inodes)
 - **Component:** prometheus / infrastructure
-- **Dashboard:** `irandirect-reliability-errors`
+- **Dashboard:** `pathveer-reliability-errors`
 - **Prometheus queries:**
   - `node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}`
   - `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`
@@ -28,7 +28,7 @@ overlay only) and target **only the host root filesystem** — not every mount.
   created.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard. For live host signals query
+Open the `pathveer-reliability-errors` dashboard. For live host signals query
 Prometheus directly (above). node-exporter is scraped only in the production
 overlay; these alerts will not fire on the local base stack.
 
@@ -74,7 +74,7 @@ Host root free% returns above threshold (storage > 15%, inodes > 10%),
 memory used < 90%, and the alert clears after its `for:` window.
 
 ## Related alerts
-IranDirectPrometheusTargetDown, IranDirectCollectorUnavailable
+PathVeerPrometheusTargetDown, PathVeerCollectorUnavailable
 
 ## Ownership
 Observability / Platform

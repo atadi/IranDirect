@@ -1,8 +1,8 @@
-# Runbook: IranDirectAlertmanagerUnavailable
+# Runbook: PathVeerAlertmanagerUnavailable
 
-- **Alert:** `IranDirectAlertmanagerUnavailable`
+- **Alert:** `PathVeerAlertmanagerUnavailable`
 - **Severity:** warning
-- **Dashboard:** `irandirect-reliability-errors`
+- **Dashboard:** `pathveer-reliability-errors`
 - **Prometheus query:** `up{job="alertmanager"} == 0`
 
 ## What it means
@@ -12,7 +12,7 @@ Prometheus cannot scrape Alertmanager for 2m.
 Alerts are still evaluated by Prometheus but cannot be delivered. Notification delivery is interrupted until recovery.
 
 ## Dashboard
-Open the `irandirect-reliability-errors` dashboard in the IranDirect folder (Grafana).
+Open the `pathveer-reliability-errors` dashboard in the PathVeer folder (Grafana).
 Prometheus query: `up{job="alertmanager"} == 0`
 
 ## Symptoms
@@ -40,7 +40,7 @@ Alertmanager logs, 'docker compose ps', last successful scrape timestamp.
 up{job="alertmanager"} returns 1 and the Alertmanager UI lists active alerts.
 
 ## Related alerts
-IranDirectPrometheusTargetDown
+PathVeerPrometheusTargetDown
 
 ## Ownership
 Observability / Platform

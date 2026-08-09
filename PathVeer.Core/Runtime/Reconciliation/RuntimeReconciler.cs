@@ -58,8 +58,8 @@ public sealed class RuntimeReconciler : IRuntimeReconciler
                 planning.CompleteSuccess(changeSet.Count);
                 RuntimePlanningTelemetry.RecordChangedRoutes(
                     changeSet.Count > 0
-                        ? IranDirectTagValues.Success
-                        : IranDirectTagValues.NoChange,
+                        ? PathVeerTagValues.Success
+                        : PathVeerTagValues.NoChange,
                     changeSet.Count);
             }
             catch (Exception ex)

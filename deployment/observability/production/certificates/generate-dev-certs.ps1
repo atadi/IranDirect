@@ -1,5 +1,5 @@
 <#
-IranDirect observability - DEV-ONLY certificate generator (Phase 33.5).
+PathVeer observability - DEV-ONLY certificate generator (Phase 33.5).
 
 Creates a self-signed CA + a Collector server certificate (and an optional
 client certificate for mTLS trials) for EXERCISING the TLS OTLP handshake
@@ -58,7 +58,7 @@ subjectKeyIdentifier = hash
 # 1) CA
 openssl genrsa -out (Join-Path $out "ca-key.pem") 2048 2>$null
 openssl req -x509 -new -nodes -key (Join-Path $out "ca-key.pem") -sha256 -days $days `
-    -subj "/CN=irandirect-dev-ca" -config $caCnf -extensions v3_ca `
+    -subj "/CN=pathveer-dev-ca" -config $caCnf -extensions v3_ca `
     -out (Join-Path $out "ca.pem") 2>$null
 
 # 2) Collector server cert (signed by CA)
@@ -72,7 +72,7 @@ openssl x509 -req -in (Join-Path $out "collector.csr") -CA (Join-Path $out "ca.p
 # 3) Optional client cert (mTLS trials)
 openssl genrsa -out (Join-Path $out "client_key.pem") 2048 2>$null
 openssl req -new -key (Join-Path $out "client_key.pem") -sha256 `
-    -subj "/CN=irandirect-service" -out (Join-Path $out "client.csr") 2>$null
+    -subj "/CN=pathveer-service" -out (Join-Path $out "client.csr") 2>$null
 openssl x509 -req -in (Join-Path $out "client.csr") -CA (Join-Path $out "ca.pem") `
     -CAkey (Join-Path $out "ca-key.pem") -CAcreateserial -days $days -sha256 `
     -extfile $cliCnf -extensions v3_cli -out (Join-Path $out "client_cert.pem") 2>$null

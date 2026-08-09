@@ -4,38 +4,38 @@ using System.Diagnostics.Metrics;
 namespace PathVeer.Core.Observability.Telemetry;
 
 /// <summary>
-/// Custom-route DNS refresh telemetry: one <c>IranDirect.CustomRouteRefresh</c>
+/// Custom-route DNS refresh telemetry: one <c>PathVeer.CustomRouteRefresh</c>
 /// root Activity per <see cref="CustomRouteResolver.ResolveAsync"/> invocation,
 /// with <c>Dns.CacheRead</c>, <c>Dns.Resolve</c>, and <c>Dns.CacheWrite</c>
-/// child Activities. One <c>irandirect.dns.lookups</c> counter increment and one
-/// <c>irandirect.dns.lookup.duration</c> histogram sample per real DNS lookup
+/// child Activities. One <c>pathveer.dns.lookups</c> counter increment and one
+/// <c>pathveer.dns.lookup.duration</c> histogram sample per real DNS lookup
 /// attempt (fresh-cache hits do not increment the counter). No per-address
 /// spans and no domain/IP/prefix tags anywhere.
 /// </summary>
 public static class CustomRouteRefreshTelemetry
 {
-    private static readonly Counter<long> s_lookups = IranDirectTelemetry
+    private static readonly Counter<long> s_lookups = PathVeerTelemetry
         .Meter.CreateCounter<long>(
-            IranDirectMetricNames.DnsLookups,
+            PathVeerMetricNames.DnsLookups,
             unit: "{lookup}",
             description: "Real DNS lookup attempts during custom-route refresh.");
 
     private static readonly Histogram<double> s_lookupDuration =
-        IranDirectTelemetry.Meter.CreateHistogram<double>(
-            IranDirectMetricNames.DnsLookupDuration,
+        PathVeerTelemetry.Meter.CreateHistogram<double>(
+            PathVeerMetricNames.DnsLookupDuration,
             unit: "ms",
             description: "Elapsed time of one real DNS lookup.");
 
     internal static CustomRouteRefreshScope StartRefresh(
         TelemetryTrigger trigger = TelemetryTrigger.Unknown)
     {
-        Activity? activity = IranDirectTelemetry.ActivitySource.StartActivity(
-            IranDirectActivityNames.CustomRouteRefresh,
+        Activity? activity = PathVeerTelemetry.ActivitySource.StartActivity(
+            PathVeerActivityNames.CustomRouteRefresh,
             ActivityKind.Internal);
 
         activity?.SetTag(
-            IranDirectTagNames.Operation,
-            IranDirectTagValues.OperationCustomRouteRefresh);
+            PathVeerTagNames.Operation,
+            PathVeerTagValues.OperationCustomRouteRefresh);
 
         return new CustomRouteRefreshScope(activity);
     }
@@ -48,22 +48,22 @@ public static class CustomRouteRefreshTelemetry
         if (failureCategory is not null)
         {
             s_lookups.Add(1, new KeyValuePair<string, object?>(
-                IranDirectTagNames.Outcome, outcome));
+                PathVeerTagNames.Outcome, outcome));
             s_lookupDuration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome),
+                    PathVeerTagNames.Outcome, outcome),
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.FailureCategory, failureCategory));
+                    PathVeerTagNames.FailureCategory, failureCategory));
         }
         else
         {
             s_lookups.Add(1, new KeyValuePair<string, object?>(
-                IranDirectTagNames.Outcome, outcome));
+                PathVeerTagNames.Outcome, outcome));
             s_lookupDuration.Record(
                 elapsedMs,
                 new KeyValuePair<string, object?>(
-                    IranDirectTagNames.Outcome, outcome));
+                    PathVeerTagNames.Outcome, outcome));
         }
     }
 
@@ -82,31 +82,31 @@ public static class CustomRouteRefreshTelemetry
 
         public DnsChildScope StartCacheRead() =>
             StartChild(
-                IranDirectActivityNames.DnsCacheRead,
-                IranDirectTagValues.OperationDnsCacheRead,
-                IranDirectTagValues.SourceCache);
+                PathVeerActivityNames.DnsCacheRead,
+                PathVeerTagValues.OperationDnsCacheRead,
+                PathVeerTagValues.SourceCache);
 
         public DnsChildScope StartResolve() =>
             StartChild(
-                IranDirectActivityNames.DnsResolve,
-                IranDirectTagValues.OperationDnsResolve,
-                IranDirectTagValues.SourceCustom);
+                PathVeerActivityNames.DnsResolve,
+                PathVeerTagValues.OperationDnsResolve,
+                PathVeerTagValues.SourceCustom);
 
         public DnsChildScope StartCacheWrite() =>
             StartChild(
-                IranDirectActivityNames.DnsCacheWrite,
-                IranDirectTagValues.OperationDnsCacheWrite,
-                IranDirectTagValues.SourceCache);
+                PathVeerActivityNames.DnsCacheWrite,
+                PathVeerTagValues.OperationDnsCacheWrite,
+                PathVeerTagValues.SourceCache);
 
         internal DnsChildScope StartChild(
             string name,
             string operation,
             string source)
         {
-            Activity? child = IranDirectTelemetry.ActivitySource
+            Activity? child = PathVeerTelemetry.ActivitySource
                 .StartActivity(name, ActivityKind.Internal);
-            child?.SetTag(IranDirectTagNames.Operation, operation);
-            child?.SetTag(IranDirectTagNames.Source, source);
+            child?.SetTag(PathVeerTagNames.Operation, operation);
+            child?.SetTag(PathVeerTagNames.Source, source);
             return new DnsChildScope(child);
         }
 
@@ -116,7 +116,7 @@ public static class CustomRouteRefreshTelemetry
                 allSucceeded
                     ? TelemetryOutcome.Success
                     : TelemetryOutcome.Failure,
-                allSucceeded ? null : IranDirectTagValues.FailureDns);
+                allSucceeded ? null : PathVeerTagValues.FailureDns);
         }
 
         public void CompleteFailure(Exception exception)
@@ -148,14 +148,14 @@ public static class CustomRouteRefreshTelemetry
             if (_activity is not null)
             {
                 _activity.SetTag(
-                    IranDirectTagNames.Outcome, outcomeString);
+                    PathVeerTagNames.Outcome, outcomeString);
                 if (outcome == TelemetryOutcome.Failure)
                 {
                     _activity.SetStatus(ActivityStatusCode.Error);
                     if (failureCategory is not null)
                     {
                         _activity.SetTag(
-                            IranDirectTagNames.FailureCategory,
+                            PathVeerTagNames.FailureCategory,
                             failureCategory);
                     }
                 }
@@ -193,7 +193,7 @@ public static class CustomRouteRefreshTelemetry
         public void SetCacheState(string cacheState)
         {
             _activity?.SetTag(
-                IranDirectTagNames.CacheState, cacheState);
+                PathVeerTagNames.CacheState, cacheState);
         }
 
         public void CompleteSuccess() =>
@@ -239,14 +239,14 @@ public static class CustomRouteRefreshTelemetry
             if (_activity is not null)
             {
                 _activity.SetTag(
-                    IranDirectTagNames.Outcome, outcomeString);
+                    PathVeerTagNames.Outcome, outcomeString);
                 if (outcome == TelemetryOutcome.Failure)
                 {
                     _activity.SetStatus(ActivityStatusCode.Error);
                     if (failureCategory is not null)
                     {
                         _activity.SetTag(
-                            IranDirectTagNames.FailureCategory,
+                            PathVeerTagNames.FailureCategory,
                             failureCategory);
                     }
                 }
@@ -274,8 +274,8 @@ public static class CustomRouteRefreshTelemetry
             }
 
             _activity?.SetTag(
-                IranDirectTagNames.Outcome,
-                IranDirectTagValues.OutcomeUnknown);
+                PathVeerTagNames.Outcome,
+                PathVeerTagValues.OutcomeUnknown);
             _activity?.Dispose();
         }
     }

@@ -1,9 +1,9 @@
-# Runbook: IranDirectPrefixChecksFailing
+# Runbook: PathVeerPrefixChecksFailing
 
-- **Alert:** `IranDirectPrefixChecksFailing`
+- **Alert:** `PathVeerPrefixChecksFailing`
 - **Severity:** warning
-- **Dashboard:** `irandirect-prefix-dns`
-- **Prometheus query:** `sum(rate(irandirect_prefix_checks_total{outcome!="success"}[30m])) / sum(rate(irandirect_prefix_checks_total[30m]))`
+- **Dashboard:** `pathveer-prefix-dns`
+- **Prometheus query:** `sum(rate(pathveer_prefix_checks_total{outcome!="success"}[30m])) / sum(rate(pathveer_prefix_checks_total[30m]))`
 
 ## What it means
 More than 20% of official prefix update checks failed over 30m. (The planned consecutive-failure gauge is not instrumented; this uses the check outcome rate.)
@@ -12,8 +12,8 @@ More than 20% of official prefix update checks failed over 30m. (The planned con
 The official prefix list may be stale or unreachable; desired-state checks against the prefix source can give wrong results.
 
 ## Dashboard
-Open the `irandirect-prefix-dns` dashboard in the IranDirect folder (Grafana).
-Prometheus query: `sum(rate(irandirect_prefix_checks_total{outcome!="success"}[30m])) / sum(rate(irandirect_prefix_checks_total[30m]))`
+Open the `pathveer-prefix-dns` dashboard in the PathVeer folder (Grafana).
+Prometheus query: `sum(rate(pathveer_prefix_checks_total{outcome!="success"}[30m])) / sum(rate(pathveer_prefix_checks_total[30m]))`
 
 ## Symptoms
 Prefix/DNS dashboard 'Prefix check rate (by outcome)' showing failure share.
@@ -40,7 +40,7 @@ Prefix-check outcome history, manual reachability result of the prefix source, r
 Prefix check failure ratio returns below 20%.
 
 ## Related alerts
-IranDirectDnsLookupFailureRatioHigh
+PathVeerDnsLookupFailureRatioHigh
 
 ## Ownership
 Service / Network

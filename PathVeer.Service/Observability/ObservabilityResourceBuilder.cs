@@ -5,7 +5,7 @@ namespace PathVeer.Service.Observability;
 
 /// <summary>
 /// Builds the bounded OpenTelemetry resource (identity metadata) for the
-/// IranDirect Service. Only non-sensitive, bounded attributes are attached:
+/// PathVeer Service. Only non-sensitive, bounded attributes are attached:
 /// <c>service.name</c>, <c>service.version</c>, and
 /// <c>deployment.environment.name</c>. No per-process instance identifier is
 /// generated (the privacy policy requires explicit approval for such
@@ -17,8 +17,8 @@ public static class ObservabilityResourceBuilder
     /// <summary>
     /// Creates the resource from bounded inputs. <paramref name="serviceName"/>
     /// and <paramref name="serviceVersion"/> are non-empty (serviceName
-    /// defaults to <c>IranDirect.Service</c>; serviceVersion is the Core
-    /// assembly version shared with <c>IranDirectTelemetry.Version</c>).
+    /// defaults to <c>PathVeer.Service</c>; serviceVersion is the Core
+    /// assembly version shared with <c>PathVeerTelemetry.Version</c>).
     /// </summary>
     public static Resource Create(
         string serviceName,
@@ -27,7 +27,7 @@ public static class ObservabilityResourceBuilder
     {
         if (string.IsNullOrWhiteSpace(serviceName))
         {
-            serviceName = "IranDirect.Service";
+            serviceName = "PathVeer.Service";
         }
 
         if (string.IsNullOrWhiteSpace(serviceVersion))

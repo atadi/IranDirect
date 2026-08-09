@@ -1,4 +1,4 @@
-<# IranDirect observability — backup script (Phase 33.5).
+<# PathVeer observability — backup script (Phase 33.5).
 #
 # Philosophy: configuration reproducibility first. Telemetry data (Prometheus
 # TSDB, Tempo blocks) is DISPOSABLE by default and is NOT backed up unless
@@ -15,7 +15,7 @@
 # ONLY when writing to an encrypted, access-controlled destination.
 #
 # Usage:
-#   .\backup.ps1 -Destination \\backup\irandirect-obs
+#   .\backup.ps1 -Destination \\backup\pathveer-obs
 #   .\backup.ps1 -Destination D:\backups -IncludeState
 #   .\backup.ps1 -Destination D:\backups -IncludeState -IncludeSecrets
 #>
@@ -30,7 +30,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ts   = (Get-Date -Format "yyyyMMdd-HHmmss")
-$archive = Join-Path $Destination "irandirect-obs-backup-$ts.tar.gz"
+$archive = Join-Path $Destination "pathveer-obs-backup-$ts.tar.gz"
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
 # Build an exclusion list for tar (Git-style patterns via --exclude).
@@ -78,10 +78,10 @@ try {
 }
 
 # Manifest + checksum.
-$manifest = Join-Path $Destination "irandirect-obs-backup-$ts.manifest.txt"
+$manifest = Join-Path $Destination "pathveer-obs-backup-$ts.manifest.txt"
 $sha = (Get-FileHash -Algorithm SHA256 $archive).Hash
 @"
-IranDirect observability backup
+PathVeer observability backup
 Timestamp : $ts
 Archive    : $(Split-Path $archive -Leaf)
 SHA256     : $sha

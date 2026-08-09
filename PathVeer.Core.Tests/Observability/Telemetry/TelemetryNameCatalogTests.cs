@@ -10,11 +10,11 @@ public sealed class TelemetryNameCatalogTests
     private static readonly IReadOnlyDictionary<string, string> ExpectedSpans =
         new Dictionary<string, string>
         {
-            ["RuntimeCycle"] = "IranDirect.RuntimeCycle",
-            ["PrefixUpdateCheck"] = "IranDirect.PrefixUpdateCheck",
-            ["CustomRouteRefresh"] = "IranDirect.CustomRouteRefresh",
-            ["IpcRequest"] = "IranDirect.IpcRequest",
-            ["SupportBundleExport"] = "IranDirect.SupportBundleExport",
+            ["RuntimeCycle"] = "PathVeer.RuntimeCycle",
+            ["PrefixUpdateCheck"] = "PathVeer.PrefixUpdateCheck",
+            ["CustomRouteRefresh"] = "PathVeer.CustomRouteRefresh",
+            ["IpcRequest"] = "PathVeer.IpcRequest",
+            ["SupportBundleExport"] = "PathVeer.SupportBundleExport",
             ["RuntimeObserve"] = "Runtime.Observe",
             ["RuntimeBuildDecision"] = "Runtime.BuildDecision",
             ["RuntimeBuildPreview"] = "Runtime.BuildPreview",
@@ -44,7 +44,7 @@ public sealed class TelemetryNameCatalogTests
     [Fact]
     public void EveryApprovedSpanName_ExactAndNoDuplicates()
     {
-        var type = typeof(IranDirectActivityNames);
+        var type = typeof(PathVeerActivityNames);
         var fields = type.GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(f => f.IsLiteral && !f.IsInitOnly).ToArray();
 
@@ -79,7 +79,7 @@ public sealed class TelemetryNameCatalogTests
     [Fact]
     public void MetricNames_ExactAndNoDuplicates()
     {
-        var type = typeof(IranDirectMetricNames);
+        var type = typeof(PathVeerMetricNames);
         var fields = type.GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(f => f.IsLiteral && !f.IsInitOnly).ToArray();
 
@@ -104,54 +104,54 @@ public sealed class TelemetryNameCatalogTests
     {
         foreach (var name in MetricNameSets().Values)
         {
-            Assert.StartsWith("irandirect.", name);
+            Assert.StartsWith("pathveer.", name);
             Assert.DoesNotContain("destination_prefix", name);
             Assert.DoesNotContain("gateway", name);
         }
 
-        Assert.EndsWith(".duration", IranDirectMetricNames.RuntimeCycleDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.RuntimeObserveDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.RuntimePlanningDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.RuntimeExecutionDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.RoutesSystemCallDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.PrefixCheckDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.DnsLookupDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.IpcRequestDuration);
-        Assert.EndsWith(".duration", IranDirectMetricNames.SupportBundleDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.RuntimeCycleDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.RuntimeObserveDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.RuntimePlanningDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.RuntimeExecutionDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.RoutesSystemCallDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.PrefixCheckDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.DnsLookupDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.IpcRequestDuration);
+        Assert.EndsWith(".duration", PathVeerMetricNames.SupportBundleDuration);
     }
 
     private static IReadOnlyDictionary<string, string> MetricNameSets() => new Dictionary<string, string>
     {
-        ["RuntimeCyclesStarted"] = "irandirect.runtime.cycles.started",
-        ["RuntimeCyclesCompleted"] = "irandirect.runtime.cycles.completed",
-        ["RuntimeCyclesFailed"] = "irandirect.runtime.cycles.failed",
-        ["RuntimeCyclesCancelled"] = "irandirect.runtime.cycles.cancelled",
-        ["RuntimeRepairsWithChanges"] = "irandirect.runtime.repairs.with_changes",
-        ["RuntimeRepairsNoChanges"] = "irandirect.runtime.repairs.no_changes",
-        ["RoutesOperationsRequested"] = "irandirect.routes.operations.requested",
-        ["RoutesOperationsSucceeded"] = "irandirect.routes.operations.succeeded",
-        ["RoutesOperationsFailed"] = "irandirect.routes.operations.failed",
-        ["PrefixChecks"] = "irandirect.prefix.checks",
-        ["DnsLookups"] = "irandirect.dns.lookups",
-        ["IpcRequests"] = "irandirect.ipc.requests",
-        ["SupportBundlesExported"] = "irandirect.support.bundles.exported",
-        ["SupportBundlesFailed"] = "irandirect.support.bundles.failed",
-        ["RuntimeCycleDuration"] = "irandirect.runtime.cycle.duration",
-        ["RuntimeObserveDuration"] = "irandirect.runtime.observe.duration",
-        ["RuntimePlanningDuration"] = "irandirect.runtime.planning.duration",
-        ["RuntimeExecutionDuration"] = "irandirect.runtime.execution.duration",
-        ["RoutesSystemCallDuration"] = "irandirect.routes.system_call.duration",
-        ["PrefixCheckDuration"] = "irandirect.prefix.check.duration",
-        ["DnsLookupDuration"] = "irandirect.dns.lookup.duration",
-        ["IpcRequestDuration"] = "irandirect.ipc.request.duration",
-        ["SupportBundleDuration"] = "irandirect.support.bundle.duration",
-        ["RuntimeOperationsPerCycle"] = "irandirect.runtime.operations.per_cycle",
-        ["RuntimeChangedRoutes"] = "irandirect.runtime.changed_routes",
-        ["ServiceEnabled"] = "irandirect.service.enabled",
-        ["RuntimeWorkerActive"] = "irandirect.runtime.worker.active",
-        ["PrefixKnownCount"] = "irandirect.prefix.known_count",
-        ["RoutesInventoryCount"] = "irandirect.routes.inventory_count",
-        ["DnsCacheRecordCount"] = "irandirect.dns.cache_record_count",
-        ["PrefixConsecutiveFailures"] = "irandirect.prefix.consecutive_failures",
+        ["RuntimeCyclesStarted"] = "pathveer.runtime.cycles.started",
+        ["RuntimeCyclesCompleted"] = "pathveer.runtime.cycles.completed",
+        ["RuntimeCyclesFailed"] = "pathveer.runtime.cycles.failed",
+        ["RuntimeCyclesCancelled"] = "pathveer.runtime.cycles.cancelled",
+        ["RuntimeRepairsWithChanges"] = "pathveer.runtime.repairs.with_changes",
+        ["RuntimeRepairsNoChanges"] = "pathveer.runtime.repairs.no_changes",
+        ["RoutesOperationsRequested"] = "pathveer.routes.operations.requested",
+        ["RoutesOperationsSucceeded"] = "pathveer.routes.operations.succeeded",
+        ["RoutesOperationsFailed"] = "pathveer.routes.operations.failed",
+        ["PrefixChecks"] = "pathveer.prefix.checks",
+        ["DnsLookups"] = "pathveer.dns.lookups",
+        ["IpcRequests"] = "pathveer.ipc.requests",
+        ["SupportBundlesExported"] = "pathveer.support.bundles.exported",
+        ["SupportBundlesFailed"] = "pathveer.support.bundles.failed",
+        ["RuntimeCycleDuration"] = "pathveer.runtime.cycle.duration",
+        ["RuntimeObserveDuration"] = "pathveer.runtime.observe.duration",
+        ["RuntimePlanningDuration"] = "pathveer.runtime.planning.duration",
+        ["RuntimeExecutionDuration"] = "pathveer.runtime.execution.duration",
+        ["RoutesSystemCallDuration"] = "pathveer.routes.system_call.duration",
+        ["PrefixCheckDuration"] = "pathveer.prefix.check.duration",
+        ["DnsLookupDuration"] = "pathveer.dns.lookup.duration",
+        ["IpcRequestDuration"] = "pathveer.ipc.request.duration",
+        ["SupportBundleDuration"] = "pathveer.support.bundle.duration",
+        ["RuntimeOperationsPerCycle"] = "pathveer.runtime.operations.per_cycle",
+        ["RuntimeChangedRoutes"] = "pathveer.runtime.changed_routes",
+        ["ServiceEnabled"] = "pathveer.service.enabled",
+        ["RuntimeWorkerActive"] = "pathveer.runtime.worker.active",
+        ["PrefixKnownCount"] = "pathveer.prefix.known_count",
+        ["RoutesInventoryCount"] = "pathveer.routes.inventory_count",
+        ["DnsCacheRecordCount"] = "pathveer.dns.cache_record_count",
+        ["PrefixConsecutiveFailures"] = "pathveer.prefix.consecutive_failures",
     };
 }

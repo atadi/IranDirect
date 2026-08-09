@@ -1,4 +1,4 @@
-# TLS certificates — IranDirect observability (Phase 33.5)
+# TLS certificates — PathVeer observability (Phase 33.5)
 
 This directory holds **certificate material** for the production observability
 stack. It is a documentation + tooling directory; **no certificate, key, CA, or
@@ -22,7 +22,7 @@ repo.
 
 ## What TLS protects
 
-- **IranDirect.Service → Collector OTLP** (gRPC 4317 / HTTP 4318) is encrypted
+- **PathVeer.Service → Collector OTLP** (gRPC 4317 / HTTP 4318) is encrypted
   with one-way TLS: the Collector presents a server certificate; the Service
   trusts the issuing CA (placed in the Windows host trust store, or the Service
   is run with the CA available to its TLS validation). See
@@ -40,7 +40,7 @@ handshake locally (Phase 33.5 live verification).
 
 For production, obtain certificates from your organization's CA or a public CA:
 
-- **Server cert** for the Collector's FQDN (the name IranDirect.Service connects
+- **Server cert** for the Collector's FQDN (the name PathVeer.Service connects
   to), with a SAN covering that hostname (and any aliases behind a reverse
   proxy).
 - **Key size** ≥ 2048-bit RSA or an equivalent EC curve; **SHA-256+** signature.

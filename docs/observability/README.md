@@ -1,6 +1,6 @@
 # Observability
 
-Telemetry architecture and instrumentation plan for IranDirect.
+Telemetry architecture and instrumentation plan for PathVeer.
 
 - [Phase 32.1 observability architecture and telemetry baseline](phase-32.1-observability-architecture.md)
   — mechanism inventory, workflow maps, ActivitySource/metrics contracts,
@@ -10,7 +10,7 @@ Telemetry architecture and instrumentation plan for IranDirect.
   values, enum + failure-category mappers, tag validator, 90 contract tests.
 - [Phase 32.3 runtime cycle tracing and metrics](phase-32.3-runtime-cycle-telemetry.md)
   — instruments the top-level runtime reconciliation cycle only: one root
-  `IranDirect.RuntimeCycle` activity, four counters, one duration histogram,
+  `PathVeer.RuntimeCycle` activity, four counters, one duration histogram,
   bounded outcome/trigger/failure-category tags; controller boundary, no child
   spans, no OTel packages, profiler-independent.
 - [Phase 32.4 runtime planning telemetry](phase-32.4-runtime-planning-telemetry.md)
@@ -30,24 +30,24 @@ Telemetry architecture and instrumentation plan for IranDirect.
   counters + one system-call duration histogram; bounded operation/change-kind/
   route-kind tags; no per-route spans or metrics, no OpenTelemetry packages.
 - [Phase 32.7 prefix update and DNS telemetry](phase-32.7-prefix-and-dns-telemetry.md)
-  — instruments the official prefix update check (`IranDirect.PrefixUpdateCheck`,
+  — instruments the official prefix update check (`PathVeer.PrefixUpdateCheck`,
   HEAD→optional GET→optional Compare) and the custom-route DNS refresh
-  (`IranDirect.CustomRouteRefresh`, cache-read→resolve→cache-write); approved
+  (`PathVeer.CustomRouteRefresh`, cache-read→resolve→cache-write); approved
   prefix + DNS counters and duration histograms; bounded operation/source/outcome/
   cache-state/trigger/failure-category tags; no per-prefix or per-address spans,
   no URLs/domains/IPs attached, no OpenTelemetry packages.
 - [Phase 32.8 IPC and support export telemetry](phase-32.8-ipc-and-support-export-telemetry.md)
-  — instruments the named-pipe IPC request/response (`IranDirect.IpcRequest` root
+  — instruments the named-pipe IPC request/response (`PathVeer.IpcRequest` root
   + `Ipc.Connect`/`Ipc.Send`/`Ipc.Receive` children, plus an independent
   `Ipc.Dispatch` server root) and the support snapshot/bundle export
-  (`IranDirect.SupportBundleExport` shared root + `Support.CaptureSnapshot`/
+  (`PathVeer.SupportBundleExport` shared root + `Support.CaptureSnapshot`/
   `Support.Serialize`/`Support.WriteJson`/`Support.CreateZip` children); IPC and
   support counters + duration histograms; bounded operation/ipc_command/outcome/
   failure-category tags; no duplicate roots when a bundle drives the snapshot
   exporter, no payload/path/identity attachments, no OpenTelemetry packages.
 - [Phase 32.9 OpenTelemetry hosting and export configuration](phase-32.9-opentelemetry-hosting.md)
   — adds **optional**, disabled-by-default OpenTelemetry hosting inside
-  `IranDirect.Service`: tracing/metrics registration for the existing Core
+  `PathVeer.Service`: tracing/metrics registration for the existing Core
   ActivitySource/Meter, optional OTLP and Development-only console export, bounded
   resource attributes, options validation, failure/shutdown isolation. No new
   workflow instrumentation; Core contracts unchanged; Core remains BCL-only.
@@ -71,15 +71,15 @@ Telemetry architecture and instrumentation plan for IranDirect.
   only — no application telemetry changes. Lives in
   [`deployment/observability/`](../../deployment/observability/).
 - [Phase 33.3 dashboards and recording rules](phase-33.3-dashboards-and-recording-rules.md)
-  — adds version-controlled Grafana dashboards (five, in the `IranDirect`
-  folder) and a Prometheus recording-rule group (`irandirect_recording`) for the
+  — adds version-controlled Grafana dashboards (five, in the `PathVeer`
+  folder) and a Prometheus recording-rule group (`pathveer_recording`) for the
   telemetry the stack already receives. Documents the metric-name→Prometheus
   translation, label inventory, which contract metrics are not yet emitted, the
   validation results, and the trace-link limitation. No application changes
   beyond a collector pipeline-output toggle.
 - [Phase 33.4 alerts and runbooks](phase-33.4-alerts-and-runbooks.md)
   — adds Alertmanager as the fifth stack service, fifteen Prometheus alert rules
-  (`irandirect_alerts`), a no-op default receiver, three inhibition rules, a
+  (`pathveer_alerts`), a no-op default receiver, three inhibition rules, a
   severity/grouping/routing model, one runbook per alert under
   `deployment/observability/runbooks/`, and dashboard alert/runbook links.
   Documents the alert inventory, thresholds, known coverage gaps, and the

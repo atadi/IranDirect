@@ -6,7 +6,7 @@ namespace PathVeer.Core.Observability.Telemetry;
 /// so architectural tests can assert telemetry contracts never leak
 /// sensitive, high-cardinality fields.
 /// </summary>
-public static class IranDirectTagNames
+public static class PathVeerTagNames
 {
     // Approved, bounded tag names
     public const string Operation = "operation";

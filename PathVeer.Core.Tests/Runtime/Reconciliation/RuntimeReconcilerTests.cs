@@ -265,15 +265,15 @@ public sealed class RuntimeReconcilerTests
         await reconciler.ReconcileAsync(snapshot);
 
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Assert.NotNull(planning);
         Assert.Equal(ActivityKind.Internal, planning!.Kind);
         Assert.Equal(
-            IranDirectTagValues.OperationPlanChanges,
-            planning.Tags.Single(t => t.Key == IranDirectTagNames.Operation).Value);
+            PathVeerTagValues.OperationPlanChanges,
+            planning.Tags.Single(t => t.Key == PathVeerTagNames.Operation).Value);
         Assert.Equal(
-            IranDirectTagValues.Success,
-            planning.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Success,
+            planning.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Ok, planning.Status);
     }
 
@@ -293,11 +293,11 @@ public sealed class RuntimeReconcilerTests
         await reconciler.ReconcileAsync(snapshot);
 
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Assert.NotNull(planning);
         Assert.Equal(
-            IranDirectTagValues.NoChange,
-            planning!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.NoChange,
+            planning!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Ok, planning.Status);
     }
 
@@ -319,15 +319,15 @@ public sealed class RuntimeReconcilerTests
         Assert.Equal(RuntimeReconciliationStatus.Failed, result.Status);
 
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         // Ownership-load failure occurs before the planner invocation, so no
         // planning activity is emitted. Verify no planning activity leaked a
         // success/no-change outcome.
         if (planning is not null)
         {
             Assert.Equal(
-                IranDirectTagValues.Failure,
-                planning.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+                PathVeerTagValues.Failure,
+                planning.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         }
     }
 
@@ -353,15 +353,15 @@ public sealed class RuntimeReconcilerTests
         Assert.Equal(RuntimeReconciliationStatus.Failed, result.Status);
 
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Assert.NotNull(planning);
         Assert.Equal(
-            IranDirectTagValues.Failure,
-            planning!.Tags.Single(t => t.Key == IranDirectTagNames.Outcome).Value);
+            PathVeerTagValues.Failure,
+            planning!.Tags.Single(t => t.Key == PathVeerTagNames.Outcome).Value);
         Assert.Equal(ActivityStatusCode.Error, planning.Status);
         Assert.Equal(
-            IranDirectTagValues.FailureIo,
-            planning.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+            PathVeerTagValues.FailureIo,
+            planning.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory).Value);
         foreach (var tag in planning.Tags)
             Assert.DoesNotContain("disk", tag.Value?.ToString());
     }
@@ -384,11 +384,11 @@ public sealed class RuntimeReconcilerTests
         await reconciler.ReconcileAsync(snapshot);
 
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Assert.NotNull(planning);
         Assert.Equal(
-            IranDirectTagValues.FailureRouting,
-            planning!.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+            PathVeerTagValues.FailureRouting,
+            planning!.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -409,11 +409,11 @@ public sealed class RuntimeReconcilerTests
         await reconciler.ReconcileAsync(snapshot);
 
         Activity? planning = stopped.SingleOrDefault(a =>
-            a.OperationName == IranDirectActivityNames.RuntimePlanChanges);
+            a.OperationName == PathVeerActivityNames.RuntimePlanChanges);
         Assert.NotNull(planning);
         Assert.Equal(
-            IranDirectTagValues.FailureUnknown,
-            planning!.Tags.Single(t => t.Key == IranDirectTagNames.FailureCategory).Value);
+            PathVeerTagValues.FailureUnknown,
+            planning!.Tags.Single(t => t.Key == PathVeerTagNames.FailureCategory).Value);
     }
 
     [Fact]
@@ -486,7 +486,7 @@ public sealed class RuntimeReconcilerTests
     {
         var listener = new ActivityListener
         {
-            ShouldListenTo = s => s.Name == IranDirectTelemetry.SourceName,
+            ShouldListenTo = s => s.Name == PathVeerTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = a => started.Enqueue(a),
@@ -503,15 +503,15 @@ public sealed class RuntimeReconcilerTests
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == IranDirectTelemetry.SourceName)
+            if (instrument.Meter.Name == PathVeerTelemetry.SourceName)
                 meterListener.EnableMeasurementEvents(instrument);
         };
         listener.SetMeasurementEventCallback<double>(
             (instrument, value, tags, _) =>
             {
-                if (instrument.Name == IranDirectMetricNames.RuntimePlanningDuration)
+                if (instrument.Name == PathVeerMetricNames.RuntimePlanningDuration)
                     durations.Enqueue(value);
-                else if (instrument.Name == IranDirectMetricNames.RuntimeChangedRoutes)
+                else if (instrument.Name == PathVeerMetricNames.RuntimeChangedRoutes)
                     changed.Enqueue(value);
             });
         listener.Start();

@@ -1,10 +1,10 @@
-# IranDirect Prometheus recording rules - Phase 33.3.
+# PathVeer Prometheus recording rules - Phase 33.3.
 #
 # Every rule below references a metric name and label set VERIFIED against the
 # live Phase 33.2 stack (see docs/observability/phase-33.3-*.md s2/s3). No
 # metric name or label here is guessed.
 #
-# Naming convention:  irandirect:<subject>_<aggregation><window>
+# Naming convention:  pathveer:<subject>_<aggregation><window>
 # Level separator ':' marks these as recorded (not raw) series, per Prometheus
 # convention.
 #
@@ -27,7 +27,7 @@
 # record MILLISECONDS. Dashboards must use unit "ms".
 
 groups:
-  - name: irandirect_recording
+  - name: pathveer_recording
     # Matches the global evaluation_interval (15s) doubled: recording rules are
     # cheaper to evaluate less often, and 30s still comfortably feeds a 5m rate.
     interval: 30s
@@ -38,31 +38,31 @@ groups:
       # ------------------------------------------------------------------
 
       # Cycle start rate. Labels: operation, trigger.
-      - record: irandirect:runtime_cycle_rate5m
+      - record: pathveer:runtime_cycle_rate5m
         expr: |
           sum by (deployment_environment_name, service_name, trigger) (
-            rate(irandirect_runtime_cycles_started_total[5m])
+            rate(pathveer_runtime_cycles_started_total[5m])
           )
 
       # Cycle completion rate, split by terminal outcome (success/no_change).
-      - record: irandirect:runtime_cycle_completed_rate5m
+      - record: pathveer:runtime_cycle_completed_rate5m
         expr: |
           sum by (deployment_environment_name, service_name, outcome) (
-            rate(irandirect_runtime_cycles_completed_total[5m])
+            rate(pathveer_runtime_cycles_completed_total[5m])
           )
 
       # Cancellation rate. Emitted on service shutdown / caller cancellation.
-      - record: irandirect:runtime_cycle_cancelled_rate5m
+      - record: pathveer:runtime_cycle_cancelled_rate5m
         expr: |
           sum by (deployment_environment_name, service_name) (
-            rate(irandirect_runtime_cycles_cancelled_total[5m])
+            rate(pathveer_runtime_cycles_cancelled_total[5m])
           )
 
       # Total completion rate across outcomes - denominator for the ratios.
-      - record: irandirect:runtime_cycle_completed_rate5m:total
+      - record: pathveer:runtime_cycle_completed_rate5m:total
         expr: |
           sum by (deployment_environment_name, service_name) (
-            rate(irandirect_runtime_cycles_completed_total[5m])
+            rate(pathveer_runtime_cycles_completed_total[5m])
           )
 
       # Success ratio: completed cycles that did real work OR confirmed
@@ -70,42 +70,42 @@ groups:
       #
       # Division guard: `> 0` on the denominator makes the rule record NO
       # sample rather than NaN/+Inf when the Service is idle or stopped.
-      - record: irandirect:runtime_cycle_success_ratio5m
+      - record: pathveer:runtime_cycle_success_ratio5m
         expr: |
           sum by (deployment_environment_name, service_name) (
-            rate(irandirect_runtime_cycles_completed_total[5m])
+            rate(pathveer_runtime_cycles_completed_total[5m])
           )
           /
           (
             sum by (deployment_environment_name, service_name) (
-              rate(irandirect_runtime_cycles_started_total[5m])
+              rate(pathveer_runtime_cycles_started_total[5m])
             ) > 0
           )
 
       # Cancellation ratio over started cycles.
-      - record: irandirect:runtime_cycle_cancelled_ratio5m
+      - record: pathveer:runtime_cycle_cancelled_ratio5m
         expr: |
           sum by (deployment_environment_name, service_name) (
-            rate(irandirect_runtime_cycles_cancelled_total[5m])
+            rate(pathveer_runtime_cycles_cancelled_total[5m])
           )
           /
           (
             sum by (deployment_environment_name, service_name) (
-              rate(irandirect_runtime_cycles_started_total[5m])
+              rate(pathveer_runtime_cycles_started_total[5m])
             ) > 0
           )
 
       # No-change ratio: share of completed cycles that found nothing to do.
       # A healthy steady-state service sits near 1.
-      - record: irandirect:runtime_cycle_no_change_ratio5m
+      - record: pathveer:runtime_cycle_no_change_ratio5m
         expr: |
           sum by (deployment_environment_name, service_name) (
-            rate(irandirect_runtime_cycles_completed_total{outcome="no_change"}[5m])
+            rate(pathveer_runtime_cycles_completed_total{outcome="no_change"}[5m])
           )
           /
           (
             sum by (deployment_environment_name, service_name) (
-              rate(irandirect_runtime_cycles_completed_total[5m])
+              rate(pathveer_runtime_cycles_completed_total[5m])
             ) > 0
           )
 
@@ -116,72 +116,72 @@ groups:
       # the grouping or the quantile is meaningless.
       # ------------------------------------------------------------------
 
-      - record: irandirect:runtime_cycle_duration_p50_5m
+      - record: pathveer:runtime_cycle_duration_p50_5m
         expr: |
           histogram_quantile(
             0.50,
             sum by (le, deployment_environment_name, service_name) (
-              rate(irandirect_runtime_cycle_duration_milliseconds_bucket[5m])
+              rate(pathveer_runtime_cycle_duration_milliseconds_bucket[5m])
             )
           )
 
-      - record: irandirect:runtime_cycle_duration_p95_5m
+      - record: pathveer:runtime_cycle_duration_p95_5m
         expr: |
           histogram_quantile(
             0.95,
             sum by (le, deployment_environment_name, service_name) (
-              rate(irandirect_runtime_cycle_duration_milliseconds_bucket[5m])
+              rate(pathveer_runtime_cycle_duration_milliseconds_bucket[5m])
             )
           )
 
-      - record: irandirect:runtime_cycle_duration_p99_5m
+      - record: pathveer:runtime_cycle_duration_p99_5m
         expr: |
           histogram_quantile(
             0.99,
             sum by (le, deployment_environment_name, service_name) (
-              rate(irandirect_runtime_cycle_duration_milliseconds_bucket[5m])
+              rate(pathveer_runtime_cycle_duration_milliseconds_bucket[5m])
             )
           )
 
       # Mean cycle duration. sum/count, never an average of buckets.
-      - record: irandirect:runtime_cycle_duration_mean5m
+      - record: pathveer:runtime_cycle_duration_mean5m
         expr: |
           sum by (deployment_environment_name, service_name) (
-            rate(irandirect_runtime_cycle_duration_milliseconds_sum[5m])
+            rate(pathveer_runtime_cycle_duration_milliseconds_sum[5m])
           )
           /
           (
             sum by (deployment_environment_name, service_name) (
-              rate(irandirect_runtime_cycle_duration_milliseconds_count[5m])
+              rate(pathveer_runtime_cycle_duration_milliseconds_count[5m])
             ) > 0
           )
 
-      - record: irandirect:runtime_planning_duration_p95_5m
+      - record: pathveer:runtime_planning_duration_p95_5m
         expr: |
           histogram_quantile(
             0.95,
             sum by (le, deployment_environment_name, service_name) (
-              rate(irandirect_runtime_planning_duration_milliseconds_bucket[5m])
+              rate(pathveer_runtime_planning_duration_milliseconds_bucket[5m])
             )
           )
 
-      - record: irandirect:runtime_execution_duration_p95_5m
+      - record: pathveer:runtime_execution_duration_p95_5m
         expr: |
           histogram_quantile(
             0.95,
             sum by (le, deployment_environment_name, service_name) (
-              rate(irandirect_runtime_execution_duration_milliseconds_bucket[5m])
+              rate(pathveer_runtime_execution_duration_milliseconds_bucket[5m])
             )
           )
 
       # Route system-call latency, kept split by operation: enumerate / create
       # / delete have materially different cost profiles.
-      - record: irandirect:routes_system_call_duration_p95_5m
+      - record: pathveer:routes_system_call_duration_p95_5m
         expr: |
           histogram_quantile(
             0.95,
             sum by (le, deployment_environment_name, service_name, operation) (
-              rate(irandirect_routes_system_call_duration_milliseconds_bucket[5m])
+              rate(pathveer_routes_system_call_duration_milliseconds_bucket[5m])
             )
           )
 
@@ -189,68 +189,68 @@ groups:
       # Work-shape distributions (counts, not durations)
       # ------------------------------------------------------------------
 
-      - record: irandirect:runtime_changed_routes_p95_5m
+      - record: pathveer:runtime_changed_routes_p95_5m
         expr: |
           histogram_quantile(
             0.95,
             sum by (le, deployment_environment_name, service_name) (
-              rate(irandirect_runtime_changed_routes_bucket[5m])
+              rate(pathveer_runtime_changed_routes_bucket[5m])
             )
           )
 
-      - record: irandirect:runtime_operations_per_cycle_p95_5m
+      - record: pathveer:runtime_operations_per_cycle_p95_5m
         expr: |
           histogram_quantile(
             0.95,
             sum by (le, deployment_environment_name, service_name) (
-              rate(irandirect_runtime_operations_per_cycle_bucket[5m])
+              rate(pathveer_runtime_operations_per_cycle_bucket[5m])
             )
           )
 
       # ------------------------------------------------------------------
       # Route operation reliability
       #
-      # NOTE: irandirect_routes_operations_failed_total is instrumented but has
+      # NOTE: pathveer_routes_operations_failed_total is instrumented but has
       # never been observed (no failing system call in the sampled window), so
       # the failure ratio is expressed against requested-minus-succeeded ONLY
       # via the succeeded ratio below. A dedicated failure-ratio rule is
       # intentionally omitted until the failed counter is observed live.
       # ------------------------------------------------------------------
 
-      - record: irandirect:routes_operations_requested_rate5m
+      - record: pathveer:routes_operations_requested_rate5m
         expr: |
           sum by (deployment_environment_name, service_name, operation) (
-            rate(irandirect_routes_operations_requested_total[5m])
+            rate(pathveer_routes_operations_requested_total[5m])
           )
 
-      - record: irandirect:routes_operations_succeeded_rate5m
+      - record: pathveer:routes_operations_succeeded_rate5m
         expr: |
           sum by (deployment_environment_name, service_name, operation) (
-            rate(irandirect_routes_operations_succeeded_total[5m])
+            rate(pathveer_routes_operations_succeeded_total[5m])
           )
 
       # Success ratio per operation. Guarded denominator.
-      - record: irandirect:routes_operation_success_ratio5m
+      - record: pathveer:routes_operation_success_ratio5m
         expr: |
           sum by (deployment_environment_name, service_name, operation) (
-            rate(irandirect_routes_operations_succeeded_total[5m])
+            rate(pathveer_routes_operations_succeeded_total[5m])
           )
           /
           (
             sum by (deployment_environment_name, service_name, operation) (
-              rate(irandirect_routes_operations_requested_total[5m])
+              rate(pathveer_routes_operations_requested_total[5m])
             ) > 0
           )
 
       # Aggregate (all-operation) success ratio for the overview stat panel.
-      - record: irandirect:routes_operation_success_ratio5m:total
+      - record: pathveer:routes_operation_success_ratio5m:total
         expr: |
           sum by (deployment_environment_name, service_name) (
-            rate(irandirect_routes_operations_succeeded_total[5m])
+            rate(pathveer_routes_operations_succeeded_total[5m])
           )
           /
           (
             sum by (deployment_environment_name, service_name) (
-              rate(irandirect_routes_operations_requested_total[5m])
+              rate(pathveer_routes_operations_requested_total[5m])
             ) > 0
           )

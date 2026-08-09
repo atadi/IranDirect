@@ -1,4 +1,4 @@
-# OpenTelemetry Collector Contrib configuration - IranDirect Phase 33.2.
+# OpenTelemetry Collector Contrib configuration - PathVeer Phase 33.2.
 #
 # Implements Phase 33.1 s6 exactly. The collector is the only OTLP endpoint
 # the application talks to. It performs NO attribute mutation, NO transforms
@@ -33,7 +33,7 @@ processors:
   resource:
     attributes:
       - key: service.name
-        value: IranDirect.Service
+        value: PathVeer.Service
         action: insert
       - key: deployment.environment.name
         value: development
