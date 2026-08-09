@@ -165,12 +165,21 @@ $zipHash = Get-Sha256 $zipPath
 "$zipHash  $ZipName" | Set-Content -Path (Join-Path $ArchReleaseRoot "$ZipName.sha256") -Encoding ASCII
 $checksums.Add("$zipHash  $ZipName")
 
-# Hash every file in the release for completeness.
+# Hash every remaining local file in the release (recursive), excluding the
+# .sha256 sidecars we just wrote and the two primary artifacts already added
+# above. Relative paths use Path.GetRelativePath so slash direction cannot
+# corrupt them. Deduped for a clean manifest.
+$excludeNames = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]@($SetupExeName, $ZipName),
+    [System.StringComparer]::OrdinalIgnoreCase)
+
 Get-ChildItem -Path $ArchReleaseRoot -Recurse -File |
+    Where-Object { $_.Extension -ne '.sha256' -and -not $excludeNames.Contains($_.Name) } |
     Sort-Object FullName |
     ForEach-Object {
-        $rel = $_.FullName.Substring($ArchReleaseRoot.Length + 1)
-        $checksums.Add("$(Get-Sha256 $_.FullName)  $rel")
+        $rel = [System.IO.Path]::GetRelativePath($ArchReleaseRoot, $_.FullName)
+        $entry = "$(Get-Sha256 $_.FullName)  $rel"
+        if (-not $checksums.Contains($entry)) { $checksums.Add($entry) }
     }
 
 Set-Content -Path (Join-Path $ArchReleaseRoot 'checksums.txt') -Value $checksums -Encoding ASCII
