@@ -29,10 +29,22 @@ if (-not $StateRoot) { $StateRoot = Join-Path $env:ProgramData 'PathVeer' }
 $svc = Get-CimInstance Win32_Service -Filter "Name='PathVeer'" -ErrorAction SilentlyContinue
 $cliOnPath = @($env:Path -split ';' | Where-Object { $_ -and (Test-Path (Join-Path $_ 'PathVeer.Cli.exe')) })
 $tray = Get-ChildItem "$env:ProgramFiles\PathVeer" -Recurse -Filter PathVeer.Tray.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-$startMenu = @(Get-ChildItem "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter *.lnk -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match 'PathVeer' })
-$appEntry = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
-    Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -eq 'PathVeer' } | Select-Object -First 1
+$startMenu = @()
+try {
+    $startMenu = @(Get-ChildItem "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter *.lnk -ErrorAction SilentlyContinue |
+        Where-Object { $null -ne $_ -and $_.PSObject.Properties['Name'] -and $_.Name -match 'PathVeer' })
+} catch { }
+
+$appEntry = $null
+try {
+    $uninstallKeys = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
+    foreach ($k in $uninstallKeys) {
+        if ($null -ne $k -and $k.PSObject.Properties['DisplayName'] -and $k.DisplayName -eq 'PathVeer') {
+            $appEntry = $k
+            break
+        }
+    }
+} catch { }
 
 $report = [ordered]@{
     capturedUtc        = (Get-Date).ToUniversalTime().ToString('o')
@@ -42,7 +54,7 @@ $report = [ordered]@{
     cliPathEntries     = $cliOnPath.Count
     cliPathSingleEntry = ($cliOnPath.Count -eq 1)
     trayPresent        = ($null -ne $tray)
-    startMenuShortcuts = @($startMenu.Name)
+    startMenuShortcuts = @($startMenu | ForEach-Object { if ($_ -and $_.PSObject.Properties['Name']) { $_.Name } else { $null } } | Where-Object { $_ })
     appsAndFeatures    = if ($appEntry) { [ordered]@{ displayName = $appEntry.DisplayName; version = $appEntry.DisplayVersion; publisher = $appEntry.Publisher; uninstall = $appEntry.UninstallString } } else { $null }
     stateRootExists    = (Test-Path $StateRoot)
     pathClean          = ($cliOnPath.Count -le 1)
