@@ -44,6 +44,14 @@
     "<keyId>:<base64>" — 64-byte public (X|Y) OR 96-byte private (X|Y|D) blob
     used to verify in -VerifyOnly mode.
 
+.PARAMETER SignerCommand
+    Optional managed-signer command (KMS/HSM/Key Vault). When set, the canonical
+    payload bytes are piped to this command's STDIN and its STDOUT (raw base64
+    ES256 signature) is used as the manifest signature. This signs WITHOUT
+    exporting the private key into PATHVEER_META_SIGN_KEY. The command must emit
+    ONLY the base64 signature (no trailing newline/logging). When empty (default)
+    the local raw-key path (PATHVEER_META_SIGN_KEY, 96-byte X|Y|D) is used.
+
 .EXAMPLE
     .\tools\Sign-ReleaseManifest.ps1 -ManifestPath artifacts/releases/1.0.0/win-x64/release-manifest.json -KeyId pv-meta-2026 -FailIfUnavailable
 #>
@@ -62,7 +70,10 @@ param(
     [switch]$VerifyOnly,
 
     [Parameter(Mandatory = $false)]
-    [string]$TrustedKeyBase64 = ''
+    [string]$TrustedKeyBase64 = '',
+
+    [Parameter(Mandatory = $false)]
+    [string]$SignerCommand = ''
 )
 
 Set-StrictMode -Version Latest
@@ -171,31 +182,7 @@ if ($VerifyOnly) {
     exit 0
 }
 
-# --- Resolve signing key ----------------------------------------------------
-$rawKeyB64 = $env:PATHVEER_META_SIGN_KEY
-if ([string]::IsNullOrWhiteSpace($rawKeyB64)) {
-    if ($FailIfUnavailable) {
-        throw "Release/Signed was requested but PATHVEER_META_SIGN_KEY is not set (no release-metadata signing key available)."
-    }
-    Write-Host "  No release-metadata signing key (PATHVEER_META_SIGN_KEY). Manifest left UNSIGNED (developer mode)." -ForegroundColor DarkGray
-    exit 0
-}
-
-# 96-byte blob: Q.X[32] | Q.Y[32] | D[32]
-$keyBytes = [System.Convert]::FromBase64String($rawKeyB64)
-if ($keyBytes.Length -ne 96) { throw "PATHVEER_META_SIGN_KEY must be 96 bytes (base64 of X|Y|D)." }
-$x = New-Object byte[] 32; [Array]::Copy($keyBytes, 0, $x, 0, 32)
-$y = New-Object byte[] 32; [Array]::Copy($keyBytes, 32, $y, 0, 32)
-$d = New-Object byte[] 32; [Array]::Copy($keyBytes, 64, $d, 0, 32)
-
-$ecp = [System.Security.Cryptography.ECParameters]::new()
-$ecp.Curve = [System.Security.Cryptography.ECCurve+NamedCurves]::nistP256
-$ecp.Q = [System.Security.Cryptography.ECPoint]::new()
-$ecp.Q.X = $x; $ecp.Q.Y = $y; $ecp.D = $d
-
-$ecdsa = [System.Security.Cryptography.ECDsa]::Create()
-$ecdsa.ImportParameters($ecp)
-
+# --- Canonicalize the signed payload (shared by both signer paths) ----------
 $raw = Get-Content -Raw $ManifestPath
 $jm = [System.Text.Json.Nodes.JsonNode]::Parse($raw)
 # Remove envelope/status fields that are not part of the signed content.
@@ -207,12 +194,86 @@ $cleanDoc = [System.Text.Json.JsonDocument]::Parse($jm.ToString())
 $canonicalJson = ConvertTo-CanonicalJson $cleanDoc.RootElement
 $payload = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
 
-$signature = $ecdsa.SignData($payload, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
-$sigB64 = [System.Convert]::ToBase64String($signature)
+# --- Resolve signing path ---------------------------------------------------
+if (-not [string]::IsNullOrWhiteSpace($SignerCommand)) {
+    # Managed/non-exportable signer (KMS/HSM/Key Vault). Convention:
+    #   - The canonical payload is written to a temp file.
+    #   - $SignerCommand is invoked with that file path appended as its final
+    #     argument; the command reads the file, signs with the managed key, and
+    #     prints ONLY the base64 ES256 signature to STDOUT.
+    # No private key is placed in PATHVEER_META_SIGN_KEY.
+    $payloadFile = Join-Path $env:TEMP ("pv-sign-payload-" + [guid]::NewGuid().ToString("N") + ".bin")
+    [System.IO.File]::WriteAllBytes($payloadFile, $payload)
 
-# Self-verify before writing (sign -> verify, fail-closed).
-$verified = $ecdsa.VerifyData($payload, [System.Convert]::FromBase64String($sigB64), [System.Security.Cryptography.HashAlgorithmName]::SHA256)
-if (-not $verified) { throw "Produced manifest signature failed self-verification." }
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo.FileName = 'pwsh'
+    $proc.StartInfo.ArgumentList.Add('-NoProfile')
+    $proc.StartInfo.ArgumentList.Add('-File')
+    $proc.StartInfo.ArgumentList.Add($SignerCommand)
+    $proc.StartInfo.ArgumentList.Add($payloadFile)
+    $proc.StartInfo.UseShellExecute = $false
+    $proc.StartInfo.RedirectStandardOutput = $true
+    $proc.StartInfo.RedirectStandardError = $true
+    $proc.Start() | Out-Null
+    $out = $proc.StandardOutput.ReadToEnd().Trim()
+    $errOut = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    if ($proc.ExitCode -ne 0) { throw "Managed signer command failed (exit $($proc.ExitCode)): $errOut" }
+    $sigB64 = $out
+    if ([string]::IsNullOrWhiteSpace($sigB64)) { throw "Managed signer returned an empty signature." }
+    # Verify against the trusted public key (PATHVEER_TRUSTED_META_KEYS), if set.
+    $pubEnv = $env:PATHVEER_TRUSTED_META_KEYS
+    if (-not [string]::IsNullOrWhiteSpace($pubEnv)) {
+        $entry = $pubEnv.Split(';', [StringSplitOptions]::RemoveEmptyEntries)[0]
+        if ($entry -match '^([^:]+):(.+)$') {
+            $tPub = [System.Convert]::FromBase64String($Matches[2])
+            if ($tPub.Length -eq 64) {
+                $qp = [System.Security.Cryptography.ECPoint]::new()
+                $qp.X = [byte[]]::new(32); [Array]::Copy($tPub, 0, $qp.X, 0, 32)
+                $qp.Y = [byte[]]::new(32); [Array]::Copy($tPub, 32, $qp.Y, 0, 32)
+                $kp = [System.Security.Cryptography.ECParameters]::new()
+                $kp.Curve = [System.Security.Cryptography.ECCurve+NamedCurves]::nistP256
+                $kp.Q = $qp
+                $vEcdsa = [System.Security.Cryptography.ECDsa]::Create(); $vEcdsa.ImportParameters($kp)
+                if (-not $vEcdsa.VerifyData($payload, [System.Convert]::FromBase64String($sigB64), [System.Security.Cryptography.HashAlgorithmName]::SHA256)) {
+                    throw "Managed signer signature failed verification against trusted public key."
+                }
+            }
+        }
+    }
+    Remove-Item -LiteralPath $payloadFile -ErrorAction SilentlyContinue
+} else {
+    # Local raw-key path (default). Requires PATHVEER_META_SIGN_KEY (96-byte X|Y|D).
+    $rawKeyB64 = $env:PATHVEER_META_SIGN_KEY
+    if ([string]::IsNullOrWhiteSpace($rawKeyB64)) {
+        if ($FailIfUnavailable) {
+            throw "Release/Signed was requested but PATHVEER_META_SIGN_KEY is not set (no release-metadata signing key available)."
+        }
+        Write-Host "  No release-metadata signing key (PATHVEER_META_SIGN_KEY). Manifest left UNSIGNED (developer mode)." -ForegroundColor DarkGray
+        exit 0
+    }
+
+    # 96-byte blob: Q.X[32] | Q.Y[32] | D[32]
+    $keyBytes = [System.Convert]::FromBase64String($rawKeyB64)
+    if ($keyBytes.Length -ne 96) { throw "PATHVEER_META_SIGN_KEY must be 96 bytes (base64 of X|Y|D)." }
+    $x = New-Object byte[] 32; [Array]::Copy($keyBytes, 0, $x, 0, 32)
+    $y = New-Object byte[] 32; [Array]::Copy($keyBytes, 32, $y, 0, 32)
+    $d = New-Object byte[] 32; [Array]::Copy($keyBytes, 64, $d, 0, 32)
+
+    $ecp = [System.Security.Cryptography.ECParameters]::new()
+    $ecp.Curve = [System.Security.Cryptography.ECCurve+NamedCurves]::nistP256
+    $ecp.Q = [System.Security.Cryptography.ECPoint]::new()
+    $ecp.Q.X = $x; $ecp.Q.Y = $y; $ecp.D = $d
+
+    $ecdsa = [System.Security.Cryptography.ECDsa]::Create()
+    $ecdsa.ImportParameters($ecp)
+    $signature = $ecdsa.SignData($payload, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    $sigB64 = [System.Convert]::ToBase64String($signature)
+
+    # Self-verify before writing (sign -> verify, fail-closed).
+    $verified = $ecdsa.VerifyData($payload, [System.Convert]::FromBase64String($sigB64), [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    if (-not $verified) { throw "Produced manifest signature failed self-verification." }
+}
 
 # --- Re-emit manifest WITH signature envelope ------------------------------
 $original = [System.Text.Json.Nodes.JsonNode]::Parse($raw)
