@@ -431,4 +431,71 @@ public sealed class UpdateArchitectureTests
         var res = verifier.Verify(parsed, signed);
         Assert.True(res.IsValid, res.Error ?? "verify failed");
     }
+
+    // --- Phase 37.5: production trusted-key bootstrap (FromEnvironment) -------
+
+    [Fact]
+    public void Verifier_FromEnvironment_RejectsUnsigned_WhenTrustedKeyConfigured()
+    {
+        var (id, _, pub) = NewKey("pv-prod-2026");
+        // Production wiring: trusted key present in env -> signed-only.
+        var prev = Environment.GetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS", $"{id}:{Convert.ToBase64String(pub)}");
+            var verifier = ReleaseSignatureVerifier.FromEnvironment(devAllowUnsigned: true);
+
+            var json = BuildManifest("1.0.0");
+            var parsed = new ReleaseManifestParser().Parse(json)!.Manifest!;
+            var res = verifier.Verify(parsed, json);
+            Assert.False(res.IsValid, "unsigned manifest must be rejected when a trust set is configured");
+            Assert.False(res.IsUnsigned);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS", prev);
+        }
+    }
+
+    [Fact]
+    public void Verifier_FromEnvironment_VerifiesSigned_WhenTrustedKeyConfigured()
+    {
+        var (id, priv, pub) = NewKey("pv-prod-2026");
+        var prev = Environment.GetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS", $"{id}:{Convert.ToBase64String(pub)}");
+            var verifier = ReleaseSignatureVerifier.FromEnvironment(devAllowUnsigned: true);
+
+            var json = BuildManifest("1.0.0");
+            var signed = new ReleaseManifestSigner(id, priv).Sign(json);
+            var parsed = new ReleaseManifestParser().Parse(signed)!.Manifest!;
+            var res = verifier.Verify(parsed, signed);
+            Assert.True(res.IsValid, res.Error ?? "signed manifest must verify under trusted key");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS", prev);
+        }
+    }
+
+    [Fact]
+    public void Verifier_FromEnvironment_AllowsUnsigned_WhenNoTrustedKeyConfigured()
+    {
+        // Dev/unsigned builds (no trust set) keep working via devAllowUnsigned.
+        var prev = Environment.GetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS", null);
+            var verifier = ReleaseSignatureVerifier.FromEnvironment(devAllowUnsigned: true);
+            var json = BuildManifest("1.0.0");
+            var parsed = new ReleaseManifestParser().Parse(json)!.Manifest!;
+            var res = verifier.Verify(parsed, json);
+            Assert.True(res.IsUnsigned);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS", prev);
+        }
+    }
 }
