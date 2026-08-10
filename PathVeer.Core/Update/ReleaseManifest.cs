@@ -101,18 +101,24 @@ public sealed class ReleaseManifest
     public static byte[] CanonicalizePayload(string rawJson)
     {
         using var doc = JsonDocument.Parse(rawJson);
-        var root = doc.RootElement.Clone();
-        if (root.ValueKind == JsonValueKind.Object)
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+            return JsonCanonicalizer.Canonicalize(root);
+
+        // Exclude envelope/status fields that are not part of the signed content
+        // (signature + signed). Build the filtered JSON text directly from each
+        // value's GetRawText() so date-like and numeric strings keep their original
+        // JSON text (no JsonNode type conversion) — this matches the PowerShell
+        // signer's canonicalization byte-for-byte.
+        var parts = new System.Collections.Generic.List<string>();
+        foreach (var p in root.EnumerateObject())
         {
-            var obj = JsonNode.Parse(rawJson)!.AsObject();
-            // Exclude envelope/status fields that are not part of the signed
-            // content: signature (the output) and signed (a presentation flag
-            // that flips to true only after signing).
-            obj.Remove("signature");
-            obj.Remove("signed");
-            return JsonCanonicalizer.Canonicalize(obj);
+            if (p.Name == "signature" || p.Name == "signed") continue;
+            parts.Add($"\"{p.Name}\":{p.Value.GetRawText()}");
         }
-        return JsonCanonicalizer.Canonicalize(root);
+        var filtered = "{" + string.Join(",", parts) + "}";
+        using var fdoc = JsonDocument.Parse(filtered);
+        return JsonCanonicalizer.Canonicalize(fdoc.RootElement);
     }
 
     public string ToJson(bool indented = false)

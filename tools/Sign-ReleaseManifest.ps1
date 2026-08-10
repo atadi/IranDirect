@@ -16,6 +16,10 @@
     are recursively sorted lexicographically and the JSON is emitted compact
     (no insignificant whitespace), UTF-8. This is what the C# client verifies.
 
+    The canonicalizer parses with System.Text.Json.JsonNode (NOT ConvertFrom-Json)
+    so date-like and numeric strings keep their original JSON form — this is the
+    critical detail that keeps PS-canonical byte-identical to C#-canonical.
+
     Key handling (secret-safe):
       * Production private key is read from $env:PATHVEER_META_SIGN_KEY
         (base64 of a 96-byte blob: Q.X[32] | Q.Y[32] | D[32]). Never committed.
@@ -33,6 +37,13 @@
 .PARAMETER FailIfUnavailable
     Fail if no signing key is available (Release/Signed mode).
 
+.PARAMETER VerifyOnly
+    Verify an existing signature (does NOT modify the file). Requires -TrustedKeyBase64.
+
+.PARAMETER TrustedKeyBase64
+    "<keyId>:<base64>" — 64-byte public (X|Y) OR 96-byte private (X|Y|D) blob
+    used to verify in -VerifyOnly mode.
+
 .EXAMPLE
     .\tools\Sign-ReleaseManifest.ps1 -ManifestPath artifacts/releases/1.0.0/win-x64/release-manifest.json -KeyId pv-meta-2026 -FailIfUnavailable
 #>
@@ -45,13 +56,120 @@ param(
     [string]$KeyId = 'pv-meta-2026',
 
     [Parameter(Mandatory = $false)]
-    [switch]$FailIfUnavailable
+    [switch]$FailIfUnavailable,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$VerifyOnly,
+
+    [Parameter(Mandatory = $false)]
+    [string]$TrustedKeyBase64 = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# --- Canonicalize (byte-identical to PathVeer.Core.Update.JsonCanonicalizer) ---
+# Walks System.Text.Json.JsonElement (NOT JsonNode, which auto-converts ISO date
+# strings to DateTime) so date-like and numeric strings keep their original JSON
+# text — exactly as the C# JsonCanonicalizer does. Recursive property-name sort
+# (Ordinal), compact, UTF-8.
+function ConvertTo-CanonicalJson {
+    param($Element)
+    switch ($Element.ValueKind) {
+        ([System.Text.Json.JsonValueKind]::Object) {
+            $pairs = @()
+            $names = @()
+            foreach ($p in $Element.EnumerateObject()) { $names += $p.Name }
+            foreach ($k in ($names | Sort-Object)) {
+                $pairs += ('"{0}":{1}' -f (Escape-JsonString $k), (ConvertTo-CanonicalJson $Element.GetProperty($k)))
+            }
+            return '{' + ($pairs -join ',') + '}'
+        }
+        ([System.Text.Json.JsonValueKind]::Array) {
+            $items = @()
+            foreach ($item in $Element.EnumerateArray()) { $items += ConvertTo-CanonicalJson $item }
+            return '[' + ($items -join ',') + ']'
+        }
+        ([System.Text.Json.JsonValueKind]::String) { return '"' + (Escape-JsonString $Element.GetString()) + '"' }
+        ([System.Text.Json.JsonValueKind]::Number) {
+            $l = 0; $d = 0.0
+            if ($Element.TryGetInt64([ref]$l) -and $Element.TryGetDouble([ref]$d) -and $l -eq $d) { return [string]$l }
+            return [string]$d
+        }
+        ([System.Text.Json.JsonValueKind]::True) { return 'true' }
+        ([System.Text.Json.JsonValueKind]::False) { return 'false' }
+        ([System.Text.Json.JsonValueKind]::Null) { return 'null' }
+        default { return 'null' }
+    }
+}
+
+function Escape-JsonString {
+    param([string]$s)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $s.ToCharArray()) {
+        if ($ch -eq [char]'"') { $sb.Append('\"') | Out-Null }
+        elseif ($ch -eq [char]'\') { $sb.Append('\\') | Out-Null }
+        elseif ([int]$ch -lt 0x20) { $sb.Append(('\u{0:x4}' -f [int]$ch)) | Out-Null }
+        else { $sb.Append($ch) | Out-Null }
+    }
+    return $sb.ToString()
+}
+
 if (-not (Test-Path $ManifestPath)) { throw "Manifest not found: $ManifestPath" }
+
+# --- Verify-only mode (publisher signature gate; does NOT modify the file) ----
+if ($VerifyOnly) {
+    if ([string]::IsNullOrWhiteSpace($TrustedKeyBase64)) {
+        throw "VerifyOnly requires -TrustedKeyBase64 '<keyId>:<base64 64-byte public key>'."
+    }
+    if (-not ($TrustedKeyBase64 -match '^([^:]+):(.+)$')) {
+        throw "TrustedKeyBase64 must be '<keyId>:<base64 public key>'."
+    }
+    $trustKeyId = $Matches[1]
+    $trustBytes = [System.Convert]::FromBase64String($Matches[2])
+    if ($trustBytes.Length -ne 64 -and $trustBytes.Length -ne 96) {
+        throw "TrustedKey must be 64 bytes (public X|Y) or 96 bytes (private X|Y|D)."
+    }
+
+    $raw = Get-Content -Raw $ManifestPath
+    $jm = [System.Text.Json.Nodes.JsonNode]::Parse($raw)
+    if ($null -eq $jm['signature']) { throw "Manifest is not signed (no signature envelope)." }
+    $sigKeyId = [string]$jm['signature']['keyId']
+    if ($sigKeyId -ne $trustKeyId) { throw "Manifest signed by keyId '$sigKeyId'; trusted key is '$trustKeyId'." }
+    $sigValue = [System.Convert]::FromBase64String([string]$jm['signature']['value'])
+
+    # Canonicalize the signed-payload (signature + signed removed) exactly as the signer does.
+    # Use JsonElement (not JsonNode) so ISO date strings stay strings — matching C#.
+    $jm.AsObject().Remove('signature') | Out-Null
+    $jm.AsObject().Remove('signed') | Out-Null
+    $cleanDoc = [System.Text.Json.JsonDocument]::Parse($jm.ToString())
+    $vPayload = ConvertTo-CanonicalJson $cleanDoc.RootElement
+    $vBytes = [System.Text.Encoding]::UTF8.GetBytes($vPayload)
+
+    # Public-only EC key import is unreliable on this SDK/PowerShell surface, so the
+    # publisher verify gate accepts the 96-byte private blob (X|Y|D) — available in any
+    # signing-capable environment — and imports it as full EC parameters (works, as the
+    # signer proves). The C# client verifies the same manifest with the 64-byte public
+    # key (see ReleaseSignatureVerifier). Both verify the identical canonical payload.
+    if ($trustBytes.Length -eq 96) {
+        $tx = New-Object byte[] 32; [Array]::Copy($trustBytes, 0, $tx, 0, 32)
+        $ty = New-Object byte[] 32; [Array]::Copy($trustBytes, 32, $ty, 0, 32)
+        $td = New-Object byte[] 32; [Array]::Copy($trustBytes, 64, $td, 0, 32)
+        $kp = [System.Security.Cryptography.ECParameters]::new()
+        $kp.Curve = [System.Security.Cryptography.ECCurve+NamedCurves]::nistP256
+        $kp.Q = [System.Security.Cryptography.ECPoint]::new()
+        $kp.Q.X = $tx; $kp.Q.Y = $ty; $kp.D = $td
+    } else {
+        throw "On this platform the PowerShell verify gate requires the 96-byte private blob (X|Y|D). The production client verifies with the 64-byte public key in C# (ReleaseSignatureVerifier)."
+    }
+    $vEcdsa = [System.Security.Cryptography.ECDsa]::Create()
+    $vEcdsa.ImportParameters($kp)
+
+    $ok = $vEcdsa.VerifyData($vBytes, $sigValue, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    if (-not $ok) { throw "Manifest signature is INVALID for trusted key '$trustKeyId'." }
+    Write-Host "  Manifest signature VERIFIED (keyId=$trustKeyId, alg=ES256)." -ForegroundColor Green
+    exit 0
+}
 
 # --- Resolve signing key ----------------------------------------------------
 $rawKeyB64 = $env:PATHVEER_META_SIGN_KEY
@@ -66,7 +184,9 @@ if ([string]::IsNullOrWhiteSpace($rawKeyB64)) {
 # 96-byte blob: Q.X[32] | Q.Y[32] | D[32]
 $keyBytes = [System.Convert]::FromBase64String($rawKeyB64)
 if ($keyBytes.Length -ne 96) { throw "PATHVEER_META_SIGN_KEY must be 96 bytes (base64 of X|Y|D)." }
-$x = $keyBytes[0..31]; $y = $keyBytes[32..63]; $d = $keyBytes[64..95]
+$x = New-Object byte[] 32; [Array]::Copy($keyBytes, 0, $x, 0, 32)
+$y = New-Object byte[] 32; [Array]::Copy($keyBytes, 32, $y, 0, 32)
+$d = New-Object byte[] 32; [Array]::Copy($keyBytes, 64, $d, 0, 32)
 
 $ecp = [System.Security.Cryptography.ECParameters]::new()
 $ecp.Curve = [System.Security.Cryptography.ECCurve+NamedCurves]::nistP256
@@ -76,38 +196,15 @@ $ecp.Q.X = $x; $ecp.Q.Y = $y; $ecp.D = $d
 $ecdsa = [System.Security.Cryptography.ECDsa]::Create()
 $ecdsa.ImportParameters($ecp)
 
-# --- Canonicalize (mirrors JsonCanonicalizer) -------------------------------
-function ConvertTo-CanonicalJson {
-    param($Node)
-    # ConvertFrom-Json yields PSCustomObject, not an IDictionary; handle both.
-    if ($Node -is [System.Management.Automation.PSCustomObject] -or
-        $Node -is [System.Management.Automation.PSObject] -or
-        $Node -is [System.Collections.IDictionary]) {
-        $dict = if ($Node -is [System.Collections.IDictionary]) { $Node }
-                else { $Node.PSObject.Properties }
-        $s = [ordered]@{}
-        if ($Node -is [System.Collections.IDictionary]) {
-            foreach ($k in ($Node.Keys | Sort-Object)) { $s[$k] = ConvertTo-CanonicalJson $Node[$k] }
-        } else {
-            foreach ($p in ($dict | Sort-Object Name)) { $s[$p.Name] = ConvertTo-CanonicalJson $p.Value }
-        }
-        return $s
-    }
-    if ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string]) {
-        $a = @()
-        foreach ($item in $Node) { $a += ConvertTo-CanonicalJson $item }
-        return $a
-    }
-    return $Node
-}
-
-$manifest = Get-Content -Raw $ManifestPath | ConvertFrom-Json
+$raw = Get-Content -Raw $ManifestPath
+$jm = [System.Text.Json.Nodes.JsonNode]::Parse($raw)
 # Remove envelope/status fields that are not part of the signed content.
-if ($manifest.PSObject.Properties['signature']) { $manifest.PSObject.Properties.Remove('signature') }
-if ($manifest.PSObject.Properties['signed']) { $manifest.PSObject.Properties.Remove('signed') }
+$jm.AsObject().Remove('signature') | Out-Null
+$jm.AsObject().Remove('signed') | Out-Null
 
-$canonicalObj = ConvertTo-CanonicalJson $manifest
-$canonicalJson = $canonicalObj | ConvertTo-Json -Compress -Depth 20
+# Canonicalize via JsonElement (not JsonNode) so ISO date strings stay strings — matching C#.
+$cleanDoc = [System.Text.Json.JsonDocument]::Parse($jm.ToString())
+$canonicalJson = ConvertTo-CanonicalJson $cleanDoc.RootElement
 $payload = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
 
 $signature = $ecdsa.SignData($payload, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
@@ -118,13 +215,15 @@ $verified = $ecdsa.VerifyData($payload, [System.Convert]::FromBase64String($sigB
 if (-not $verified) { throw "Produced manifest signature failed self-verification." }
 
 # --- Re-emit manifest WITH signature envelope ------------------------------
-$original = Get-Content -Raw $ManifestPath | ConvertFrom-Json
-$original | Add-Member -NotePropertyName 'signature' -NotePropertyValue ([ordered]@{
+$original = [System.Text.Json.Nodes.JsonNode]::Parse($raw)
+$original['signed'] = $true
+$original['signature'] = [System.Text.Json.Nodes.JsonNode]::Parse(
+    (ConvertTo-Json -Compress -InputObject ([ordered]@{
         algorithm = 'ES256'
         keyId     = $KeyId
         value     = $sigB64
-    }) -Force
-$original.signed = $true
-$original | ConvertTo-Json -Depth 20 | Set-Content -Path $ManifestPath -Encoding UTF8
+    }))
+)
+[System.IO.File]::WriteAllText($ManifestPath, $original.ToString(), [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "  Manifest signed (keyId=$KeyId, alg=ES256)." -ForegroundColor Green

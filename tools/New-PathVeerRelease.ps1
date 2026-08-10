@@ -53,7 +53,10 @@ param(
     [string]$Channel = 'stable',
 
     [Parameter(Mandatory = $false)]
-    [string]$RuntimeIdentifier = 'win-x64'
+    [string]$RuntimeIdentifier = 'win-x64',
+
+    [Parameter(Mandatory = $false)]
+    [string]$BaseUrl = 'https://releases.pathveer.com'
 )
 
 Set-StrictMode -Version Latest
@@ -192,8 +195,8 @@ Set-Content -Path (Join-Path $ArchReleaseRoot 'checksums.txt') -Value $checksums
 # Minimum direct-upgrade floor: same major.minor, patch 0 (pre-1.0 builds cannot
 # take a 1.0 installer directly). Kept simple for v1; tighten as migrations appear.
 $minUpgrade = if ($Version -match '^(\d+)\.(\d+)\.') { "$($Matches[1]).$($Matches[2]).0" } else { '1.0.0' }
-$installerUrl  = "https://releases.pathveer.com/windows/$Channel/PathVeerSetup-$Version-$RuntimeIdentifier.exe"
-$packageUrl    = "https://releases.pathveer.com/windows/$Channel/PathVeer-$Version-$RuntimeIdentifier.zip"
+$installerUrl  = "$BaseUrl/windows/$Channel/PathVeerSetup-$Version-$RuntimeIdentifier.exe"
+$packageUrl    = "$BaseUrl/windows/$Channel/PathVeer-$Version-$RuntimeIdentifier.zip"
 
 $manifest = [ordered]@{
     schemaVersion          = 1
@@ -221,8 +224,9 @@ $manifest = [ordered]@{
     components             = @('Service', 'Cli', 'Tray')
 }
 
-$manifest | ConvertTo-Json -Depth 4 |
-    Set-Content -Path (Join-Path $ArchReleaseRoot 'release-manifest.json') -Encoding UTF8
+$manifest | ConvertTo-Json -Depth 4 | ForEach-Object {
+    [System.IO.File]::WriteAllText((Join-Path $ArchReleaseRoot 'release-manifest.json'), $_, [System.Text.UTF8Encoding]::new($false))
+}
 
 # 5. Manifest signature (separate metadata key, ES256) — after generation so it
 # covers the final manifest bytes. Fail-closed under Release/Signed.
