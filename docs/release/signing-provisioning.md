@@ -54,18 +54,28 @@ subscription + Trusted Signing account in a supported region matching the identi
 
 Authenticode key is independent from the metadata key (separate rotation/compromise boundary).
 
-Current `tools/Sign-ReleaseManifest.ps1` reads the raw 96-byte EC P-256 private key
-from `PATHVEER_META_SIGN_KEY`. The production client loads trusted **public** keys
-from `PATHVEER_TRUSTED_META_KEYS` (64-byte `Q.X||Q.Y`) and rejects unsigned manifests
-when any key is present (§6 hard gate satisfied architecturally).
+Current `tools/Sign-ReleaseManifest.ps1` supports **two** signer paths:
+- **Default local path:** reads the raw 96-byte EC P-256 private key from
+  `PATHVEER_META_SIGN_KEY` (X||Y||D). Works unchanged; suitable for CI-secret PEM.
+- **Managed/non-exportable path (IMPLEMENTED, `ae29d3c`):** `-SignerCommand <cmd>`
+  writes the canonical payload to a temp file and invokes `<cmd> <payloadFile>`;
+  the command must emit ONLY the base64 ES256 signature on STDOUT. This signs
+  **without exporting the private key** into the environment — a KMS/HSM/Key Vault
+  wrapper drops in with no script change. Verified by real execution (managed path
+  produced a valid envelope with no private key in env; C# `ReleaseSignatureVerifier`
+  remains the authoritative verifier).
 
-**§8 concern:** a managed/non-exportable KMS/HSM/Key Vault EC key must NOT be
-exported to fit the current raw-key script. Two clean options:
-- **Keep CI-secret PEM** (the 96-byte key in `PATHVEER_META_SIGN_KEY` as a CI secret, non-exportable at rest in the secret store). Simplest; works with current script unchanged.
-- **Signer-provider abstraction** (request a signature from KMS/HSM without exporting the private key). Requires a small adapter in `Sign-ReleaseManifest.ps1`; depends on the user's cloud decision.
+The production client loads trusted **public** keys from `PATHVEER_TRUSTED_META_KEYS`
+(64-byte `Q.X||Q.Y`) and rejects unsigned manifests when any key is present
+(§6 hard gate satisfied architecturally).
 
-**Required input:** (a) chosen key-storage model, (b) the production public key
-injected via `PATHVEER_TRUSTED_META_KEYS` in the release pipeline, (c) final `keyId`.
+**§8 concern resolved architecturally:** production signing can request a signature
+from a managed provider without placing raw key material in `PATHVEER_META_SIGN_KEY`.
+The local raw-key path is retained for deterministic tests / CI-secret PEM.
+
+**Required input:** (a) chosen key-storage model (managed KMS vs CI-secret PEM —
+both now supported), (b) the production public key injected via
+`PATHVEER_TRUSTED_META_KEYS` in the release pipeline, (c) final `keyId`.
 The public key is the only material the shipped client needs.
 
 ## 4. Disposable VM (BLOCKER D)
