@@ -57,3 +57,6 @@ graphify-out/
 
 # Local Claude/Agent settings (machine-specific, never committed).
 .claude/
+
+# Test run output (trx logs, coverage)
+TestResults/
