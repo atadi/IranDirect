@@ -1,0 +1,8 @@
+{
+  "keyId": "pv-meta-prod-2026-01",
+  "algorithm": "ES256",
+  "curve": "nistP256",
+  "publicKey": "fN95fm+Do+CGr8RLvC+XBJIhtATr4D63gbpIJhL0w+c/9YKJ6DwcsWnU65Gfmu8OLFWg3VyMn2Mp1N6ZVpmWJg==",
+  "fingerprint": "59704d9d42eb43884cc8b6c996eae65053f953564262e972f50644e132142ba9",
+  "createdUtc": "2026-08-10T23:06:42.2636524Z"
+}

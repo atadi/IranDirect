@@ -13,9 +13,14 @@ using System.Text;
 /// rotation-aware: a manifest carries a keyId; verification succeeds if ANY
 /// trusted key with that id validates the signature over the canonical payload.
 ///
-/// Production private key is supplied via PATHVEER_META_SIGN_KEY (base64), never
-/// committed. A dev/unsigned manifest carries Signature == null and is accepted
-/// only when the verifier is constructed with allowUnsigned = true.
+/// The production trust root is the BUILT-IN public key set
+/// (BuiltInReleaseTrust). The private key is never committed; only the public
+/// key is embedded, so this is safe to ship. PATHVEER_TRUSTED_META_KEYS is an
+/// OPTIONAL override/addition used for development, staging and controlled
+/// rotations — it can add or replace keys but can NEVER weaken production trust
+/// to accept unsigned manifests.
+/// A dev/unsigned manifest carries Signature == null and is accepted only when
+/// the verifier is constructed with allowUnsigned = true.
 /// </summary>
 public sealed class ReleaseSignatureVerifier
 {
@@ -29,33 +34,45 @@ public sealed class ReleaseSignatureVerifier
     }
 
     /// <summary>
-    /// Phase 37.5 — production trusted-key bootstrap.
-    ///
-    /// Loads the trusted release-metadata public-key set from the environment
-    /// variable PATHVEER_TRUSTED_META_KEYS, which holds one or more
-    /// semicolon-separated entries of the form "&lt;keyId&gt;:&lt;base64(64-byte Q.X||Q.Y)&gt;".
-    /// This is the production trust root: the client must embed/provide the real
-    /// public keys (e.g. via a signed config injection or secret store) and MUST
-    /// NOT silently fall back to allowUnsigned when keys are present.
-    ///
-    /// When no trusted keys are configured (developer / unsigned builds), the
-    /// verifier is constructed in allowUnsigned mode so unsigned dev manifests
-    /// still resolve. A production build that configures empty keys should treat
-    /// absence as a missing-trust condition, not implicit acceptance — callers
-    /// decide by passing <paramref name="devAllowUnsigned"/>.
+    /// Production trust bootstrap. Uses ONLY the built-in release-metadata public
+    /// keys (BuiltInReleaseTrust). The PATHVEER_TRUSTED_META_KEYS environment
+    /// variable is a DEV/TEST/STAGING mechanism and is deliberately NOT merged
+    /// here: a production binary must never let an environment override (e.g. a
+    /// staging key) weaken or dilute its production trust root. Rotation overlap is
+    /// achieved by embedding additional production keys in code, not by env.
+    /// The result is always signed-only (allowUnsigned = false): an unsigned or
+    /// unknown/staging-key manifest hard-fails.
     /// </summary>
-    /// <param name="devAllowUnsigned">
-    /// Whether an unsigned manifest is tolerated when NO trusted keys are
-    /// configured. Production must pass false so an unprovisioned trust store
-    /// fails closed instead of accepting unsigned feeds.
-    /// </param>
+    public static ReleaseSignatureVerifier ForProduction()
+    {
+        var keys = BuiltInReleaseTrust.All().ToDictionary(k => k.Key, k => k.Value, StringComparer.Ordinal);
+        return new ReleaseSignatureVerifier(keys, allowUnsigned: false);
+    }
+
+    /// <summary>
+    /// Phase 37.5 — development / test trusted-key bootstrap from the
+    /// PATHVEER_TRUSTED_META_KEYS environment variable. Kept for dev, staging and
+    /// tests; it does NOT embed any production key, so production code must use
+    /// <see cref="ForProduction"/> instead. When no keys are present and
+    /// <paramref name="devAllowUnsigned"/> is true, unsigned dev manifests are
+    /// tolerated.
+    /// </summary>
     public static ReleaseSignatureVerifier FromEnvironment(bool devAllowUnsigned = true)
+    {
+        var keys = FromEnvironmentEntries();
+        // When any trusted key is configured, unsigned manifests are rejected
+        // (signed-only) regardless of devAllowUnsigned. Only with NO keys does the
+        // dev flag permit unsigned dev feeds.
+        var allowUnsigned = (!keys.Any()) && devAllowUnsigned;
+        return new ReleaseSignatureVerifier(keys, allowUnsigned);
+    }
+
+    private static IEnumerable<KeyValuePair<string, byte[]>> FromEnvironmentEntries()
     {
         var entries = (Environment.GetEnvironmentVariable("PATHVEER_TRUSTED_META_KEYS") ?? "").Trim();
         if (string.IsNullOrWhiteSpace(entries))
-            return new ReleaseSignatureVerifier([], allowUnsigned: devAllowUnsigned);
+            yield break;
 
-        var keys = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var raw in entries.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var sep = raw.IndexOf(':');
@@ -63,11 +80,8 @@ public sealed class ReleaseSignatureVerifier
             var keyId = raw[..sep];
             var bytes = Convert.FromBase64String(raw[(sep + 1)..]);
             if (bytes.Length != 64) continue; // Q.X||Q.Y only; reject malformed
-            keys[keyId] = bytes;
+            yield return new KeyValuePair<string, byte[]>(keyId, bytes);
         }
-        // Trusted keys present -> signed-only. Never allow unsigned when a trust
-        // set is configured, regardless of devAllowUnsigned.
-        return new ReleaseSignatureVerifier(keys, allowUnsigned: false);
     }
 
     public SignatureVerificationResult Verify(ReleaseManifest manifest, string rawJson)

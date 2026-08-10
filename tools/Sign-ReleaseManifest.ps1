@@ -73,7 +73,14 @@ param(
     [string]$TrustedKeyBase64 = '',
 
     [Parameter(Mandatory = $false)]
-    [string]$SignerCommand = ''
+    [string]$SignerCommand = '',
+
+    # Resolve the production signing private key from the protected DPAPI store
+    # produced by New-PathVeerMetadataKey.ps1. When set, PATHVEER_META_SIGN_KEY is
+    # NOT required. The key blob is decrypted in-process and passed directly to the
+    # signer; it is never placed in an environment variable or written to disk.
+    [Parameter(Mandatory = $false)]
+    [string]$ProductionKeyStore = ''
 )
 
 Set-StrictMode -Version Latest
@@ -243,8 +250,21 @@ if (-not [string]::IsNullOrWhiteSpace($SignerCommand)) {
     }
     Remove-Item -LiteralPath $payloadFile -ErrorAction SilentlyContinue
 } else {
-    # Local raw-key path (default). Requires PATHVEER_META_SIGN_KEY (96-byte X|Y|D).
+    # Local raw-key path (default). Prefer a secure DPAPI key store when
+    # -ProductionKeyStore is given; otherwise fall back to PATHVEER_META_SIGN_KEY.
     $rawKeyB64 = $env:PATHVEER_META_SIGN_KEY
+    if ([string]::IsNullOrWhiteSpace($rawKeyB64) -and -not [string]::IsNullOrWhiteSpace($ProductionKeyStore)) {
+        $keyFile = Join-Path $ProductionKeyStore ("metadata-signing-{0}.xml" -f $KeyId)
+        if (-not (Test-Path -LiteralPath $keyFile)) {
+            throw "Production key store not found for keyId '$KeyId' at $keyFile."
+        }
+        # Bare DPAPI-protected SecureString -> recover the 96-byte X|Y|D blob.
+        $ss = Import-Clixml -LiteralPath $keyFile
+        $rawKeyB64 = [Runtime.InteropServices.Marshal]::PtrToStringUni(
+            [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss))
+        [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode(
+            [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss)) | Out-Null
+    }
     if ([string]::IsNullOrWhiteSpace($rawKeyB64)) {
         if ($FailIfUnavailable) {
             throw "Release/Signed was requested but PATHVEER_META_SIGN_KEY is not set (no release-metadata signing key available)."

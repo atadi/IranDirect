@@ -608,12 +608,13 @@ finally
 
     private static ReleaseSignatureVerifier BuildReleaseVerifier()
     {
-        // 37.5: production trust root. Loads the trusted release-metadata public
-        // keys from PATHVEER_TRUSTED_META_KEYS (keyId:base64(64-byte pub);...).
-        // When keys are present, unsigned manifests are REJECTED (signed-only).
-        // When no keys are configured (dev/unsigned builds), allowUnsigned keeps
-        // the dev experience working but production MUST provision real keys.
-        return ReleaseSignatureVerifier.FromEnvironment(devAllowUnsigned: true);
+        // Production trust root: built-in release-metadata public keys, with any
+        // PATHVEER_TRUSTED_META_KEYS additions/overrides (staging, rotation).
+        // Always signed-only — allowUnsigned is never enabled here, so an
+        // unsigned manifest or an unknown/staging key hard-fails. With no
+        // environment overrides the client still trusts the built-in production
+        // key, which is the whole point of embedding it.
+        return ReleaseSignatureVerifier.ForProduction();
     }
 
     private static string FormatAppUpdateResult(UpdateCheckResult result)
