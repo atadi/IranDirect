@@ -109,11 +109,15 @@ Rationale: `PathVeerSetup.exe` is self-contained and detects the missing `Micros
 | GATE-7 Interactive legacy migration | Disposable VM | **NOT EXECUTED** | No VM; no IranDirect artifact | VM + legacy build |
 | GATE-8 Apps&Features uninstall/reinstall | Disposable VM | **NOT EXECUTED** | No VM | VM |
 | GATE-9 Real update check→Setup handoff | Staging HTTPS + VM | **NOT EXECUTED** | No staging host; no VM | host + VM |
-| GATE-10 Tampered installer non-execution | Staging/VM | **PARTIAL (code)** | Deterministic tests `Feed_TamperedInstaller_RejectedByHash` / `Feed_TamperedManifest_RejectedBySignature` prove non-execution on hash/sig failure (37.4) | real end-to-end staged form needs host+VM |
-| GATE-11 Real staging HTTPS | Staging host | **NOT EXECUTED** | DNS `releases.pathveer.com` does not resolve | hosting/DNS |
-| GATE-12 Production-like immutable publication | CDN/object storage | **PARTIAL (local FS)** | Immutable + latest-last + stable/beta isolation proven against Local backend (37.5) | real CDN/object storage |
+| GATE-10 Tampered installer non-execution | Staging/VM | **PASS (real feed, no VM exec)** | A one-byte-flipped installer served over `releases.pathveer.com` (disposable object) was rejected by `InstallerDownloadVerifier` on SHA-256 mismatch; Setup never launched. See `cloudflare-r2-certification.md` | remaining VM-side execution form needs a VM |
+| GATE-11 Real staging HTTPS | Staging host | **PASS except Authenticode** | Real Cloudflare R2 + `releases.pathveer.com`: DNS/TLS/200, correct Content-Type + Cache-Control, real `HttpReleaseSource` fetch, ES256 verified against a real trusted-key set, installer downloaded and SHA-256 matched. Installer is `NotSigned`, so any Authenticode clause is **BLOCKED**. See `cloudflare-r2-certification.md` | production Authenticode |
+| GATE-12 Production-like immutable publication | CDN/object storage | **PASS** | Real R2 + custom domain: same-bytes republish = no-op, different bytes at an immutable path rejected (`IMMUTABILITY VIOLATION`), `latest.json` written last, `windows/stable/latest.json` never created, cache policy correct. See `cloudflare-r2-certification.md` | — |
 
-No gate was marked PASS from real Windows execution. None was faked.
+GATE-11 and GATE-12 were subsequently executed for real against Cloudflare R2 and
+`https://releases.pathveer.com` (beta/staging only, stable untouched) — see
+`docs/release/cloudflare-r2-certification.md`. Every other gate above remains
+unexecuted for want of a disposable VM and production Authenticode. No gate was
+faked; Authenticode status is reported honestly as unsigned.
 
 ---
 
