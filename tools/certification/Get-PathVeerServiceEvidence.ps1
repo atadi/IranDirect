@@ -45,5 +45,7 @@ $active = @($evidence.authorities)
 $evidence.singleAuthorityHeld = ($active.Count -le 1)
 
 $evidence | ConvertTo-Json -Depth 4 | Set-Content -Path $OutFile -Encoding utf8
-Write-Host "SCM evidence -> $OutFile (PathVeer=$(if($evidence.pathVeer){$evidence.pathVeer.state}else{'absent'), IranDirect=$(if($evidence.iranDirect){$evidence.iranDirect.state}else{'absent'}))" -ForegroundColor Cyan
+$pvState = if ($evidence.pathVeer) { $evidence.pathVeer.state } else { 'absent' }
+$idState = if ($evidence.iranDirect) { $evidence.iranDirect.state } else { 'absent' }
+Write-Host "SCM evidence -> $OutFile (PathVeer=$pvState, IranDirect=$idState)" -ForegroundColor Cyan
 $evidence | Format-List
