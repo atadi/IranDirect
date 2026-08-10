@@ -36,7 +36,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    # Accepts a SemVer core with an optional pre-release suffix (e.g. 1.0.0-beta.1),
+    # matching New-PathVeerRelease.ps1 so beta/RC releases can be packaged.
+    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
     [string]$Version,
 
     [Parameter(Mandatory = $false)]

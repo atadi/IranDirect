@@ -195,8 +195,12 @@ Set-Content -Path (Join-Path $ArchReleaseRoot 'checksums.txt') -Value $checksums
 # Minimum direct-upgrade floor: same major.minor, patch 0 (pre-1.0 builds cannot
 # take a 1.0 installer directly). Kept simple for v1; tighten as migrations appear.
 $minUpgrade = if ($Version -match '^(\d+)\.(\d+)\.') { "$($Matches[1]).$($Matches[2]).0" } else { '1.0.0' }
-$installerUrl  = "$BaseUrl/windows/$Channel/PathVeerSetup-$Version-$RuntimeIdentifier.exe"
-$packageUrl    = "$BaseUrl/windows/$Channel/PathVeer-$Version-$RuntimeIdentifier.zip"
+# Public URLs MUST match the immutable versioned object layout the publisher
+# writes (windows/<version>/<rid>/<file>) — the channel prefix is reserved for
+# the mutable latest.json pointer only. These URLs are baked into the signed
+# payload, so they must be correct BEFORE signing; they are never edited after.
+$installerUrl  = "$BaseUrl/windows/$Version/$RuntimeIdentifier/$SetupExeName"
+$packageUrl    = "$BaseUrl/windows/$Version/$RuntimeIdentifier/$ZipName"
 
 $manifest = [ordered]@{
     schemaVersion          = 1
