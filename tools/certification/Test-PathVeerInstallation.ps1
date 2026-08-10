@@ -32,7 +32,7 @@ $tray = Get-ChildItem "$env:ProgramFiles\PathVeer" -Recurse -Filter PathVeer.Tra
 $startMenu = @(Get-ChildItem "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter *.lnk -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match 'PathVeer' })
 $appEntry = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
-    Where-Object { $_.DisplayName -eq 'PathVeer' } | Select-Object -First 1
+    Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -eq 'PathVeer' } | Select-Object -First 1
 
 $report = [ordered]@{
     capturedUtc        = (Get-Date).ToUniversalTime().ToString('o')
