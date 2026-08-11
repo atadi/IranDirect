@@ -119,10 +119,14 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         param($ps1, $pkg)
         $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ps1 `
             -PackageDirectory $pkg -RegisterShell -InstallTray -ProgressFile 'C:\pv-cert\install-progress.json' -ResultFile 'C:\pv-cert\install-result.json' 2>&1
+        $resultFile = $null
+        if (Test-Path 'C:\pv-cert\install-result.json') {
+            $resultFile = Get-Content 'C:\pv-cert\install-result.json' -Raw
+        }
         [PSCustomObject]@{
             exitCode = $LASTEXITCODE
             log = ($out -join "`n")
-            resultFile = (if(Test-Path 'C:\pv-cert\install-result.json'){ Get-Content 'C:\pv-cert\install-result.json' -Raw } else { $null })
+            resultFile = $resultFile
         }
     } -ArgumentList $installPs1, $installPkg
 
@@ -141,19 +145,41 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         $cliOnPath = @($env:Path -split ';' | Where-Object { $_ -and (Test-Path (Join-Path $_ 'PathVeer.Cli.exe')) }).Count
         $pipe = [System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*PathVeer.Control.v1*' -or $_ -like '*IranDirect.Control.v1*' }
         $cliStatus = & $cliExe status 2>&1
+
+        $svcName = $null; $svcState = 'absent'; $svcStartMode = $null; $svcPathName = $null
+        if ($svc) {
+            $svcName = $svc.Name
+            $svcState = $svc.State
+            $svcStartMode = $svc.StartMode
+            $svcPathName = $svc.PathName
+        }
+        $appsAndFeatures = $null
+        if ($app) {
+            $appsAndFeatures = [PSCustomObject]@{
+                displayName = $app.DisplayName
+                version = $app.DisplayVersion
+                publisher = $app.Publisher
+                uninstall = $app.UninstallString
+            }
+        }
+        $installManifest = $null
+        if (Test-Path 'C:\Program Files\PathVeer\install-manifest.json') {
+            $installManifest = Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw
+        }
+
         [PSCustomObject]@{
-            serviceName = if($svc){$svc.Name}else{$null}
-            serviceState = if($svc){$svc.State}else{'absent'}
-            serviceStartMode = if($svc){$svc.StartMode}else{$null}
-            servicePathName = if($svc){$svc.PathName}else{$null}
-            appsAndFeatures = if($app){ [PSCustomObject]@{ displayName=$app.DisplayName; version=$app.DisplayVersion; publisher=$app.Publisher; uninstall=$app.UninstallString } } else { $null }
+            serviceName = $svcName
+            serviceState = $svcState
+            serviceStartMode = $svcStartMode
+            servicePathName = $svcPathName
+            appsAndFeatures = $appsAndFeatures
             startMenuShortcuts = $startMenu
             trayPresent = ($null -ne $tray)
             cliOnPathCount = $cliOnPath
             ipcPipes = $pipe
             cliStatus = ($cliStatus -join "`n")
             programDataState = (Test-Path "$env:ProgramData\PathVeer")
-            installManifest = (if(Test-Path 'C:\Program Files\PathVeer\install-manifest.json'){ Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw } else { $null })
+            installManifest = $installManifest
         }
     }
 
@@ -175,7 +201,8 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
         $binBefore = (Get-CimInstance Win32_Service -Filter "Name='PathVeer'").StartMode
         # Find the Tray process and terminate it (process-level teardown, not service).
         $trayProc = Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue | Select-Object -First 1
-        $trayPidBefore = if($trayProc){$trayProc.Id}else{$null}
+        $trayPidBefore = $null
+        if ($trayProc) { $trayPidBefore = $trayProc.Id }
         if ($trayProc) { Stop-Process -Id $trayProc.Id -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 3
         $svcAfter = Get-Service -Name 'PathVeer' -ErrorAction Stop
@@ -206,11 +233,13 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "GATE-3 REBOOT PERSISTENCE (VM only)"
     $before = Invoke-Command -Session $Session -ScriptBlock {
         $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
+        $policy = 'absent'
+        if (Test-Path "$env:ProgramData\PathVeer") { $policy = 'state-present' }
         [PSCustomObject]@{
             serviceState = $svc.Status
             serviceStartMode = $svc.StartType
             startedBy = $svc.StartType
-            policy = (if(Test-Path "$env:ProgramData\PathVeer"){ 'state-present' }else{'absent'})
+            policy = $policy
         }
     }
     Step "Restarting guest VM only..."
@@ -223,12 +252,14 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
         $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
         $pipe = [System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*PathVeer.Control.v1*' }
         $cliOk = $false; try { & $cliExe status *> $null; $cliOk = ($LASTEXITCODE -eq 0) } catch {}
+        $policy = 'absent'
+        if (Test-Path "$env:ProgramData\PathVeer") { $policy = 'state-present' }
         [PSCustomObject]@{
             serviceState = $svc.Status
             serviceStartMode = $svc.StartType
             ipcPipeAlive = ($null -ne $pipe)
             cliWorks = $cliOk
-            policy = (if(Test-Path "$env:ProgramData\PathVeer"){ 'state-present' }else{'absent'})
+            policy = $policy
         }
     }
     Save-Json '03-gate3-reboot-persistence.json' ([PSCustomObject]@{
@@ -482,7 +513,10 @@ if (-not $script:Cred) { Write-Error 'No credential supplied. Aborting.'; exit 1
 
 $sess = New-GuestSession $script:Cred
 
-$stages = if ($Stage -eq 'All') { @('GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9') } else { @($Stage) }
+$stages = @('GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')
+if ($Stage -ne 'All') {
+    $stages = @($Stage)
+}
 
 foreach ($st in $stages) {
     if (-not $SkipRestore) {
