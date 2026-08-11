@@ -74,20 +74,24 @@ All three pass. This converts the §14 prerequisite from "open" to "architecture
 
 | Gate | Status | Evidence / reason |
 |------|--------|-------------------|
-| GATE-1 IranDirect→PathVeer SCM upgrade | NOT EXECUTED | No IranDirect build artifact available; no VM |
-| GATE-2 Native route mutation/recovery | NOT EXECUTED | No VM; would need real SCM/routing authority |
-| GATE-3 Windows reboot persistence | NOT EXECUTED | No VM; host reboot forbidden by §62 |
-| GATE-4 Purge→reinstall | NOT EXECUTED | No VM |
-| GATE-5 Interactive fresh install | NOT EXECUTED | No VM + no production-signed Setup |
-| GATE-6 Interactive upgrade | NOT EXECUTED | No VM |
-| GATE-7 Legacy migration UI | NOT EXECUTED | No IranDirect build |
-| GATE-8 Apps&Features uninstall/reinstall | NOT EXECUTED | No VM |
-| GATE-9 Update check→verify→handoff | PARTIAL (code path) | End-to-end fetch+verify+download proven against localhost static origin in 37.4 `DistributionTests` (11 tests pass); real staging HTTPS not available |
-| GATE-10 Tampered installer rejected | PASS (code) | `Feed_TamperedInstaller_RejectedByHash` + `Feed_TamperedManifest_RejectedBySignature` (37.4) prove non-execution on hash/signature failure |
-| GATE-11 Real staging HTTPS feed | NOT EXECUTED | No staging host/DNS/infra |
-| GATE-12 Production-like immutable publication | PARTIAL (local FS) | Immutable + latest-last + stable/beta isolation proven against local filesystem backend; not against real CDN/object storage |
+| GATE-1 IranDirect→PathVeer SCM upgrade | BLOCKED | Authentic IranDirect build artifact unavailable (searched repo/git/local; see 37.8 §4); no VM |
+| GATE-2 Native route mutation/recovery | BLOCKED | No VM; would need real SCM/routing authority in guest |
+| GATE-3 Windows reboot persistence | BLOCKED | No VM; host reboot forbidden by §62 |
+| GATE-4 Purge→reinstall | BLOCKED | No VM |
+| GATE-5 Interactive fresh install | BLOCKED | No VM + no production-signed Setup (unsigned → Unknown Publisher expected) |
+| GATE-6 Interactive upgrade | BLOCKED | No VM |
+| GATE-7 Legacy migration UI | BLOCKED | No IranDirect build (see 37.8 §4) |
+| GATE-8 Apps&Features uninstall/reinstall | BLOCKED | No VM |
+| GATE-9 Update check→verify→handoff | PARTIAL | Fetch+ES256-verify+download+hash-verify proven (37.4 `DistributionTests` 11 tests + 37.6 real HTTPS); Setup handoff past unsigned warning needs VM |
+| GATE-10 Tampered installer rejected | PASS | 37.4 hash/sig tests + 37.6 R2 tamper transport test prove non-execution on failure |
+| GATE-11 Real staging HTTPS feed | PASS | 37.6 real Cloudflare R2 + `releases.pathveer.com` (see `cloudflare-r2-certification.md`) |
+| GATE-12 Production-like immutable publication | PASS | 37.6 real R2 immutable + latest-last + stable/beta isolation (see `cloudflare-r2-certification.md`) |
 
-No VM gate was marked PASS from real Windows execution. None was faked.
+VM execution gates (GATE-1..8, GATE-9 handoff) could not be physically run on the
+current developer workstation: Hyper-V is enabled but **CPU virtualization is disabled
+in firmware** and **no legitimate Windows ISO exists** on the host (37.8 §0). They are
+marked BLOCKED, not faked. A runbook (`vm-certification-runbook.md`) is ready to
+execute them on a VM-capable host.
 
 ---
 
@@ -176,11 +180,11 @@ None of these were invented or silently marked complete.
 
 ## 12. Outstanding blockers (real, release-gating)
 
-1. **Production Authenticode certificate** not procured → cannot sign PE artifacts (GATE-5/6/9/45 blocked).
-2. **Production ES256 metadata key** not provisioned → client trust store unfilled in any shipped build.
-3. **Disposable VM matrix** not executed (GATE-1..8, GATE-3 reboot, GATE-4/8 uninstall) — no VM available here.
-4. **Real staging HTTPS feed** (GATE-11) and **CDN/object-storage immutable publication** (GATE-12) not executed — no infra/DNS.
-5. **IranDirect legacy build** absent → GATE-1/7 cannot run.
+1. **Production Authenticode certificate** not procured → cannot sign PE artifacts (GATE-5/6/9 partially blocked). See `authenticode-provider-feasibility.md` (external embargo/org-only blocker).
+2. ~~Production ES256 metadata key~~ — **RESOLVED**: real `pv-meta-prod-2026-01` provisioned, embedded trust, recovery PFX written (phase 37.6 / 37.7).
+3. **Disposable VM matrix** not executed (GATE-1..8, GATE-3 reboot, GATE-4/8 uninstall) — **BLOCKED**: current host has CPU virtualization disabled in firmware and no Windows ISO (see `phase-37.8-vm-certification.md` §0). Runbook ready: `vm-certification-runbook.md`.
+4. ~~Real staging HTTPS feed (GATE-11) / immutable publication (GATE-12)~~ — **RESOLVED (PASS)**: real Cloudflare R2 + `releases.pathveer.com` (phase 37.6 / `cloudflare-r2-certification.md`).
+5. **IranDirect legacy build** absent → GATE-1/7 **BLOCKED** (no authentic artifact; searched repo/git/local — `phase-37.8-vm-certification.md` §4).
 6. **RIPEstat commercial-terms review** open (legal/business).
 
 ---
