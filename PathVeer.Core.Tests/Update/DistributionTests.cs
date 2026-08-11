@@ -119,6 +119,65 @@ public sealed class DistributionTests
         return new Bundle(dir, version, installerBytes, manifestPath, key.pub, key.keyId, key.priv);
     }
 
+    // --- Release build (New-PathVeerRelease.ps1) -------------------------------
+
+    private static int RunReleaseBuild(string version, string mode, string outRoot)
+    {
+        var script = Path.Combine(ToolsDir, "New-PathVeerRelease.ps1");
+        var psi = new ProcessStartInfo
+        {
+            FileName = "pwsh",
+            Arguments = $"-NoLogo -NoProfile -File \"{script}\" " +
+                        $"-Version {version} -Mode {mode} -OutputDirectory \"{outRoot}\" -Channel beta",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        using var p = Process.Start(psi)!;
+        var so = p.StandardOutput.ReadToEndAsync();
+        var se = p.StandardError.ReadToEndAsync();
+        p.WaitForExit();
+        Task.WaitAll(so, se);
+        if (p.ExitCode != 0)
+            throw new Exception($"Release build exited {p.ExitCode}.\nSTDOUT:\n{so.Result}\nSTDERR:\n{se.Result}");
+        return p.ExitCode;
+    }
+
+    [Fact]
+    public void ReleaseBuild_RecordsShaOfFinalOnDiskInstaller()
+    {
+        // Release-order regression: the manifest must record SHA-256 of the FINAL
+        // installer bytes on disk. Because New-PathVeerRelease.ps1 signs (step 3)
+        // BEFORE hashing (step 4), the recorded hash is always the post-sign hash;
+        // we assert here that it equals the actual on-disk bytes, which is exactly
+        // what a signer would have signed. This guards against the prior
+        // hash-then-sign ordering defect.
+        var outRoot = Path.Combine(Path.GetTempPath(), "pv-rel-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outRoot);
+        try
+        {
+            // Release/Unsigned needs no signtool and proves the hash-of-final-bytes contract.
+            RunReleaseBuild("0.0.0-order", "Release/Unsigned", outRoot);
+
+            var archDir = Path.Combine(outRoot, "0.0.0-order", "win-x64");
+            var setupExe = Path.Combine(archDir, "PathVeerSetup-0.0.0-order-win-x64.exe");
+            var manifestPath = Path.Combine(archDir, "release-manifest.json");
+            Assert.True(File.Exists(setupExe), "setup exe produced");
+            Assert.True(File.Exists(manifestPath), "manifest produced");
+
+            var actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(setupExe))).ToLowerInvariant();
+            using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var recorded = doc.RootElement.GetProperty("installer").GetProperty("sha256").GetString()!.ToLowerInvariant();
+            Assert.Equal(actual, recorded);
+            // Unsigned release must NOT claim a code-signing trust it does not have.
+            Assert.False(doc.RootElement.GetProperty("signed").GetBoolean());
+        }
+        finally
+        {
+            try { Directory.Delete(outRoot, recursive: true); } catch { }
+        }
+    }
+
     private static int RunPublisher(Bundle bundle, string channel, string env, string publishRoot, string publicBaseUrl, bool whatIf = false)
     {
         var trustedArg = $"{bundle.KeyId}:{PrivateBlobBase64(bundle.Priv)}";
