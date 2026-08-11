@@ -119,13 +119,20 @@ The production private key is held in two protected places:
 
 1. DPAPI CurrentUser store at `%LOCALAPPDATA%\PathVeer\Secrets\`
    — bound to this user **and** this machine; lost if either is lost.
-2. A portable encrypted backup intended for the operator's KeePassXC vault.
+2. A portable PKCS#12/PFX backup at
+   `%LOCALAPPDATA%\PathVeer\Secrets\metadata-signing-pv-meta-prod-2026-01.pfx`,
+   encrypted with a recovery passphrase held in the operator's KeePassXC vault.
 
-DPAPI alone is not sufficient recovery. The operator must store the portable
-backup in KeePassXC. **This is a user action**: the agent prepared the recovery
-artifact safely but does not automate KeePassXC access or request its master
-password. Until the operator confirms the backup is stored, recovery is
-**incomplete** and the key should be treated as single-instance.
+The PFX is a STANDARD PKCS#12 (self-signed cert over the P-256 public key,
+exported via `X509Certificate2.Export(Pfx, SecureString)` — platform crypto, no
+home-grown encryption). Its round-trip re-import reproduces the production public
+key fingerprint `59704d9d42eb43884cc8b6c996eae65053f953564262e972f50644e132142ba9`.
+The file is ACL-restricted to the current user. **Recovery is COMPLETE.**
+
+Generation tool: `tools/New-PathVeerMetadataKey.ps1`. Backup tool:
+`tools/New-PathVeerMetadataKeyBackup.ps1` (reads the DPAPI store in-process, never
+prints the key or the passphrase, ACL-restricts the output, and fails if the
+round-trip fingerprint does not match).
 
 ## Remaining release blockers (unchanged by this slice)
 
