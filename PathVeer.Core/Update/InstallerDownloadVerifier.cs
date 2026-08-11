@@ -63,6 +63,22 @@ public sealed class InstallerDownloadVerifier
 
         return InstallerVerificationResult.Success(actualHash);
     }
+
+    /// <summary>
+    /// Builds a production installer verifier that enforces Authenticode trust via
+    /// <see cref="CodeSignatureVerifier"/>. Until a production Authenticode
+    /// certificate is provisioned (publisher policy = <see
+    /// cref="CodeSignatureVerifier.UnprovisionedPublisher"/>), every signed file
+    /// is reported Invalid so the release stays ES256 + hash protected only and is
+    /// never presented as Authenticode-trusted. A <paramref name="expectedPublisher"/>
+    /// value is required; pass <see cref="CodeSignatureVerifier.UnprovisionedPublisher"/>
+    /// when no certificate exists.
+    /// </summary>
+    public static InstallerDownloadVerifier ForProduction(string expectedPublisher)
+    {
+        var sig = new CodeSignatureVerifier(expectedPublisher);
+        return new InstallerDownloadVerifier(path => sig.Verify(path));
+    }
 }
 
 public enum InstallerSignatureStatus

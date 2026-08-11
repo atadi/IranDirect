@@ -56,7 +56,10 @@ param(
     [string]$RuntimeIdentifier = 'win-x64',
 
     [Parameter(Mandatory = $false)]
-    [string]$BaseUrl = 'https://releases.pathveer.com'
+    [string]$BaseUrl = 'https://releases.pathveer.com',
+
+    [Parameter(Mandatory = $false)]
+    [string]$MetadataKeyId = 'pv-meta-prod-2026-01'
 )
 
 Set-StrictMode -Version Latest
@@ -239,7 +242,7 @@ if ($SignedMode) {
     Write-Step "5/5 Signing release manifest (ES256)..."
     & pwsh -NoLogo -NoProfile -File $SignManifestStep `
         -ManifestPath $ManifestPath `
-        -KeyId 'pv-meta-2026' `
+        -KeyId $MetadataKeyId `
         -FailIfUnavailable:$true
     if ($LASTEXITCODE -ne 0) { throw "Manifest signing failed (Release/Signed requires a metadata signing key)." }
 }
