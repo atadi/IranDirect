@@ -1,14 +1,24 @@
 # Phase 37.8 — Disposable VM Certification (reconciliation & host audit)
 
-Date: 2026-08-11
+Date: 2026-08-11 (superseded 2026-08-12 by `phase-37.9-vm-execution.md`)
 Branch: `development/service-authority`
 Starting HEAD: `375a9f7`
-Outcome: **VM PROVISIONING BLOCKED on this host.** Gate matrix reconciled; legacy
-IranDirect artifact confirmed unavailable; runbook prepared for a VM-capable host.
 
-## 0. Host capability audit (read-only)
+> **Correction (2026-08-12).** The original conclusion below — "VM provisioning
+> BLOCKED: CPU virtualization disabled in firmware" — is **stale and withdrawn**.
+> The blocking signal (`Win32_Processor.VirtualizationFirmwareEnabled = False`)
+> is not authoritative when Hyper-V is already active. The user experimentally
+> proved Hyper-V execution works: `Win32_ComputerSystem.HypervisorPresent = True`,
+> `bcdedit hypervisorlaunchtype = Auto`, `vmms` service Running, and a real
+> Generation-2 probe VM (`PathVeer-HyperV-Probe`) was created and booted
+> successfully. A legitimate Windows 11 ISO was supplied. The disposable
+> certification VM **was provisioned and the gates were executed** — see
+> `phase-37.9-vm-execution.md`. The historical audit below is retained as
+> evidence of the earlier (incorrect) blocker assessment.
 
-| Item | Finding |
+## 0. Host capability audit (read-only, original 2026-08-11 — RETRACTED)
+
+| Item | Finding (original, since corrected) |
 |------|---------|
 | Windows edition/build | Windows 10 Pro, 10.0.26100.1 |
 | Hyper-V feature | **Enabled** |
@@ -16,13 +26,21 @@ IranDirect artifact confirmed unavailable; runbook prepared for a VM-capable hos
 | Existing VMs | None |
 | Virtual switches | `Default Switch` (Internal), `WSL (Hyper-V firewall)` (Internal) |
 | C: free / total | 272 GiB free of 930 GiB |
-| CPU virtualization firmware | **Disabled** (`VirtualizationFirmwareEnabled = False`) |
-| Windows ISO/VHDX assets | **None found** on host (searched `C:\codespace`, Downloads, Desktop, ProgramData, Temp) |
+| CPU virtualization firmware | Reported `Disabled` by WMI (`VirtualizationFirmwareEnabled = False`) — **not authoritative under active Hyper-V/VBS**; contradicted by `HypervisorPresent = True` |
+| Windows ISO/VHDX assets | None found on host at the time (ISO supplied later) |
 
-**Conclusion:** A Hyper-V VM cannot be started on this workstation. Two independent
-prerequisites are missing: (1) no legitimate Windows installation media (ISO/VHDX),
-and (2) CPU virtualization is disabled in firmware, which blocks all VM execution
-regardless of an ISO. The host itself was not mutated.
+> **Retracted conclusion:** "A Hyper-V VM cannot be started on this workstation."
+> Incorrect — Hyper-V was operational; the WMI signal was misleading.
+
+## 0b. Corrected host/VM facts (2026-08-12)
+
+- `Win32_ComputerSystem.HypervisorPresent = True`; `vmms` Running; probe VM booted.
+- Legitimate ISO supplied: `en-us_windows_11_business_editions_version_26h1...iso`.
+- Certification VM `PathVeer-Certification` (Gen2, 4 vCPU, 8 GiB, 80 GiB dynamic
+  VHDX on D:, Default Switch, Secure Boot on) provisioned and executed the gates.
+- vTPM could not be enabled via the host's Hyper-V module (no usable local
+  guardian); the guest install used the documented Windows LabConfig TPM/SecureBoot
+  bypass (guest-only, host not weakened). See phase-37.9 for details.
 
 ## 1. Gate matrix reconciliation (authoritative: phase-37.5 §5)
 
