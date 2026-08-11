@@ -5,22 +5,30 @@ Reusable procedure for executing the **Phase 37.5 release-certification gate mat
 companion to `phase-37.5-release-certification.md` and `phase-37.8-vm-certification.md`.
 
 It was prepared on the `development/service-authority` branch after a host-capability
-audit found that a VM **cannot be provisioned on the current developer workstation**
-(see §0 of phase-37.8). When a VM-capable host + legitimate Windows ISO become
-available, execute this runbook verbatim — no redesign needed.
+audit found that a VM **could not be provisioned on the developer workstation at the
+time** (see §0 of phase-37.8). That conclusion was **subsequently withdrawn**: the
+`Win32_Processor.VirtualizationFirmwareEnabled = False` signal is not authoritative
+under active Hyper-V/VBS, and a real Generation-2 VM (`PathVeer-Certification`) was
+built and booted on this same host. The runbook below is therefore **executable
+as-is** against the already-provisioned certification VM. See `phase-37.9-vm-execution.md`.
 
-## 0. Prerequisites (VM-capable host)
+> **Correction (2026-08-12).** The certification VM **does exist and is operational**:
+> `PathVeer-Certification` (Gen2, vTPM, Secure Boot On, 4 vCPU / 8 GiB, Default
+> Switch, guest `PV-CERT` local admin `pvcert`), with a clean checkpoint
+> `PV-CLEAN-WINDOWS`. PowerShell Direct from the host as `pvcert` is the supported
+> host→guest automation channel. No BIOS/firmware change is required or permitted.
 
-- Windows 10/11 Pro or Enterprise with the **Hyper-V role enabled**.
-- **CPU virtualization (VT-x / AMD-V) enabled in firmware** — Hyper-V will not run a
-  VM without it. Verify with:
-  `Get-CimInstance Win32_Processor | Select VirtualizationFirmwareEnabled`
-  (must be `True`).
-- A **legitimate Windows 11 x64 ISO** (Microsoft Evaluation Center image, or a
-  licensed retail/VL ISO). No unofficial images.
-- `Default Switch` (Internal NAT) or an isolated NAT switch present.
-- Host disk headroom for a dynamic VHDX (≈80–100 GiB max, thin-provisioned).
-- Network outbound HTTPS to `https://releases.pathveer.com`.
+## 0. Prerequisites (VM-capable host) — verified satisfied
+
+- Windows 10/11 Pro/Enterprise with the **Hyper-V role enabled** — ✅ confirmed.
+- **Hyper-V execution capable** — ✅ confirmed (`HypervisorPresent = True`,
+  `vmms` Running, real probe VM booted). Do NOT reclassify virtualization as blocked.
+- A **legitimate Windows 11 x64 ISO** — ✅ supplied by the user (Windows 11 Business
+  Editions 26H1 ISO).
+- `Default Switch` (Internal NAT) — ✅ present; used by the certification VM.
+- Host disk headroom for a dynamic VHDX — ✅ confirmed (~64 GiB RAM, ample disk).
+- Network outbound HTTPS to `https://releases.pathveer.com` — ✅ the guest reaches the
+  public release feed over the Default Switch NAT.
 
 ## 1. Provision the disposable VM (guarded)
 
