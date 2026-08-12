@@ -14,11 +14,12 @@
         (never echoed, never logged, never written).
       * Stable is NEVER published. beta-channel immutability is respected.
 
-    RESUMABILITY:
-      * Run with -Stage All (default) for the full sequence, or -Stage <name> to
-        (re)run a single gate. Each stage restores the clean checkpoint first
-        (except where noted), so a half-run VM never poisons later stages.
-      * -SkipRestore skips the checkpoint-restore step for a single re-run.
+    #    RESUMABILITY:
+    #      * Run with -Stage All (default) for the full sequence, or -Stage <name> to
+    #        (re)run a single gate. Each stage restores the certification checkpoint
+    #        (PV-CERT-HARNESS) first (except where noted), so a half-run VM never poisons
+    #        later stages.
+    #      * -SkipRestore skips the checkpoint-restore step for a single re-run.
 
     USAGE (from a NATIVE Windows PowerShell/Terminal window so the credential
     dialog can appear):
@@ -27,7 +28,10 @@
 [CmdletBinding()]
 param(
     [string]$VmName = 'PathVeer-Certification',
-    [string]$CleanSnapshot = 'PV-CLEAN-WINDOWS',
+    # Canonical certification execution baseline. MUST be PV-CERT-HARNESS (clean Windows +
+    # approved JEA instrumentation, NO PathVeer product). Restoring PV-CLEAN-WINDOWS would
+    # wipe the JEA endpoint and break every privileged gate. Missing -> harness fails loudly.
+    [string]$CertificationSnapshot = 'PV-CERT-HARNESS',
     [ValidateSet('All','GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')]
     [string]$Stage = 'All',
     [switch]$SkipRestore,
@@ -69,9 +73,16 @@ function Assert-VmRunning {
 
 function Restore-Clean {
     param([System.Management.Automation.Runspaces.PSSession]$Session)
-    Write-Host "Restoring clean checkpoint '$CleanSnapshot'..." -ForegroundColor Yellow
+    # Certification execution baseline MUST be PV-CERT-HARNESS (clean Windows + approved JEA
+    # instrumentation, NO PathVeer product). Restoring PV-CLEAN-WINDOWS would wipe the JEA
+    # endpoint and break every privileged gate. Fail loudly (no silent fallback) if absent.
+    Write-Host "Restoring certification checkpoint '$CertificationSnapshot'..." -ForegroundColor Yellow
     if ($Session) { Remove-PSSession $Session -ErrorAction SilentlyContinue }
-    Restore-VMSnapshot -VMName $VmName -Name $CleanSnapshot -Confirm:$false -ErrorAction Stop
+    try {
+        Restore-VMSnapshot -VMName $VmName -Name $CertificationSnapshot -Confirm:$false -ErrorAction Stop
+    } catch {
+        throw "Certification checkpoint '$CertificationSnapshot' not found or could not be restored on VM '$VmName'. Create it from the clean Windows baseline AFTER registering the JEA endpoint (Enable-PathVeerCertificationJea.ps1), then re-run. Do NOT use PV-CLEAN-WINDOWS for certification runs. ($($_.Exception.Message))"
+    }
     Start-VM -Name $VmName -ErrorAction Stop
     (Get-VM -Name $VmName) | Wait-VM -For Heartbeat -Timeout 300 -ErrorAction Stop
     Start-Sleep -Seconds 5
@@ -603,7 +614,7 @@ foreach ($st in $stages) {
             } catch {
                 Write-Host "  GATE-5 stage ended (install gate not satisfied): $($_.Exception.Message)" -ForegroundColor Red
                 # Stop the whole run cleanly; structured FAIL evidence already saved.
-                # The final block restores the clean checkpoint.
+                # The final block restores the certification checkpoint (PV-CERT-HARNESS).
                 $sess | Remove-PSSession -ErrorAction SilentlyContinue
                 return
             }
@@ -623,7 +634,7 @@ if ($script:JeaSession) { $script:JeaSession | Remove-PSSession -ErrorAction Sil
 if (-not $SkipRestore) {
     $sess | Remove-PSSession -ErrorAction SilentlyContinue
     Restore-Clean
-    Write-Host "Guest restored to clean baseline '$CleanSnapshot'." -ForegroundColor Green
+    Write-Host "Guest restored to certification baseline '$CertificationSnapshot'." -ForegroundColor Green
 }
 
 Write-Host "`nAll evidence written to: $EvidenceDir" -ForegroundColor Green
