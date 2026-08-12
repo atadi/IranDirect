@@ -187,27 +187,31 @@ function Invoke-PathVeerCli {
 function Get-PathVeerCertificationBoundary {
     <#
     .SYNOPSIS
-        Trusted restricted-boundary scan: report which dangerous commands are exposed in THIS JEA
-        session. Runs as trusted module code (FullLanguage, virtual account). The caller receives only
-        the resulting list - no arbitrary scripting is sent across the boundary.
+        Trusted declaration of the canonical forbidden-command set for the certification JEA
+        boundary. Runs as trusted module code (FullLanguage virtual account).
+
+        IMPORTANT: this function does NOT measure caller-visible command availability itself.
+        Measuring forbidden availability from inside the trusted module context is INVALID: the
+        trusted context resolves the full system PATH and FullLanguage, so Get-Command finds host
+        executables (powershell.exe, cmd.exe, wscript.exe, ...) that are NOT exposed to the
+        restricted NoLanguage caller -> false positives.
+
+        The authoritative caller-visible surface is measured by the DESKTOP probe via a bare
+        Get-Command executed in the restricted JEA session ($jeaSession), then filtered Desktop-side
+        against this canonical forbidden set. This function supplies only the trusted definition
+        (fact A). The caller-visible measurement (fact B) is never taken from the trusted context.
     #>
     [CmdletBinding()]
     param()
-    $forbidden = @(
-        'powershell.exe', 'cmd.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe',
-        'Start-Process', 'Invoke-Expression', 'Invoke-Command', 'Invoke-WebRequest',
-        'New-ScheduledTask', 'Register-ScheduledTask', 'Set-Content', 'Set-Item',
-        'New-Item', 'Invoke-Item', 'Get-CimInstance'
-    )
-    $found = @()
-    foreach ($name in $forbidden) {
-        $base = if ($name -like '*.exe') { [System.IO.Path]::GetFileNameWithoutExtension($name) } else { $name }
-        if (Get-Command -Name $base -ErrorAction SilentlyContinue) { $found += $name }
-    }
     [PSCustomObject]@{
-        forbiddenChecked = $forbidden.Count
-        available        = $found
-        restrictedBoundaryOk = ($found.Count -eq 0)
+        # Canonical dangerous-command definition (trusted fact). The probe compares the restricted
+        # session's OWN Get-Command output against this list Desktop-side.
+        forbiddenDefined = @(
+            'powershell.exe', 'cmd.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe', 'mshta.exe',
+            'Start-Process', 'Invoke-Expression', 'Invoke-Command', 'Invoke-WebRequest',
+            'New-ScheduledTask', 'Register-ScheduledTask', 'Set-Content', 'Set-Item',
+            'New-Item', 'Invoke-Item', 'Get-CimInstance'
+        )
     }
 }
 

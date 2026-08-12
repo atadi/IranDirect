@@ -217,12 +217,24 @@ try {
         throw "SECURITY VIOLATION: ordinary parent (PV-CERT\pvcert) was able to WRITE into the protected certification tree ($protectedRoot). Trust boundary broken."
     }
 
-    # --- RESTRICTED BOUNDARY: forbidden commands must be ABSENT from the JEA session ---
-    # Delegated to the trusted Get-PathVeerCertificationBoundary function (NoLanguage-safe bare call).
-    # The returned list is the certification evidence; no scripting is sent into the JEA session.
-    $boundary = Invoke-Command -Session $jeaSession -ScriptBlock { Get-PathVeerCertificationBoundary }
-    $result.forbiddenAvailable = $boundary.available
-    $result.restrictedBoundaryOk = $boundary.restrictedBoundaryOk
+    # --- RESTRICTED BOUNDARY: forbidden commands must be ABSENT from the CALLER-VISIBLE JEA surface ---
+    # The authoritative surface is the restricted JEA session's OWN Get-Command, collected via a bare
+    # allowed call (NoLanguage-safe; proven against the REAL VM). Filtering/comparison is performed on
+    # the Desktop after deserialization, so NO scripting is sent into the restricted session.
+    # Get-PathVeerCertificationBoundary supplies the canonical forbidden set (trusted fact A); the
+    # measurement (fact B) is taken from the restricted session, never from the trusted module context
+    # (which would otherwise resolve host executables the caller cannot actually invoke -> false positive).
+    $boundaryDef = Invoke-Command -Session $jeaSession -ScriptBlock { Get-PathVeerCertificationBoundary }
+    $callerCommands = Invoke-Command -Session $jeaSession -ScriptBlock { Get-Command }
+    $callerNames = @($callerCommands | ForEach-Object { $_.Name })
+    $forbidden = @($boundaryDef.forbiddenDefined)
+    $hits = @()
+    foreach ($f in $forbidden) {
+        $base = if ($f -like '*.exe') { [System.IO.Path]::GetFileNameWithoutExtension($f) } else { $f }
+        if ($callerNames -contains $base) { $hits += $f }
+    }
+    $result.forbiddenAvailable = $hits
+    $result.restrictedBoundaryOk = ($hits.Count -eq 0)
     $result.restrictionChecksCompleted = $true
 
     $result.elevationAvailable = $result.jeaIsAdministrator
@@ -244,7 +256,7 @@ try {
         Write-Host 'JEA CONTROL PLANE FAIL' -ForegroundColor Red
         if ($result.parentIsAdministrator) { Write-Host '  - parent was unexpectedly administrator' -ForegroundColor Red }
         if (-not $result.jeaIsAdministrator) { Write-Host '  - JEA session not genuinely elevated' -ForegroundColor Red }
-        if (-not $result.restrictedBoundaryOk) { Write-Host "  - forbidden commands available: $($forbiddenAvailable -join ', ')" -ForegroundColor Red }
+        if (-not $result.restrictedBoundaryOk) { Write-Host "  - forbidden commands available: $($result.forbiddenAvailable -join ', ')" -ForegroundColor Red }
         if (-not $result.trustedFilesNotWritableByParent) { Write-Host '  - parent CAN write into protected certification tree' -ForegroundColor Red }
         exit 1
     }
