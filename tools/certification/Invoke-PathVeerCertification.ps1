@@ -97,121 +97,11 @@ function Copy-ToGuest([System.Management.Automation.Runspaces.PSSession]$Session
     }
 }
 
-<# .SYNOPSIS
-    Runs a guest command with a genuinely elevated (administrative) token, NON-interactively.
-
-    The PowerShell Direct session is created as 'pvcert' (a member of Administrators but
-    with a UAC-filtered token -> guestIsAdministrator reports False). A plain '&' spawn in
-    that session is therefore non-elevated, so the installer's Assert-Administrator aborts
-    before any payload is written. This helper elevates via a credential-based RunAs logon
-    (Start-Process -Verb RunAs -Credential), which does NOT surface a UAC consent dialog
-    (it is a fresh elevated logon, not a token-filter removal). UAC itself is left intact.
-
-    It writes a structured result (exit code + captured stdout/stderr log) so the harness
-    can treat installer failure as a hard gate boundary instead of crashing on a later
-    missing-command invocation.
-
-    If elevation is unavailable for any reason, it falls back to a direct (non-elevated)
-    run so the gate still receives structured FAIL evidence rather than an unclassified
-    exception -- elevationAvailable will be $false to make the degradation visible.
-#>
-function Invoke-GuestElevated {
-    param(
-        [System.Management.Automation.Runspaces.PSSession]$Session,
-        [System.Management.Automation.PSCredential]$Cred,
-        [string]$Command,                                  # command line to run elevated
-        [string]$ResultDir = 'C:\pv-cert',
-        [int]$TimeoutSeconds = 900
-    )
-    $marker = [guid]::NewGuid().ToString('N')
-    $wrap    = "$ResultDir\elevated-$marker.ps1"
-    $log     = "$ResultDir\elevated-$marker.log"
-    $wrapContent = "& $Command 2>&1 | Set-Content -FilePath '$log' -Encoding utf8`n`$e = `$LASTEXITCODE`nexit `$e"
-    $result = Invoke-Command -Session $Session -ScriptBlock {
-        param($wrap, $wrapContent, $log, $CredIn, $Command, $TimeoutSeconds)
-        $out = [PSCustomObject]@{
-            started=$false; completed=$false; exitCode=$null
-            logFile=$log; elevationAvailable=$true; error=$null
-        }
-        try {
-            Set-Content -Path $wrap -Value $wrapContent -Encoding UTF8
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = 'powershell.exe'
-            $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$wrap`""
-            $psi.Verb = 'RunAs'
-            $psi.UseShellExecute = $true
-            if ($CredIn) { $psi.UserName = $CredIn.UserName; $psi.Password = $CredIn.GetNetworkCredential().Password }
-            $p = [System.Diagnostics.Process]::Start($psi)
-            $out.started = $true
-            if ($p.WaitForExit($TimeoutSeconds * 1000)) { $out.completed = $true; $out.exitCode = $p.ExitCode }
-            else { $out.error = "elevated process did not exit within $TimeoutSeconds s" }
-        } catch {
-            # Fall back to a direct (non-elevated) run so the gate still gets evidence.
-            $out.elevationAvailable = $false
-            $out.error = $_.Exception.Message
-            try {
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& { $Command } 2>&1 | Set-Content -FilePath '$log' -Encoding utf8; exit `$LASTEXITCODE" | Out-Null
-                $out.started = $true; $out.completed = $true; $out.exitCode = $LASTEXITCODE
-            } catch {
-                $out.error = "$($out.error); fallback also failed: $($_.Exception.Message)"
-            }
-        }
-        try { if (Test-Path $log) { $out | Add-Member -NotePropertyName log -NotePropertyValue (Get-Content $log -Raw -ErrorAction SilentlyContinue) } } catch {}
-        return $out
-    } -ArgumentList $wrap, $wrapContent, $log, $Cred, $Command, $TimeoutSeconds
-    return $result
-}
-
-<# .SYNOPSIS
-    Runs an entire guest SCRIPTBLOCK elevated and reads back a structured result object the
-    script writes to a JSON file. Used for gates whose whole body is privileged (e.g. GATE-2
-    route mutation + service control, GATE-22 contract checks) so we avoid scattering
-    per-command elevation calls.
-#>
-function Invoke-GuestScriptElevated {
-    param(
-        [System.Management.Automation.Runspaces.PSSession]$Session,
-        [System.Management.Automation.PSCredential]$Cred,
-        [scriptblock]$ScriptBlock,
-        [hashtable]$ArgumentList = @{},
-        [string]$ResultDir = 'C:\pv-cert',
-        [int]$TimeoutSeconds = 900
-    )
-    $marker = [guid]::NewGuid().ToString('N')
-    $scriptFile  = "$ResultDir\elevated-script-$marker.ps1"
-    $argJson     = "$ResultDir\elevated-script-$marker.args.json"
-    $resultJson  = "$ResultDir\elevated-script-$marker.result.json"
-
-    # Write the guest script to a file FIRST. The script reads its args from a JSON file
-    # and writes its result to a result JSON file.
-    $guestScript = @'
-$argsIn = Get-Content '__ARGJSON__' -Raw | ConvertFrom-Json -AsHashtable
-$result = & {
-    param($a)
-__BODY__
-} $argsIn
-$result | ConvertTo-Json -Depth 8 | Set-Content -FilePath '__RESULTJSON__' -Encoding utf8
-'@
-    # Convert the scriptblock body to text, then inject.
-    $bodyText = $ScriptBlock.ToString()
-    $guestScript = $guestScript.Replace('__ARGJSON__', $argJson).Replace('__RESULTJSON__', $resultJson).Replace('__BODY__', $bodyText)
-
-    Invoke-Command -Session $Session -ScriptBlock {
-        param($f, $c, $aj, $a)
-        Set-Content -Path $f -Value $c -Encoding UTF8
-        $a | ConvertTo-Json -Depth 8 | Set-Content -Path $aj -Encoding utf8
-    } -ArgumentList $scriptFile, $guestScript, $argJson, $ArgumentList | Out-Null
-
-    # Elevate `powershell.exe -File <script>`; the script itself writes the result JSON.
-    $run = Invoke-GuestElevated -Session $Session -Cred $Cred -Command "powershell.exe -File '$scriptFile'" -ResultDir $ResultDir -TimeoutSeconds $TimeoutSeconds
-
-    $rb = Invoke-Command -Session $Session -ScriptBlock {
-        param($rj)
-        if (Test-Path $rj) { try { return Get-Content $rj -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json } catch {} }
-    } -ArgumentList $resultJson
-
-    return [PSCustomObject]@{ elevation = $run; result = $rb }
-}
+# Shared privileged-execution primitive (single source of truth). It defines
+# Invoke-GuestElevated and Invoke-GuestScriptElevated, used by every privileged gate.
+# Scheduled-Task (RunLevel Highest, Interactive) elevation -- no UAC dialog, no password
+# persisted/exposed. The child captures its OWN elevation evidence; callers must assert it.
+. (Join-Path $PSScriptRoot 'PathVeer.Certification.Elevation.ps1')
 
 # -------- Stage implementations (each returns a hashtable of evidence) --------
 
@@ -271,6 +161,7 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     $gate5Failed = $false
     $failReasons = [System.Collections.Generic.List[string]]::new()
     if (-not $install.elevationAvailable) { $gate5Failed = $true; $failReasons.Add("elevation unavailable: $($install.error)") }
+    if ($install.elevationSucceeded -ne $true) { $gate5Failed = $true; $failReasons.Add("child process not genuinely elevated (childIsAdministrator=$($install.childIsAdministrator), childUser=$($install.childUser))") }
     if ($install.completed -eq $false) { $gate5Failed = $true; $failReasons.Add("installer did not complete: $($install.error)") }
     if ($null -ne $install.exitCode -and $install.exitCode -ne 0) { $gate5Failed = $true; $failReasons.Add("installer exit code $($install.exitCode)") }
     if ($installResult -and $installResult.success -eq $false) { $gate5Failed = $true; $failReasons.Add("installer reported failure: [$($installResult.category)] $($installResult.message)") }
@@ -284,6 +175,9 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
             result = 'FAIL'
             reasons = $failReasons.ToArray()
             elevated = $install.elevationAvailable
+            elevationSucceeded = $install.elevationSucceeded
+            childUser = $install.childUser
+            childIsAdministrator = $install.childIsAdministrator
             installExitCode = $install.exitCode
             installCompleted = $install.completed
             installResult = $installResult
