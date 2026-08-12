@@ -32,10 +32,24 @@ if ($existing) {
     Write-Host "JEA endpoint '$configName' not registered; nothing to remove." -ForegroundColor Yellow
 }
 
-$modulePath = Join-Path $env:ProgramFiles 'PathVeerCertificationJea'
-if (Test-Path $modulePath) { Remove-Item -Path $modulePath -Recurse -Force -ErrorAction SilentlyContinue }
+# Remove ONLY the certification module we installed (under the standard Windows PowerShell module
+# path, matching Enable-PathVeerCertificationJea.ps1). Does not touch unrelated modules.
+$modulePath = Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\PathVeerCertificationJea'
+if (Test-Path $modulePath) {
+    Remove-Item -Path $modulePath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Removed certification module: $modulePath" -ForegroundColor Green
+} else {
+    Write-Host "Certification module not present at $modulePath; nothing to remove." -ForegroundColor Yellow
+}
 
-$transcripts = 'C:\ProgramData\PathVeerCertificationJea\Transcripts'
-if (Test-Path $transcripts) { Remove-Item -Path $transcripts -Recurse -Force -ErrorAction SilentlyContinue }
+# Remove certification-specific instrumentation under ProgramData (transcripts + protected tree).
+# This is certification scaffolding, not PathVeer product state.
+$protectedRoot = 'C:\ProgramData\PathVeerCertificationJea'
+if (Test-Path $protectedRoot) {
+    Remove-Item -Path $protectedRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Removed certification instrumentation: $protectedRoot" -ForegroundColor Green
+} else {
+    Write-Host "Certification instrumentation not present at $protectedRoot; nothing to remove." -ForegroundColor Yellow
+}
 
 Write-Host 'Certification JEA control plane removed. Unrelated Windows/PathVeer state untouched.' -ForegroundColor Cyan

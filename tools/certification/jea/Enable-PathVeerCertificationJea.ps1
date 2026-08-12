@@ -9,14 +9,17 @@
 
     Must run ONCE with genuine local elevation (Run as Administrator) inside the PV-CERT-WINDOWS
     guest, NOT from the filtered PowerShell Direct session (Windows denies bootstrapping elevation
-    from the filtered parent — that is why the old Scheduled-Task design failed with "Access denied").
+    from the filtered parent - that is why the old Scheduled-Task design failed with "Access denied").
 
-    Security-critical setup performed here:
-      - Installs the trusted module (PathVeerCertificationJea) with ONLY validated wrapper functions.
-      - Creates C:\ProgramData\PathVeerCertificationJea\Transcripts with ACLs so that the ordinary /
-        filtered PV-CERT\pvcert account CANNOT modify or delete audit transcripts (SYSTEM + local
-        Administrators have full control; pvcert gets no access).
-      - Registers the endpoint with RoleDefinitions limited to PV-CERT\pvcert (not all local admins).
+    SECURITY-CRITICAL: this is the genuine elevated TRUST TRANSITION. It installs the trusted
+    module into the standard all-users Windows PowerShell module path and promotes the installer /
+    payload into the protected certification tree. The filtered pvcert caller never gains write to
+    either location.
+
+    JEA runs on Windows PowerShell (Desktop edition). Run this script from an ELEVATED
+    Windows PowerShell (powershell.exe), NOT pwsh, so module discovery and registration use the
+    Windows PowerShell PSModulePath. (If launched under pwsh, discovery validation is delegated to
+    Windows PowerShell automatically.)
 
     After this succeeds and Test-PathVeerCertGuestJea.ps1 proves both privileged execution AND the
     restricted command boundary, take a new checkpoint PV-CERT-HARNESS. Never modify PV-CLEAN-WINDOWS.
@@ -44,14 +47,21 @@ foreach ($f in @($pssc,$role,$psm1,$psd1)) {
     if (-not (Test-Path $f)) { throw "Required file not found: $f" }
 }
 
-# Install the trusted module under Program Files.
-$modulePath = Join-Path $env:ProgramFiles 'PathVeerCertificationJea'
-$roleDir    = Join-Path $modulePath 'RoleCapabilities'
+# ---------------------------------------------------------------------------------------------
+# Install the trusted module into the STANDARD all-users Windows PowerShell module path.
+# Windows PowerShell 5.1 only auto-discovers role-capability modules from:
+#   $PSHOME\Modules, $env:ProgramFiles\WindowsPowerShell\Modules, $HOME\Documents\WindowsPowerShell\Modules
+# The previous location (C:\Program Files\PathVeerCertificationJea) was NOT on PSModulePath, so the
+# JEA runspace could not find 'PathVeerCertificationRole' -> "Could not find the role capability".
+# C:\Program Files\WindowsPowerShell\Modules is the correct, discoverable location.
+# ---------------------------------------------------------------------------------------------
+$moduleBase = Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\PathVeerCertificationJea'
+$roleDir    = Join-Path $moduleBase 'RoleCapabilities'
 New-Item -ItemType Directory -Force -Path $roleDir | Out-Null
-Copy-Item -Path $psm1 -Destination (Join-Path $modulePath 'PathVeerCertificationJea.psm1') -Force
-Copy-Item -Path $psd1 -Destination (Join-Path $modulePath 'PathVeerCertificationJea.psd1') -Force
+Copy-Item -Path $psm1 -Destination (Join-Path $moduleBase 'PathVeerCertificationJea.psm1') -Force
+Copy-Item -Path $psd1 -Destination (Join-Path $moduleBase 'PathVeerCertificationJea.psd1') -Force
 Copy-Item -Path $role -Destination (Join-Path $roleDir 'PathVeerCertificationRole.psrc') -Force
-Copy-Item -Path $pssc -Destination (Join-Path $modulePath 'PathVeer.Certification.pssc') -Force
+Write-Host "Trusted module installed to: $moduleBase" -ForegroundColor Cyan
 
 # --- Protected certification tree (TRUST BOUNDARY) ---
 # Layout:
@@ -146,5 +156,90 @@ if ($existing) {
 }
 Register-PSSessionConfiguration -Path $pssc -Name $configName -Force -ErrorAction Stop
 
-Write-Host "Registered JEA endpoint '$configName' (role limited to PV-CERT\pvcert)." -ForegroundColor Green
+# ---------------------------------------------------------------------------------------------
+# Post-install validation. The previous bootstrap printed success even though the endpoint was
+# unusable because the role capability was not discoverable. We now FAIL LOUDLY if any of the
+# required conditions is not met.
+# ---------------------------------------------------------------------------------------------
+Write-Host "Validating JEA module + role-capability discoverability (Windows PowerShell)..." -ForegroundColor Cyan
+
+function Get-ModuleDiscovery {
+    # Windows PowerShell (Desktop) shares JEA's PSModulePath. If we are running under pwsh (Core),
+    # delegate discovery to Windows PowerShell so the check reflects the actual JEA runtime.
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        $json = powershell.exe -NoProfile -Command @'
+$mod = Get-Module -ListAvailable -Name PathVeerCertificationJea | Select-Object -First 1
+if ($mod) {
+    [PSCustomObject]@{
+        Found     = $true
+        ModuleBase = $mod.ModuleBase
+        RoleCap   = Test-Path (Join-Path $mod.ModuleBase 'RoleCapabilities\PathVeerCertificationRole.psrc')
+    } | ConvertTo-Json -Compress
+} else {
+    '{"Found":false}'
+}
+'@
+        return ($json | ConvertFrom-Json)
+    } else {
+        $mod = Get-Module -ListAvailable -Name PathVeerCertificationJea | Select-Object -First 1
+        return [PSCustomObject]@{
+            Found      = ($null -ne $mod)
+            ModuleBase = $(if ($mod) { $mod.ModuleBase } else { $null })
+            RoleCap    = $(if ($mod) { Test-Path (Join-Path $mod.ModuleBase 'RoleCapabilities\PathVeerCertificationRole.psrc') } else { $false })
+        }
+    }
+}
+
+$disc = Get-ModuleDiscovery
+if (-not $disc.Found) {
+    throw "VALIDATION FAILED: module 'PathVeerCertificationJea' is not discoverable by Windows PowerShell (PSModulePath). The role capability will NOT resolve -> endpoint unusable."
+}
+if (-not [string]::Equals($disc.ModuleBase, $moduleBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "VALIDATION FAILED: module discovered at '$($disc.ModuleBase)' but expected '$moduleBase'. Role capability resolution path is wrong."
+}
+if (-not $disc.RoleCap) {
+    throw "VALIDATION FAILED: RoleCapabilities\PathVeerCertificationRole.psrc is missing under module base '$($disc.ModuleBase)'."
+}
+
+$cfg = Get-PSSessionConfiguration -Name $configName -ErrorAction SilentlyContinue
+if (-not $cfg) { throw "VALIDATION FAILED: endpoint '$configName' is not registered." }
+if ($cfg.Enabled -ne $true) { throw "VALIDATION FAILED: endpoint '$configName' is registered but not enabled." }
+
+# Smoke test: attempt a local JEA session. As a non-role user (the operator is admin, not in
+# RoleDefinitions) the connection is EXPECTED to be rejected with an authorization error - which
+# proves the endpoint is reachable AND the role capability resolved. If the role capability still
+# cannot be found, the error mentions "role capability" / "could not find" -> we fail loudly.
+Write-Host "Smoke test: attempting a local JEA session (expected: authorization denied for non-role user, NOT 'role capability not found')..." -ForegroundColor Cyan
+$job = Start-Job -ScriptBlock { param($cn)
+    try {
+        $s = New-PSSession -ComputerName localhost -ConfigurationName $cn -ErrorAction Stop
+        if ($s) { Remove-PSSession $s -ErrorAction SilentlyContinue }
+        return 'CONNECTED'
+    } catch {
+        return "ERR:$($_.Exception.Message)"
+    }
+} -ArgumentList $configName
+$done = Wait-Job $job -Timeout 30
+if (-not $done) {
+    Stop-Job $job -ErrorAction SilentlyContinue
+    Remove-Job $job -ErrorAction SilentlyContinue
+    Write-Host "Smoke test: timed out (inconclusive; module + endpoint validation above is authoritative)." -ForegroundColor Yellow
+} else {
+    $r = Receive-Job $job
+    Remove-Job $job -ErrorAction SilentlyContinue
+    if ($r -eq 'CONNECTED') {
+        Write-Host "Smoke test: connected to endpoint (unexpected for non-role user) - endpoint reachable." -ForegroundColor Green
+    } elseif ($r -match '^ERR:') {
+        $smokeErr = $r.Substring(4)
+        if ($smokeErr -match 'role capability|could not find') {
+            throw "VALIDATION FAILED (smoke test): role capability STILL not resolvable: $smokeErr"
+        } elseif ($smokeErr -match 'not authorized|access is denied|cannot be loaded|permission') {
+            Write-Host "Smoke test: endpoint reachable; role capability resolved; connection correctly rejected for non-role user (expected)." -ForegroundColor Green
+        } else {
+            Write-Host "Smoke test: inconclusive (transport/environment): $smokeErr" -ForegroundColor Yellow
+        }
+    }
+}
+
+Write-Host "Registered JEA endpoint '$configName' (role limited to PV-CERT\pvcert) and validated role-capability discovery." -ForegroundColor Green
 Write-Host "Next: from the HOST run Test-PathVeerCertGuestJea.ps1 to prove privileged context AND restricted boundary." -ForegroundColor Cyan
