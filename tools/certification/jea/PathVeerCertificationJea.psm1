@@ -7,21 +7,29 @@
 # registry path, or service name may be supplied by the connecting user. The module may use
 # privileged PowerShell internally, but only against KNOWN PathVeer certification targets.
 #
-# SECURITY CONTRACT:
-#   - The installer location and CLI location are fixed constants. They are never parameters.
-#   - Permitted service identity is fixed ('PathVeer').
-#   - Permitted installer actions are a closed ValidateSet.
-#   - No generic shell (powershell.exe/cmd.exe), no Invoke-Expression, no Start-Process with
-#     caller input, no New-ScheduledTask, no arbitrary filesystem/registry write primitives.
-#   - Functions return structured evidence; they do not silently mask failure.
+# TRUST BOUNDARY (corrected): the privileged installer script and the package payload are
+# executed ONLY from the PROTECTED certification tree
+#   C:\ProgramData\PathVeerCertificationJea\Trusted     (installer script)
+#   C:\ProgramData\PathVeerCertificationJea\Payloads    (package payload)
+# These directories are created by the operator-elevated bootstrap with ACLs that DENY the
+# ordinary/filtered PV-CERT\pvcert account write access. The untrusted incoming staging area
+#   C:\pv-cert\incoming
+# is pvcert-writable but is NEVER executed by privileged code. The bootstrap performs the
+# one-way promotion (copy + ACL) from incoming -> protected; no JEA function promotes.
 
-$script:InstallScript   = 'C:\pv-cert\Install-PathVeer.ps1'
-$script:InstallPackage  = 'C:\pv-cert\PathVeer-1.0.0-beta.1'
+$script:BaseDir         = Join-Path $env:ProgramData 'PathVeerCertificationJea'
+$script:TrustedDir      = Join-Path $script:BaseDir 'Trusted'
+$script:PayloadDir      = Join-Path $script:BaseDir 'Payloads'
+# PROTECTED, operator-promoted copies — never caller-supplied, never from C:\pv-cert at runtime.
+$script:InstallScript   = Join-Path $script:TrustedDir 'Install-PathVeer.ps1'
+$script:InstallPackage  = Join-Path $script:PayloadDir 'PathVeer-1.0.0-beta.1'
 $script:CliExe          = 'C:\Program Files\PathVeer\Cli\PathVeer.Cli.exe'
 $script:ServiceName     = 'PathVeer'
 $script:InstallRoot     = 'C:\Program Files\PathVeer'
 $script:StateRoot       = Join-Path $env:ProgramData 'PathVeer'
-$script:ResultRoot      = 'C:\pv-cert'
+# C:\pv-cert is explicitly UNTRUSTED incoming staging. It is referenced here ONLY to explain
+# that it must NOT be executed; no executable content is ever read from it by privileged code.
+$script:UntrustedIncoming = 'C:\pv-cert\incoming'
 
 function Test-PathVeerCertificationAdmin {
     <#

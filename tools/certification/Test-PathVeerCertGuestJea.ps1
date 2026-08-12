@@ -92,6 +92,35 @@ try {
         [PSCustomObject]@{ user = $id.Name; isAdministrator = $wp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator) }
     }
 
+    # Prove the TRUST BOUNDARY: the ordinary/filtered parent (pvcert) must NOT be able to write
+    # into the protected certification tree. We attempt to create a harmless uniquely-named
+    # sentinel file in each protected directory and expect ACCESS DENIED. We never touch the
+    # real trusted installer / payload / transcript files.
+    $protectedDirs = @(
+        (Join-Path $env:ProgramData 'PathVeerCertificationJea\Trusted'),
+        (Join-Path $env:ProgramData 'PathVeerCertificationJea\Payloads'),
+        (Join-Path $env:ProgramData 'PathVeerCertificationJea\Transcripts'),
+        (Join-Path $env:ProgramData 'PathVeerCertificationJea')
+    )
+    $parentWriteAttempts = Invoke-Command -Session $session -ScriptBlock {
+        param($dirs)
+        $results = @()
+        foreach ($d in $dirs) {
+            if (-not (Test-Path $d)) { $results += [PSCustomObject]@{ dir = $d; exists = $false; writeDenied = $true; note = 'absent (bootstrap not run)' }; continue }
+            $sentinel = Join-Path $d ('probe-write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+            $denied = $false
+            try { [System.IO.File]::WriteAllText($sentinel, 'probe'); Remove-Item -Path $sentinel -Force -ErrorAction SilentlyContinue }
+            catch { $denied = $true }
+            $results += [PSCustomObject]@{ dir = $d; exists = $true; writeDenied = $denied }
+        }
+        return $results
+    } -ArgumentList $protectedDirs
+    # Trust boundary holds if every existing protected dir DENIES parent write.
+    $parentCannotWriteProtected = $true
+    foreach ($r in $parentWriteAttempts) {
+        if ($r.exists -and -not $r.writeDenied) { $parentCannotWriteProtected = $false }
+    }
+
     # Prove the restricted boundary: forbidden commands must be ABSENT from the JEA session.
     $forbiddenAvailable = Invoke-Command -Session $jeaSession -ScriptBlock {
         param($forbidden)
@@ -116,21 +145,24 @@ try {
         elevationAvailable = $jea.isAdministrator
         elevationSucceeded = $jea.isAdministrator
         restrictedBoundaryOk = $restrictedBoundaryOk
+        trustedFilesNotWritableByParent = $parentCannotWriteProtected
+        parentWriteAttempts = $parentWriteAttempts
         forbiddenAvailable = $forbiddenAvailable
         error = $null
     }
 
     Save-Probe $report
 
-    $pass = ($parent.isAdministrator -eq $false) -and ($jea.isAdministrator -eq $true) -and $restrictedBoundaryOk
+    $pass = ($parent.isAdministrator -eq $false) -and ($jea.isAdministrator -eq $true) -and $restrictedBoundaryOk -and $parentCannotWriteProtected
     if ($pass) {
-        Write-Host 'JEA CONTROL PLANE PASS (privileged context + restricted boundary)' -ForegroundColor Green
+        Write-Host 'JEA CONTROL PLANE PASS (privileged context + restricted boundary + trust boundary)' -ForegroundColor Green
         exit 0
     } else {
         Write-Host 'JEA CONTROL PLANE FAIL' -ForegroundColor Red
         if ($parent.isAdministrator) { Write-Host '  - parent was unexpectedly administrator' -ForegroundColor Red }
         if (-not $jea.isAdministrator) { Write-Host '  - JEA session not genuinely elevated' -ForegroundColor Red }
         if (-not $restrictedBoundaryOk) { Write-Host "  - forbidden commands available: $($forbiddenAvailable -join ', ')" -ForegroundColor Red }
+        if (-not $parentCannotWriteProtected) { Write-Host '  - parent CAN write into protected certification tree' -ForegroundColor Red }
         exit 1
     }
 } finally {

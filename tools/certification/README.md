@@ -59,14 +59,26 @@ credentials or a password.
   validates its parameters (ValidateSet / ValidatePattern / constrained types); no `-Command`,
   ScriptBlock, executable path, registry path, filesystem path, or service name is accepted
   from the caller. Installer/CLI paths are FIXED inside the trusted module.
+- **Trust boundary (protected vs untrusted zones).** The privileged JEA installer executes the
+  installer script and consumes the package payload ONLY from the PROTECTED tree
+  `C:\ProgramData\PathVeerCertificationJea\Trusted` and `...\Payloads`. These are created by the
+  operator-elevated bootstrap with ACLs that DENY the ordinary/filtered `PV-CERT\pvcert` account
+  write access (SYSTEM + local Administrators hold FullControl; pvcert gets an explicit DENY).
+  The untrusted incoming staging area `C:\pv-cert\incoming` is pvcert-writable but is NEVER
+  executed by privileged code. The bootstrap performs the one-way, operator-authorized promotion
+  (copy + ACL) from `C:\pv-cert\incoming` (or the operator-provided source) into the protected
+  tree. NO JEA function promotes arbitrary content, so a filtered pvcert caller cannot convert
+  incoming content into executed privileged content.
 - **Virtual account, no added groups.** `RunAsVirtualAccount = $true`, no
   `RunAsVirtualAccountGroups`. The standard virtual-account behavior yields the administrative
   identity required by certification (verify on the VM).
 - **Narrow role definition.** `RoleDefinitions = @{ 'PV-CERT\pvcert' = 'PathVeerCertificationRole' }`.
   NOT every local administrator — only the certification identity.
-- **Protected audit transcripts.** `TranscriptDirectory = 'C:\ProgramData\PathVeerCertificationJea\Transcripts'`.
-  The bootstrap creates it with an ACL that denies the ordinary/filtered `PV-CERT\pvcert` account
-  any access; only SYSTEM and local Administrators hold FullControl. Audit logs cannot be tampered
+- **Protected audit transcripts + trusted payloads.** `TranscriptDirectory =
+  'C:\ProgramData\PathVeerCertificationJea\Transcripts'`. The bootstrap creates the whole
+  `C:\ProgramData\PathVeerCertificationJea\{Trusted,Payloads,Transcripts}` tree with ACLs that
+  deny the ordinary/filtered `PV-CERT\pvcert` account any write; only SYSTEM and local
+  Administrators hold FullControl. Audit logs and trusted installer/payload cannot be tampered
   by the filtered connecting user.
 
 ### Host bridge + probes
@@ -82,6 +94,9 @@ credentials or a password.
   - `jeaIsAdministrator = True` (genuine virtual-account admin in the JEA session)
   - `restrictedBoundaryOk = True` (forbidden commands `powershell.exe`, `Start-Process`,
     `Invoke-Expression`, `Invoke-Command`, `New-ScheduledTask`, `Set-Content`, … are ABSENT)
+  - `trustedFilesNotWritableByParent = True` (the filtered parent CANNOT write into the protected
+    `C:\ProgramData\PathVeerCertificationJea\{Trusted,Payloads,Transcripts}` tree — proven with
+    harmless sentinel-write attempts that must be Access Denied)
 
 ### Checkpoint semantics
 

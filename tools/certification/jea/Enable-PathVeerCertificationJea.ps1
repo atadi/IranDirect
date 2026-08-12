@@ -53,22 +53,89 @@ Copy-Item -Path $psd1 -Destination (Join-Path $modulePath 'PathVeerCertification
 Copy-Item -Path $role -Destination (Join-Path $roleDir 'PathVeerCertificationRole.psrc') -Force
 Copy-Item -Path $pssc -Destination (Join-Path $modulePath 'PathVeer.Certification.pssc') -Force
 
-# Protected transcript directory. SYSTEM + Administrators full control; filtered pvcert: no access.
-$transcriptDir = 'C:\ProgramData\PathVeerCertificationJea\Transcripts'
-New-Item -ItemType Directory -Force -Path $transcriptDir | Out-Null
-$acl = Get-Acl -Path $transcriptDir
-$acl.SetAccessRuleProtection($true, $false)   # disable inheritance; remove inherited entries
-$acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
-$sysSid = [System.Security.Principal.SecurityIdentifier]'S-1-5-18'      # SYSTEM
-$admSid = [System.Security.Principal.SecurityIdentifier]'S-1-5-32-544'  # BUILTIN\Administrators
+# --- Protected certification tree (TRUST BOUNDARY) ---
+# Layout:
+#   C:\ProgramData\PathVeerCertificationJea\
+#     Trusted\     -> operator-promoted installer script (executed by privileged JEA)
+#     Payloads\    -> operator-promoted package payload (consumed by privileged JEA)
+#     Transcripts\ -> audit logs
+# ACL: SYSTEM + local Administrators = FullControl; ordinary/filtered PV-CERT\pvcert = NO WRITE.
+# The filtered pvcert caller is NOT a member of these; we also explicitly DENY the pvcert SID
+# to be safe against group membership surprises, and disable inheritance so no relaxed inherited
+# ACE leaks write access.
+$baseDir    = Join-Path $env:ProgramData 'PathVeerCertificationJea'
+$trustedDir = Join-Path $baseDir 'Trusted'
+$payloadDir = Join-Path $baseDir 'Payloads'
+$transcriptDir = Join-Path $baseDir 'Transcripts'
+foreach ($d in @($baseDir,$trustedDir,$payloadDir,$transcriptDir)) {
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+}
+
+$sysSid  = [System.Security.Principal.SecurityIdentifier]'S-1-5-18'      # SYSTEM
+$admSid  = [System.Security.Principal.SecurityIdentifier]'S-1-5-32-544'  # BUILTIN\Administrators
 $adminGroup = [System.Security.Principal.NTAccount]'BUILTIN\Administrators'
+# The ordinary/filtered certification identity. Explicit DENY so group-membership surprises
+# cannot grant write. Resolved best-effort; if the account does not exist, the explicit allow
+# for SYSTEM+Administrators below is still sufficient to keep pvcert out.
+$pvcertSid = $null
+try { $pvcertSid = ([System.Security.Principal.NTAccount]'PV-CERT\pvcert').Translate([System.Security.Principal.SecurityIdentifier]) } catch {}
+
 $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+$noWrite = [System.Security.AccessControl.FileSystemRights]::Write -bor [System.Security.AccessControl.FileSystemRights]::Modify -bor [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor [System.Security.AccessControl.FileSystemRights]::CreateSubdirectories -bor [System.Security.AccessControl.FileSystemRights]::Delete -bor [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [System.Security.AccessControl.FileSystemRights]::WriteAttributes -bor [System.Security.AccessControl.FileSystemRights]::WriteExtendedAttributes
 $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
 $propagate = [System.Security.AccessControl.PropagationFlags]::None
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, $inherit, $propagate, 'Allow')))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, $inherit, $propagate, 'Allow')))
-Set-Acl -Path $transcriptDir -AclObject $acl
-Write-Host "Protected transcript directory created: $transcriptDir (SYSTEM + Administrators only)." -ForegroundColor Cyan
+
+foreach ($d in @($baseDir,$trustedDir,$payloadDir,$transcriptDir)) {
+    $acl = Get-Acl -Path $d
+    $acl.SetAccessRuleProtection($true, $false)   # disable inheritance; drop inherited ACEs
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    # Allow SYSTEM + Administrators full control.
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, $inherit, $propagate, 'Allow')))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, $inherit, $propagate, 'Allow')))
+    # Explicit DENY write to the filtered pvcert identity (if resolvable).
+    if ($pvcertSid) {
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, $inherit, $propagate, 'Deny')))
+    }
+    Set-Acl -Path $d -AclObject $acl
+}
+Write-Host "Protected certification tree created: $baseDir (SYSTEM + Administrators only; pvcert denied write)." -ForegroundColor Cyan
+
+# --- Operator-authorized trust promotion (one-way, elevated) ---
+# The bootstrap is the genuine elevated trust transition. Source material originates from the
+# operator-provided $SourceDir (host share) OR the untrusted C:\pv-cert\incoming area. The
+# protected copies below are the ONLY paths the privileged JEA installer will ever execute/consume.
+# No JEA function performs promotion, so the filtered pvcert caller cannot turn incoming content
+# into executed privileged content.
+$promotedInstaller = Join-Path $trustedDir 'Install-PathVeer.ps1'
+$promotedPayload   = Join-Path $payloadDir 'PathVeer-1.0.0-beta.1'
+$incomingInstaller = Join-Path 'C:\pv-cert\incoming' 'Install-PathVeer.ps1'
+$incomingPayload   = Join-Path 'C:\pv-cert\incoming' 'PathVeer-1.0.0-beta.1'
+
+# Prefer operator-provided trusted sources from $SourceDir.
+$srcInstaller = Join-Path $SourceDir 'Install-PathVeer.ps1'
+$srcPayload   = Join-Path $SourceDir 'PathVeer-1.0.0-beta.1'
+if (Test-Path $srcInstaller) { Copy-Item -Path $srcInstaller -Destination $promotedInstaller -Force }
+elseif (Test-Path $incomingInstaller) { Copy-Item -Path $incomingInstaller -Destination $promotedInstaller -Force }
+else { Write-Host "WARNING: no installer source found at $srcInstaller or $incomingInstaller; JEA install will fail until promoted." -ForegroundColor Yellow }
+
+if (Test-Path $srcPayload) { Copy-Item -Path $srcPayload -Destination $promotedPayload -Recurse -Force }
+elseif (Test-Path $incomingPayload) { Copy-Item -Path $incomingPayload -Destination $promotedPayload -Recurse -Force }
+else { Write-Host "WARNING: no payload source found at $srcPayload or $incomingPayload; JEA install will fail until promoted." -ForegroundColor Yellow }
+
+# Re-apply ACLs on the promoted files so they inherit the protected (pvcert-denied) rules.
+foreach ($f in @($promotedInstaller,$promotedPayload)) {
+    if (Test-Path $f) {
+        $fa = Get-Acl -Path $f
+        $fa.SetAccessRuleProtection($true, $false)
+        $fa.Access | ForEach-Object { $fa.RemoveAccessRule($_) | Out-Null }
+        $fa.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+        $fa.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+        if ($pvcertSid) { $fa.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Deny'))) }
+        Set-Acl -Path $f -AclObject $fa
+    }
+}
+Write-Host "Trusted installer promoted to: $promotedInstaller" -ForegroundColor Cyan
+Write-Host "Trusted payload promoted to:    $promotedPayload" -ForegroundColor Cyan
 
 # Register the endpoint (genuine admin action, performed by the operator here).
 $configName = 'PathVeer.Certification'

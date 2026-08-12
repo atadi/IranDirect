@@ -139,7 +139,7 @@ function Run-GuestJeaInstall([System.Management.Automation.Runspaces.PSSession]$
 function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
     $guestRoot = 'C:\pv-cert'
-    Copy-ToGuest $Session @($Pkg, $InstallScript) $guestRoot
+    Copy-ToGuest $Session @($Pkg, $InstallScript) 'C:\pv-cert\incoming'
     $progressFile = Join-Path $guestRoot 'install-progress.json'
     $resultFile   = Join-Path $guestRoot 'install-result.json'
 
@@ -450,7 +450,7 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
     # Old/New package paths are used only to stage the asset into C:\pv-cert. For certification
     # the staged package identity is what the installer consumes. We stage then invoke the wrapper.
     $guestRoot = 'C:\pv-cert'
-    Copy-ToGuest $Session @($OldPkg, $NewPkg) $guestRoot
+    Copy-ToGuest $Session @($OldPkg, $NewPkg) 'C:\pv-cert\incoming'
     # Install older baseline (elevated) — wrapper uses the staged package.
     $b = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $oldVer = $null
@@ -492,7 +492,7 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
 function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-28 SAME-VERSION REPAIR"
     $jea = Get-GuestJeaSession $script:Cred
-    Copy-ToGuest $Session @($Pkg) 'C:\pv-cert' | Out-Null
+    Copy-ToGuest $Session @($Pkg) 'C:\pv-cert\incoming' | Out-Null
     # Same-version repair/install over existing (elevated).
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null
