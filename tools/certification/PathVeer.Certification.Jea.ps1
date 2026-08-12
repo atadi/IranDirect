@@ -71,16 +71,12 @@ function Invoke-GuestJeaFunction {
             'Invoke-PathVeerCli','Get-PathVeerProgramDataState'
         )
         if ($allowed -notcontains $Function) { throw "Function '$Function' is not an allowed certification operation." }
+        # NoLanguage-safe invocation: a bare trusted-function call (name + splat) with no type
+        # literals / New-Object / Get-Command (those are NOT exposed in the JEA runspace).
         $res = Invoke-Command -Session $JeaSession -ScriptBlock {
             param($fn,$argsIn)
-            $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-            $wp = New-Object System.Security.Principal.WindowsPrincipal($id)
-            $r = [PSCustomObject]@{
-                childUser=$id.Name
-                childIsAdministrator=$wp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
-                result=$null; error=$null
-            }
-            try { $r.result = & (Get-Command $fn) @argsIn } catch { $r.error = $_.Exception.Message }
+            $r = [PSCustomObject]@{ result=$null; error=$null }
+            try { $r.result = & $fn @argsIn } catch { $r.error = $_.Exception.Message }
             return $r
         } -ArgumentList $Function,$ArgumentList -ErrorAction Stop
         if ($res) {

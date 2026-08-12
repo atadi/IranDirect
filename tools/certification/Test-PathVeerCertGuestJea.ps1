@@ -77,14 +77,6 @@ $jeaModule = Join-Path $PSScriptRoot 'PathVeer.Certification.Jea.ps1'
 if (-not (Test-Path $jeaModule)) { throw "Shared JEA module not found: $jeaModule" }
 . $jeaModule
 
-# Forbidden arbitrary-execution / broad-write primitives that must NOT be exposed.
-$forbiddenCommands = @(
-    'powershell.exe', 'cmd.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe',
-    'Start-Process', 'Invoke-Expression', 'Invoke-Command', 'Invoke-WebRequest',
-    'New-ScheduledTask', 'Register-ScheduledTask', 'Set-Content', 'Set-Item',
-    'New-Item', 'Invoke-Item', 'Get-CimInstance'
-)
-
 # Structured evidence object, initialized with stage flags so every run records HOW FAR it got.
 $result = [ordered]@{
     parentSessionConnected   = $false
@@ -160,17 +152,16 @@ try {
     }
     $result.jeaSessionConnected = $true
 
-    # --- harmless identity/admin-role check inside the JEA session ---
-    $jea = Invoke-Command -Session $jeaSession -ScriptBlock {
-        $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-        $wp = New-Object System.Security.Principal.WindowsPrincipal($id)
-        [PSCustomObject]@{ user = $id.Name; isAdministrator = $wp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator) }
-    }
+    # --- identity/admin-role proof via the TRUSTED JEA function (NoLanguage-safe: bare call) ---
+    # No arbitrary scripting is sent into the JEA session; the trusted module performs the check.
+    $jea = Invoke-Command -Session $jeaSession -ScriptBlock { Test-PathVeerCertificationAdmin }
     $result.jeaIdentityCaptured = $true
     $result.jeaUser = $jea.user
     $result.jeaIsAdministrator = $jea.isAdministrator
 
     # --- TRUST BOUNDARY: ordinary/filtered parent (pvcert) must NOT write the protected tree ---
+    # This runs in the NORMAL PowerShell Direct parent session (FullLanguage), not the JEA session,
+    # so it is permitted; it proves the untrusted parent cannot modify the protected certification tree.
     $protectedDirs = @(
         (Join-Path $env:ProgramData 'PathVeerCertificationJea\Trusted'),
         (Join-Path $env:ProgramData 'PathVeerCertificationJea\Payloads'),
@@ -199,17 +190,11 @@ try {
     $result.aclChecksCompleted = $true
 
     # --- RESTRICTED BOUNDARY: forbidden commands must be ABSENT from the JEA session ---
-    $forbiddenAvailable = Invoke-Command -Session $jeaSession -ScriptBlock {
-        param($forbidden)
-        $found = @()
-        foreach ($name in $forbidden) {
-            $base = if ($name -like '*.exe') { [System.IO.Path]::GetFileNameWithoutExtension($name) } else { $name }
-            if (Get-Command -Name $base -ErrorAction SilentlyContinue) { $found += $name }
-        }
-        return $found
-    } -ArgumentList $forbiddenCommands
-    $result.forbiddenAvailable = $forbiddenAvailable
-    $result.restrictedBoundaryOk = ($forbiddenAvailable.Count -eq 0)
+    # Delegated to the trusted Get-PathVeerCertificationBoundary function (NoLanguage-safe bare call).
+    # The returned list is the certification evidence; no scripting is sent into the JEA session.
+    $boundary = Invoke-Command -Session $jeaSession -ScriptBlock { Get-PathVeerCertificationBoundary }
+    $result.forbiddenAvailable = $boundary.available
+    $result.restrictedBoundaryOk = $boundary.restrictedBoundaryOk
     $result.restrictionChecksCompleted = $true
 
     $result.elevationAvailable = $result.jeaIsAdministrator
@@ -217,8 +202,8 @@ try {
     $result.completed = $true
 
     $result.resultSavingAttempted = $true
-    Save-Probe -Result $result
     $result.resultSaved = $true
+    Save-Probe -Result $result
 
     $pass = ($result.parentIsAdministrator -eq $false) -and
             ($result.jeaIsAdministrator -eq $true) -and
@@ -242,8 +227,8 @@ try {
     $result.errorFullyQualifiedId = $_.FullyQualifiedErrorId
     $result.resultSavingAttempted = $true
     try {
-        Save-Probe -Result $result
         $result.resultSaved = $true
+        Save-Probe -Result $result
     } catch [System.InvalidOperationException] {
         # Save-Probe wrapped an evidence-save failure; the original error is in the message.
         $result.resultSaved = $false

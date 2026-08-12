@@ -184,6 +184,33 @@ function Invoke-PathVeerCli {
     return [PSCustomObject]@{ available=$true; exitCode=$LASTEXITCODE; output=($out -join "`n"); verb=$Verb; subVerb=$SubVerb }
 }
 
+function Get-PathVeerCertificationBoundary {
+    <#
+    .SYNOPSIS
+        Trusted restricted-boundary scan: report which dangerous commands are exposed in THIS JEA
+        session. Runs as trusted module code (FullLanguage, virtual account). The caller receives only
+        the resulting list - no arbitrary scripting is sent across the boundary.
+    #>
+    [CmdletBinding()]
+    param()
+    $forbidden = @(
+        'powershell.exe', 'cmd.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe',
+        'Start-Process', 'Invoke-Expression', 'Invoke-Command', 'Invoke-WebRequest',
+        'New-ScheduledTask', 'Register-ScheduledTask', 'Set-Content', 'Set-Item',
+        'New-Item', 'Invoke-Item', 'Get-CimInstance'
+    )
+    $found = @()
+    foreach ($name in $forbidden) {
+        $base = if ($name -like '*.exe') { [System.IO.Path]::GetFileNameWithoutExtension($name) } else { $name }
+        if (Get-Command -Name $base -ErrorAction SilentlyContinue) { $found += $name }
+    }
+    [PSCustomObject]@{
+        forbiddenChecked = $forbidden.Count
+        available        = $found
+        restrictedBoundaryOk = ($found.Count -eq 0)
+    }
+}
+
 function Get-PathVeerProgramDataState {
     [CmdletBinding()]
     param()
@@ -205,5 +232,6 @@ Export-ModuleMember -Function @(
     'Get-PathVeerRouteState',
     'Invoke-PathVeerCertificationInstall',
     'Invoke-PathVeerCli',
-    'Get-PathVeerProgramDataState'
+    'Get-PathVeerProgramDataState',
+    'Get-PathVeerCertificationBoundary'
 )
