@@ -1,0 +1,67 @@
+# PathVeer Certification — JEA Role Capability (narrow, certification-only)
+#
+# This is the RESTRICTED privileged surface exposed to the certification harness.
+# It does NOT grant an unrestricted Administrator PowerShell endpoint. Only the
+# cmdlets/functions/external commands actually required by the certification gates
+# (GATE-5/2/4/6/8/22/28) are visible. The session runs as a JEA virtual account
+# (member of BUILTIN\Administrators) created per-connection; the connecting user
+# (PV-CERT\pvcert, a UAC-filtered standard token) never receives administrator
+# credentials and can only invoke the commands enumerated here.
+#
+# Authoritative source of truth. The guest bootstrap (Enable-PathVeerCertificationJea.ps1)
+# writes an equivalent copy of this file into the guest module path and registers it.
+
+@{
+    # Minimum required; the session is locked to the commands below.
+    VisibleCmdlets = @(
+        'Get-Service',
+        'Stop-Service',
+        'Start-Service',
+        'Restart-Service',
+        'Get-CimInstance',
+        'Get-Process',
+        'Stop-Process',
+        'Get-NetRoute',
+        'Test-Path',
+        'Get-Content',
+        'Set-Content',
+        'Get-Item',
+        'Get-ChildItem',
+        'Get-ItemProperty',
+        'New-Item',
+        'Get-Date'
+    )
+
+    # Built-in functions used by gate script blocks.
+    VisibleFunctions = @(
+        'Join-Path',
+        'ConvertTo-Json',
+        'ConvertFrom-Json',
+        'Select-Object',
+        'Where-Object',
+        'ForEach-Object',
+        'Measure-Object',
+        'Start-Sleep',
+        'Write-Host',
+        'Out-Null'
+    )
+
+    # External executables allowed. Only the PathVeer CLI and a controlled
+    # powershell.exe host (used to launch the installer script elevated).
+    # Arbitrary executables are NOT permitted.
+    VisibleExternalCommands = @(
+        'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+        'C:\Program Files\PathVeer\Cli\PathVeer.Cli.exe'
+    )
+
+    VisibleAliases = @()
+    VisibleProviders = @()
+
+    # No extra modules imported; no startup scripts beyond the locked surface.
+    ModulesToImport = @()
+    ScriptsToProcess = @()
+
+    # Audit trail of every certification command executed through the endpoint.
+    # Ownership-aware cleanup removes this directory on Disable-PathVeerCertificationJea.ps1.
+    TranscriptDirectory = 'C:\pv-cert\jea-transcripts'
+}

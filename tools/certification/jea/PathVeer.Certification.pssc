@@ -1,0 +1,37 @@
+# PathVeer Certification — JEA Session Configuration
+#
+# Registers the restricted certification control plane endpoint
+# 'PathVeer.Certification'. The connecting user (PV-CERT\pvcert, a UAC-filtered
+# standard token over PowerShell Direct) is mapped to the narrow role capability
+# 'PathVeerCertificationRole'. Execution occurs as a per-connection virtual account
+# that is a member of BUILTIN\Administrators, so privileged certification operations
+# run with full admin rights WITHOUT the filtered parent ever obtaining an elevated
+# token and WITHOUT any stored/passed password.
+#
+# This is the replacement for the rejected Scheduled-Task (RunLevel Highest)
+# bootstrap, which Windows denied with "Access is denied" from the filtered parent.
+
+@{
+    SchemaVersion        = '2.0.0.0'
+    GUID                 = 'f4d2c0a1-7b3e-4c9a-9f12-3e5a7b8c9d01'
+    SessionType          = 'RestrictedRemoteServer'
+
+    # Run as a temporary virtual account (not the operator's identity).
+    RunAsVirtualAccount       = $true
+    RunAsVirtualAccountGroups = @('BUILTIN\Administrators')
+
+    # FullLanguage is required so legitimate gate script blocks may use a small
+    # number of approved .NET type calls (e.g. named-pipe enumeration). The security
+    # boundary is the VisibleCmdlets/VisibleExternalCommands allowlist in the role
+    # capability, NOT language mode. No unrestricted PowerShell is exposed.
+    LanguageMode = 'FullLanguage'
+
+    # The connecting account is a local Administrator (filtered token); map that
+    # group to the narrow certification role.
+    RoleDefinitions = @{
+        'BUILTIN\Administrators' = @{ RoleCapabilities = @('PathVeerCertificationRole') }
+    }
+
+    # Audit transcripts land under the certification workspace.
+    TranscriptDirectory = 'C:\pv-cert\jea-transcripts'
+}

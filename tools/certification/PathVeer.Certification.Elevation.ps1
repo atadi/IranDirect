@@ -1,10 +1,26 @@
 <# PathVeer.Certification.Elevation.ps1
-   Shared privileged-execution primitive for PathVeer VM certification.
+   *** RETIRED — DO NOT DOT-SOURCE OR INVOKE FROM THE HARNESS ***
 
-   SINGLE SOURCE OF TRUTH, dot-sourced by BOTH:
-     - Invoke-PathVeerCertification.ps1 (the gates)
-     - Test-PathVeerCertGuestElevation.ps1 (the minimal operator probe)
+   This file is preserved as HISTORICAL DIAGNOSTIC EVIDENCE of a rejected elevation design,
+   not as active tooling. The Scheduled-Task (RunLevel Highest) bootstrap implemented here
+   was rejected by real-VM Windows:
+       error = Scheduled task registration/start failed: Access is denied.
+   The filtered PowerShell Direct parent (PV-CERT\pvcert, UAC-filtered token) cannot register
+   an elevated task, so the design is circular and cannot work on this certification VM.
 
+   The replacement is the JEA certification control plane:
+     - tools/certification/PathVeer.Certification.Jea.ps1     (host bridge: New-GuestJeaSession /
+       Invoke-GuestJeaElevated / Invoke-GuestJeaScriptElevated)
+     - tools/certification/jea/PathVeer.Certification.pssc     (session config)
+     - tools/certification/jea/PathVeerCertificationRole.psrc   (narrow role capability)
+     - tools/certification/jea/Enable-PathVeerCertificationJea.ps1   (operator bootstrap, elevated)
+     - tools/certification/jea/Disable-PathVeerCertificationJea.ps1  (reversible teardown)
+     - tools/certification/Test-PathVeerCertGuestJea.ps1        (harmless proof probe)
+
+   The content below remains for audit reference only. The functions Invoke-GuestElevated and
+   Invoke-GuestScriptElevated are no longer referenced by Invoke-PathVeerCertification.ps1.
+
+   --- original design rationale (superseded) ---
    Why a Scheduled Task (not Start-Process -Verb RunAs / ProcessStartInfo):
    ----------------------------------------------------------------------
    The PowerShell Direct session runs as 'pvcert' (a member of Administrators but with a
