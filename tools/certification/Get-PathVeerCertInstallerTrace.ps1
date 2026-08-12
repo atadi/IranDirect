@@ -13,7 +13,7 @@
 [CmdletBinding()]
 param(
     [string]$VMName = 'PathVeer-Certification',
-    [string]$GuestUser = 'pvcert'
+    [string]$GuestUser = 'PV-CERT\pvcert'
 )
 
 $ErrorActionPreference = 'Stop'

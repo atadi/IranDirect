@@ -30,7 +30,7 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDi
 $OutFile = Join-Path $OutDir '00-connectivity.json'
 
 Write-Host "Requesting PathVeer-Certification (PV-CERT) credentials via local prompt..." -ForegroundColor Cyan
-$cred = Get-Credential -UserName 'pvcert' -Message 'PathVeer-Certification (PV-CERT) local admin password for PowerShell Direct'
+$cred = Get-Credential -UserName 'PV-CERT\pvcert' -Message 'PathVeer-Certification (PV-CERT) local admin password for PowerShell Direct'
 if (-not $cred) { Write-Error 'No credential supplied. Aborting.'; exit 1 }
 
 Write-Host "Connecting to $VmName ..." -ForegroundColor Cyan

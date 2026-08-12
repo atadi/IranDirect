@@ -621,7 +621,7 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
 
 Assert-VmRunning
 Write-Host "Requesting $VmName (PV-CERT) credentials via local prompt..." -ForegroundColor Cyan
-$script:Cred = Get-Credential -UserName 'pvcert' -Message 'PathVeer-Certification (PV-CERT) local admin password for PowerShell Direct'
+$script:Cred = Get-Credential -UserName 'PV-CERT\pvcert' -Message 'PathVeer-Certification (PV-CERT) local admin password for PowerShell Direct'
 if (-not $script:Cred) { Write-Error 'No credential supplied. Aborting.'; exit 1 }
 
 $sess = New-GuestSession $script:Cred

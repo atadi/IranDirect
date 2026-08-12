@@ -21,13 +21,18 @@
 [CmdletBinding()]
 param(
     [string]$VmName = 'PathVeer-Certification',
+    [string]$GuestUser = 'PV-CERT\pvcert',
     [string]$ResultDir = 'C:\pv-cert'
 )
 
 $ErrorActionPreference = 'Stop'
 
 # --- operator credential via native local prompt (never printed/stored) ---
-$cred = Get-Credential -Message 'Enter the certification guest (pvcert) credential for PowerShell Direct'
+# Authoritative local-admin identity for this certification VM is the domain-qualified
+# local account 'PV-CERT\pvcert'. A bare 'pvcert' username fails PowerShell Direct auth
+# on this guest; the host name prefix is required. Provided via -UserName so the operator
+# only enters the password.
+$cred = Get-Credential -UserName $GuestUser -Message "Enter the certification guest ($GuestUser) password for PowerShell Direct"
 
 # --- load the EXACT shared primitive used by the gates ---
 $elevModule = Join-Path $PSScriptRoot 'PathVeer.Certification.Elevation.ps1'
