@@ -222,6 +222,52 @@ if ($cfgExecPolicy -ne 'RemoteSigned') {
 }
 Write-Host "Active endpoint ExecutionPolicy = '$($cfg.ExecutionPolicy)' (expected RemoteSigned)." -ForegroundColor Green
 
+# ---------------------------------------------------------------------------------------------
+# Effective export-surface validation (CRITICAL).
+# The previous bootstrap validated module discoverability, role-capability presence, and the
+# active endpoint ExecutionPolicy, but never validated that the ACTUAL imported module export
+# surface satisfies the role-capability VisibleFunctions. The .psm1 can Export-ModuleMember the
+# function and the .psrc can request it, yet a missing .psd1 FunctionsToExport entry silently
+# removes it from the effective surface -> the JEA session throws CommandNotFoundException while
+# bootstrap prints success. We FAIL LOUDLY here instead.
+#
+# This validation:
+#   1. imports the INSTALLED module from its protected installed location (not the source copy),
+#   2. reads the actual exported function names from the imported module,
+#   3. loads the INSTALLED role-capability PSRC and reads its VisibleFunctions,
+#   4. throws VALIDATION FAILED if any PSRC-visible function is absent from the effective surface.
+# ---------------------------------------------------------------------------------------------
+Write-Host "Validating effective module export surface against role-capability VisibleFunctions..." -ForegroundColor Cyan
+
+# Import the installed module from its protected installed location so we test EXACTLY what JEA imports.
+$installedModuleName = 'PathVeerCertificationJea'
+Remove-Module -Name $installedModuleName -Force -ErrorAction SilentlyContinue
+Import-Module -Name $installedModuleName -Force -ErrorAction Stop
+
+$exported = @( (Get-Command -Module $installedModuleName -CommandType Function).Name )
+if ($exported.Count -eq 0) {
+    throw "VALIDATION FAILED: imported module '$installedModuleName' exposes NO functions. The endpoint would serve an empty command surface."
+}
+
+# Read the INSTALLED role-capability PSRC and its VisibleFunctions.
+$installedRolePath = Join-Path $moduleBase 'RoleCapabilities\\PathVeerCertificationRole.psrc'
+if (-not (Test-Path $installedRolePath)) {
+    throw "VALIDATION FAILED: installed role capability not found at '$installedRolePath'."
+}
+$roleData = Import-PowerShellDataFile -Path $installedRolePath
+$visibleFunctions = @( $roleData.VisibleFunctions )
+
+$missing = @( $visibleFunctions | Where-Object { $_ -and ($exported -notcontains $_) } )
+if ($missing.Count -gt 0) {
+    throw ("VALIDATION FAILED: role-capability VisibleFunctions request functions that are NOT present " +
+           "in the effective module export surface:`n  " + ($missing -join "`n  ") +
+           "`nModule exported: " + ($exported -join ', ') +
+           "`nFix the module manifest (FunctionsToExport) so every PSRC-visible function is actually exported.")
+}
+
+# Invariant proof: PSRC VisibleFunctions ⊆ Module ExportedFunctions.
+Write-Host ("Effective export surface OK: all {0} PSRC-visible function(s) are exported by the imported module." -f $visibleFunctions.Count) -ForegroundColor Green
+
 # Smoke test: attempt a local JEA session. As a non-role user (the operator is admin, not in
 # RoleDefinitions) the connection is EXPECTED to be rejected with an authorization error - which
 # proves the endpoint is reachable AND the role capability resolved. If the role capability still
