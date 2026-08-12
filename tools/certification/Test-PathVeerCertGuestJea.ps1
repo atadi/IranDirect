@@ -160,34 +160,62 @@ try {
     $result.jeaIsAdministrator = $jea.isAdministrator
 
     # --- TRUST BOUNDARY: ordinary/filtered parent (pvcert) must NOT write the protected tree ---
-    # This runs in the NORMAL PowerShell Direct parent session (FullLanguage), not the JEA session,
-    # so it is permitted; it proves the untrusted parent cannot modify the protected certification tree.
-    $protectedDirs = @(
-        (Join-Path $env:ProgramData 'PathVeerCertificationJea\Trusted'),
-        (Join-Path $env:ProgramData 'PathVeerCertificationJea\Payloads'),
-        (Join-Path $env:ProgramData 'PathVeerCertificationJea\Transcripts'),
-        (Join-Path $env:ProgramData 'PathVeerCertificationJea')
+    # This runs in the NORMAL PowerShell Direct parent session (FullLanguage), not the JEA session.
+    # The protected tree is deliberately DENIED to PV-CERT\pvcert (explicit DENY ACE + inheritance).
+    # We do NOT pre-test the path with Test-Path (enumeration itself is denied and would abort the
+    # probe). Instead we attempt a harmless unique canary WRITE directly into the fixed protected
+    # tree and interpret an authorization failure as PASS. A successful write is a security violation.
+    $protectedRoot = Join-Path $env:ProgramData 'PathVeerCertificationJea'
+    $canaryTargets = @(
+        $protectedRoot
+        (Join-Path $protectedRoot 'Trusted')
+        (Join-Path $protectedRoot 'Payloads')
+        (Join-Path $protectedRoot 'Transcripts')
     )
     $parentWriteAttempts = Invoke-Command -Session $session -ScriptBlock {
-        param($dirs)
+        param($targets)
         $results = @()
-        foreach ($d in $dirs) {
-            if (-not (Test-Path $d)) { $results += [PSCustomObject]@{ dir = $d; exists = $false; writeDenied = $true; note = 'absent (bootstrap not run)' }; continue }
-            $sentinel = Join-Path $d ('probe-write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
-            $denied = $false
-            try { [System.IO.File]::WriteAllText($sentinel, 'probe'); Remove-Item -Path $sentinel -Force -ErrorAction SilentlyContinue }
-            catch { $denied = $true }
-            $results += [PSCustomObject]@{ dir = $d; exists = $true; writeDenied = $denied }
+        foreach ($root in $targets) {
+            $sentinel = Join-Path $root ('probe-write-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+            try {
+                # Attempt the write. If it succeeds, that is a TRUST-BOUNDARY VIOLATION.
+                [System.IO.File]::WriteAllText($sentinel, 'probe')
+                try { Remove-Item -LiteralPath $sentinel -Force -ErrorAction SilentlyContinue } catch { }
+                $results += [PSCustomObject]@{ target = $root; writeDenied = $false; classification = 'WRITE_SUCCEEDED'; note = 'SECURITY VIOLATION: parent wrote into protected tree' }
+            } catch {
+                $ex   = $_.Exception
+                $msg  = $ex.Message
+                $fqid = $_.FullyQualifiedErrorId
+                $cat  = $_.CategoryInfo.Category
+                # Robustly recognize an EXPECTED authorization denial.
+                $isDenied = ($ex -is [System.UnauthorizedAccessException]) -or
+                            ($fqid -match 'UnauthorizedAccess') -or
+                            ($cat -eq 'PermissionDenied') -or
+                            ($msg -match 'Access is denied' -or $msg -match 'Unauthorized')
+                # Parent cannot even create the path (e.g. subdir absent) -> still not writable.
+                $isAbsent = ($ex -is [System.IO.DirectoryNotFoundException]) -or ($msg -match 'Could not find|does not exist|not exist')
+                if ($isDenied) {
+                    $results += [PSCustomObject]@{ target = $root; writeDenied = $true; classification = 'UNAUTHORIZED'; note = 'UnauthorizedAccess (expected denial)' }
+                } elseif ($isAbsent) {
+                    $results += [PSCustomObject]@{ target = $root; writeDenied = $true; classification = 'CANNOT_CREATE'; note = 'parent cannot create path in protected tree (denied/absent)' }
+                } else {
+                    # Genuinely unexpected error: do NOT swallow it; let the probe fail loudly.
+                    throw
+                }
+            }
         }
         return $results
-    } -ArgumentList $protectedDirs
+    } -ArgumentList $canaryTargets
     $result.parentWriteAttempts = $parentWriteAttempts
     $parentCannotWriteProtected = $true
     foreach ($r in $parentWriteAttempts) {
-        if ($r.exists -and -not $r.writeDenied) { $parentCannotWriteProtected = $false }
+        if (-not $r.writeDenied) { $parentCannotWriteProtected = $false }
     }
     $result.trustedFilesNotWritableByParent = $parentCannotWriteProtected
     $result.aclChecksCompleted = $true
+    if (-not $parentCannotWriteProtected) {
+        throw "SECURITY VIOLATION: ordinary parent (PV-CERT\pvcert) was able to WRITE into the protected certification tree ($protectedRoot). Trust boundary broken."
+    }
 
     # --- RESTRICTED BOUNDARY: forbidden commands must be ABSENT from the JEA session ---
     # Delegated to the trusted Get-PathVeerCertificationBoundary function (NoLanguage-safe bare call).
