@@ -60,3 +60,4 @@ graphify-out/
 
 # Test run output (trx logs, coverage)
 TestResults/
+.worktrees/
