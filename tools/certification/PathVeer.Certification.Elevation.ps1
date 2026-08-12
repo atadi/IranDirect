@@ -29,6 +29,22 @@
    elevationAvailable=$false and NEVER executes the command non-elevated.
 #>
 
+function Assert-GuestResultDir {
+    [CmdletBinding()]
+    param(
+        [System.Management.Automation.Runspaces.PSSession]$Session,
+        [string]$ResultDir
+    )
+    # Runs INSIDE the guest. Ensures the temporary workspace exists before any file is written.
+    # Idempotent: safe if the directory already exists (e.g. a gate staged C:\pv-cert earlier).
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($d)
+        if (-not (Test-Path -LiteralPath $d -PathType Container)) {
+            New-Item -ItemType Directory -Path $d -Force -ErrorAction Stop | Out-Null
+        }
+    } -ArgumentList $ResultDir | Out-Null
+}
+
 function Invoke-GuestElevated {
     [CmdletBinding()]
     param(
@@ -80,6 +96,9 @@ exit ([int]`$result.exitCode)
     }
 
     try {
+        # 0) Ensure the guest working directory exists (clean snapshot may not have C:\pv-cert).
+        Assert-GuestResultDir -Session $Session -ResultDir $ResultDir
+
         # 1) Write the wrapper (non-elevated; pvcert can write C:\pv-cert).
         Invoke-Command -Session $Session -ScriptBlock { param($f,$c) Set-Content -Path $f -Value $c -Encoding UTF8 } -ArgumentList $wrap, $wrapContent | Out-Null
 
@@ -146,9 +165,12 @@ exit ([int]`$result.exitCode)
     } catch {
         $out.error = $_.Exception.Message
     } finally {
-        # 5) Deterministic cleanup of the task + wrapper.
+        # 5) Deterministic cleanup of the task + temporary wrapper/log/result files ONLY.
+        #    Never delete C:\pv-cert itself (it may hold the product package / installer / evidence).
         try { Invoke-Command -Session $Session -ScriptBlock { param($tn) Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue } -ArgumentList $taskName | Out-Null } catch {}
         try { Invoke-Command -Session $Session -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $wrap | Out-Null } catch {}
+        try { Invoke-Command -Session $Session -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $log | Out-Null } catch {}
+        try { Invoke-Command -Session $Session -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $resultJson | Out-Null } catch {}
     }
     return $out
 }
@@ -186,20 +208,31 @@ $result | ConvertTo-Json -Depth 8 | Set-Content -Path '__RESULTJSON__' -Encoding
     $bodyText    = $ScriptBlock.ToString()
     $guestScript = $guestScript.Replace('__ARGJSON__', $argJson).Replace('__RESULTJSON__', $resultJson).Replace('__BODY__', $bodyText)
 
-    # Write the guest script + args (non-elevated).
-    Invoke-Command -Session $Session -ScriptBlock {
-        param($f, $c, $aj, $a)
-        Set-Content -Path $f -Value $c -Encoding UTF8
-        $a | ConvertTo-Json -Depth 8 | Set-Content -Path $aj -Encoding utf8
-    } -ArgumentList $scriptFile, $guestScript, $argJson, $ArgumentList | Out-Null
+    # Ensure the guest working directory exists (clean snapshot may not have C:\pv-cert).
+    Assert-GuestResultDir -Session $Session -ResultDir $ResultDir
 
-    # Elevate `powershell.exe -File <script>`; the script writes its own result JSON.
-    $run = Invoke-GuestElevated -Session $Session -Cred $Cred -Command "powershell.exe -File '$scriptFile'" -ResultDir $ResultDir -TimeoutSeconds $TimeoutSeconds
+    try {
+        # Write the guest script + args (non-elevated).
+        Invoke-Command -Session $Session -ScriptBlock {
+            param($f, $c, $aj, $a)
+            Set-Content -Path $f -Value $c -Encoding UTF8
+            $a | ConvertTo-Json -Depth 8 | Set-Content -Path $aj -Encoding utf8
+        } -ArgumentList $scriptFile, $guestScript, $argJson, $ArgumentList | Out-Null
 
-    $rb = Invoke-Command -Session $Session -ScriptBlock {
-        param($rj)
-        if (Test-Path $rj) { try { return Get-Content $rj -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json } catch {} }
-    } -ArgumentList $resultJson
+        # Elevate `powershell.exe -File <script>`; the script writes its own result JSON.
+        $run = Invoke-GuestElevated -Session $Session -Cred $Cred -Command "powershell.exe -File '$scriptFile'" -ResultDir $ResultDir -TimeoutSeconds $TimeoutSeconds
 
-    return [PSCustomObject]@{ elevation = $run; result = $rb }
+        $rb = Invoke-Command -Session $Session -ScriptBlock {
+            param($rj)
+            if (Test-Path $rj) { try { return Get-Content $rj -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json } catch {} }
+        } -ArgumentList $resultJson
+
+        return [PSCustomObject]@{ elevation = $run; result = $rb }
+    } finally {
+        # Ownership-aware cleanup: remove ONLY the temporary files this helper created.
+        # Never delete C:\pv-cert itself (it may hold the product package / installer / evidence).
+        try { Invoke-Command -Session $Session -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $scriptFile | Out-Null } catch {}
+        try { Invoke-Command -Session $Session -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $argJson | Out-Null } catch {}
+        try { Invoke-Command -Session $Session -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $resultJson | Out-Null } catch {}
+    }
 }
