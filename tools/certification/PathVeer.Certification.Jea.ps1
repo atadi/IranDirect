@@ -24,7 +24,7 @@
     NEVER execute the privileged operation on the filtered session.
 #>
 
-function New-GuestJeaSession([System.Management.Automation.PSCredential]$Cred) {
+function New-GuestJeaSession {
     [CmdletBinding()]
     param(
         [System.Management.Automation.PSCredential]$Cred,
