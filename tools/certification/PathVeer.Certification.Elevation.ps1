@@ -68,7 +68,7 @@ try {
 } catch {
     `$result.error = `$_.Exception.Message
 }
-`$result | ConvertTo-Json -Depth 4 | Set-Content -FilePath '$resultJson' -Encoding utf8
+`$result | ConvertTo-Json -Depth 4 | Set-Content -Path '$resultJson' -Encoding utf8
 exit ([int]`$result.exitCode)
 "@
 
@@ -181,7 +181,7 @@ $result = & {
     param($a)
 __BODY__
 } $argsIn
-$result | ConvertTo-Json -Depth 8 | Set-Content -FilePath '__RESULTJSON__' -Encoding utf8
+$result | ConvertTo-Json -Depth 8 | Set-Content -Path '__RESULTJSON__' -Encoding utf8
 '@
     $bodyText    = $ScriptBlock.ToString()
     $guestScript = $guestScript.Replace('__ARGJSON__', $argJson).Replace('__RESULTJSON__', $resultJson).Replace('__BODY__', $bodyText)

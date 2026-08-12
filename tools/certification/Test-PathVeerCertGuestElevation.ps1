@@ -76,7 +76,7 @@ try {
 
     $outPath = Join-Path $PWD 'artifacts/certification/elevation-probe.json'
     if (-not (Test-Path (Split-Path $outPath))) { New-Item -ItemType Directory -Force -Path (Split-Path $outPath) | Out-Null }
-    $report | ConvertTo-Json -Depth 6 | Set-Content -FilePath $outPath -Encoding utf8
+    $report | ConvertTo-Json -Depth 6 | Set-Content -Path $outPath -Encoding utf8
 
     Write-Host ''
     Write-Host '=== ELEVATION PROBE RESULT ===' -ForegroundColor White
