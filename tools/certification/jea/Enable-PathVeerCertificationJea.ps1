@@ -58,9 +58,15 @@ foreach ($f in @($pssc,$role,$psm1,$psd1)) {
 $moduleBase = Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\PathVeerCertificationJea'
 $roleDir    = Join-Path $moduleBase 'RoleCapabilities'
 New-Item -ItemType Directory -Force -Path $roleDir | Out-Null
-Copy-Item -Path $psm1 -Destination (Join-Path $moduleBase 'PathVeerCertificationJea.psm1') -Force
-Copy-Item -Path $psd1 -Destination (Join-Path $moduleBase 'PathVeerCertificationJea.psd1') -Force
-Copy-Item -Path $role -Destination (Join-Path $roleDir 'PathVeerCertificationRole.psrc') -Force
+$installedMod = Join-Path $moduleBase 'PathVeerCertificationJea.psm1'
+$installedPsd1 = Join-Path $moduleBase 'PathVeerCertificationJea.psd1'
+$installedRole = Join-Path $roleDir 'PathVeerCertificationRole.psrc'
+Copy-Item -Path $psm1 -Destination $installedMod -Force
+Copy-Item -Path $psd1 -Destination $installedPsd1 -Force
+Copy-Item -Path $role -Destination $installedRole -Force
+# Narrowly clear any Mark-of-the-Web / Zone.Identifier on the EXACT trusted files we just promoted.
+# This is the operator-authorized trust transition; we do NOT call Unblock-File globally.
+Unblock-File -Path $installedMod, $installedPsd1, $installedRole -ErrorAction SilentlyContinue
 Write-Host "Trusted module installed to: $moduleBase" -ForegroundColor Cyan
 
 # --- Protected certification tree (TRUST BOUNDARY) ---
@@ -204,6 +210,17 @@ if (-not $disc.RoleCap) {
 $cfg = Get-PSSessionConfiguration -Name $configName -ErrorAction SilentlyContinue
 if (-not $cfg) { throw "VALIDATION FAILED: endpoint '$configName' is not registered." }
 if ($cfg.Enabled -ne $true) { throw "VALIDATION FAILED: endpoint '$configName' is registered but not enabled." }
+
+# Verify the ACTIVE registered configuration, not merely the source PSSC. An omitted ExecutionPolicy
+# would make the JEA session default to Restricted and block the trusted module import
+# ("cannot be loaded because running scripts is disabled on this system"). Fail loudly if the live
+# endpoint did not pick up RemoteSigned.
+$cfgExecPolicy = $null
+try { $cfgExecPolicy = $cfg.ExecutionPolicy } catch {}
+if ($cfgExecPolicy -ne 'RemoteSigned') {
+    throw "VALIDATION FAILED: registered endpoint '$configName' ExecutionPolicy='$cfgExecPolicy' (expected 'RemoteSigned'). The JEA wsmprovhost process will default to Restricted and block the trusted module import. Re-register from the updated PSSC."
+}
+Write-Host "Active endpoint ExecutionPolicy = '$($cfg.ExecutionPolicy)' (expected RemoteSigned)." -ForegroundColor Green
 
 # Smoke test: attempt a local JEA session. As a non-role user (the operator is admin, not in
 # RoleDefinitions) the connection is EXPECTED to be rejected with an authorization error - which

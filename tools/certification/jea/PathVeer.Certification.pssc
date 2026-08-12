@@ -23,6 +23,13 @@
     GUID                 = 'f4d2c0a1-7b3e-4c9a-9f12-3e5a7b8c9d01'
     SessionType          = 'RestrictedRemoteServer'
 
+    # The trusted module lives in the all-users module path; the JEA wsmprovhost.exe process
+    # starts without the operator's interactive -Scope Process execution policy, so an OMITTED
+    # ExecutionPolicy defaults the session to Restricted and the module import is blocked
+    # ("cannot be loaded because running scripts is disabled on this system"). Pin it explicitly
+    # to RemoteSigned for THIS endpoint only. No machine-wide Set-ExecutionPolicy mutation occurs.
+    ExecutionPolicy      = 'RemoteSigned'
+
     # Per-connection virtual account (standard JEA behavior provides the admin identity).
     RunAsVirtualAccount       = $true
     RunAsVirtualAccountGroups = @()
