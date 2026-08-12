@@ -1,7 +1,6 @@
 <#
 .SYNOPSIS
-    PathVeer certification JEA control-plane bridge (replaces the retired Scheduled-Task
-    elevation primitive).
+    PathVeer certification JEA control-plane bridge (replaces the retired Scheduled-Task elevation).
 
     SINGLE SOURCE OF TRUTH, dot-sourced by:
       - Invoke-PathVeerCertification.ps1 (the gates)
@@ -12,16 +11,16 @@
     (non-administrator) token. Windows denies any attempt to bootstrap elevation from it
     (real-VM evidence: "Register-ScheduledTask RunLevel Highest -> Access is denied").
 
-    Instead, the operator registers a narrow JEA endpoint 'PathVeer.Certification' ONCE
-    with genuine elevation inside the guest (Enable-PathVeerCertificationJea.ps1). The
-    harness then connects to that endpoint over PowerShell Direct. The endpoint runs the
-    command as a per-connection virtual account (BUILTIN\Administrators) — full privileged
-    execution WITHOUT the filtered parent ever holding an elevated token and WITHOUT any
-    stored/passed password.
+    Instead, the operator registers a narrow JEA endpoint 'PathVeer.Certification' ONCE with
+    genuine elevation inside the guest (jea/Enable-PathVeerCertificationJea.ps1). The harness
+    then connects to that endpoint over PowerShell Direct and invokes ONLY the trusted, validated
+    module functions exposed by the role. No arbitrary command, ScriptBlock, executable path, or
+    shell is ever passed across the boundary — the JEA functions perform the privileged work against
+    KNOWN PathVeer targets.
 
-    These helpers establish the privileged JEA session lazily and run commands through it.
-    If the endpoint is absent, they return a structured HARNESS/ENVIRONMENT failure and
-    NEVER execute the privileged operation on the filtered session.
+    These helpers establish the privileged JEA session lazily. If the endpoint is absent, they
+    return a structured HARNESS/ENVIRONMENT failure and NEVER execute the privileged operation on
+    the filtered session.
 #>
 
 function New-GuestJeaSession {
@@ -40,59 +39,55 @@ function New-GuestJeaSession {
 
 <#
 .SYNOPSIS
-    Run a command line elevated through the JEA certification endpoint.
+    Run a trusted JEA certification function with validated arguments. No arbitrary command surface.
 #>
-function Invoke-GuestJeaElevated {
+function Invoke-GuestJeaFunction {
     [CmdletBinding()]
     param(
-        [System.Management.Automation.Runspaces.PSSession]$Session,   # normal filtered PS Direct session (for diagnostics only)
-        [System.Management.Automation.Runspaces.PSSession]$JeaSession, # privileged JEA session (must be provided)
+        [System.Management.Automation.Runspaces.PSSession]$Session,        # normal filtered PS Direct session (diagnostics only)
+        [System.Management.Automation.Runspaces.PSSession]$JeaSession,     # privileged JEA session (required)
         [System.Management.Automation.PSCredential]$Cred,
-        [string]$Command,                                              # command line to run elevated
-        [string]$ResultDir = 'C:\pv-cert',
+        [Parameter(Mandatory)][string]$Function,
+        [hashtable]$ArgumentList = @{},
         [int]$TimeoutSeconds = 900
     )
     $out = [PSCustomObject]@{
-        started=$false; completed=$false; exitCode=$null
+        completed=$false; result=$null
         childUser=$null; childIsAdministrator=$false; elevationSucceeded=$false
-        elevationAvailable=$false; error=$null; logContent=$null
+        elevationAvailable=$false; error=$null
     }
     if (-not $JeaSession) {
         $out.error = 'JEA certification session unavailable (endpoint PathVeer.Certification not registered). Run Enable-PathVeerCertificationJea.ps1 in the guest.'
         return $out
     }
-    $marker     = [guid]::NewGuid().ToString('N')
-    $log        = "$ResultDir\jea-$marker.log"
-    $resultJson = "$ResultDir\jea-$marker.result.json"
-    $out.started = $true
+    $out.elevationAvailable = $true
     try {
+        # Argument validation is enforced on the guest by the function's parameter attributes.
+        # Only validated function names (whitelist) are forwarded.
+        $allowed = @(
+            'Test-PathVeerCertificationAdmin','Get-PathVeerServiceState','Start-PathVeerService',
+            'Stop-PathVeerService','Stop-PathVeerTray','Get-PathVeerInstallManifest',
+            'Get-PathVeerInstalledFiles','Get-PathVeerRouteState','Invoke-PathVeerCertificationInstall',
+            'Invoke-PathVeerCli','Get-PathVeerProgramDataState'
+        )
+        if ($allowed -notcontains $Function) { throw "Function '$Function' is not an allowed certification operation." }
         $res = Invoke-Command -Session $JeaSession -ScriptBlock {
-            param($cmd,$log,$resultJson,$timeout)
+            param($fn,$argsIn)
+            $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            $wp = New-Object System.Security.Principal.WindowsPrincipal($id)
             $r = [PSCustomObject]@{
-                completed=$false; exitCode=$null
-                childUser=$null; childIsAdministrator=$false; elevationSucceeded=$false; error=$null
+                childUser=$id.Name
+                childIsAdministrator=$wp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+                result=$null; error=$null
             }
-            try {
-                $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-                $wp = New-Object System.Security.Principal.WindowsPrincipal($id)
-                $r.childUser = $id.Name
-                $r.childIsAdministrator = $wp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
-                & ([scriptblock]::Create($cmd)) *> $log
-                $r.exitCode = $LASTEXITCODE
-                $r.completed = $true
-                $r.elevationSucceeded = $r.childIsAdministrator
-            } catch {
-                $r.error = $_.Exception.Message
-            }
-            $r | ConvertTo-Json -Depth 4 | Set-Content -Path $resultJson -Encoding utf8
+            try { $r.result = & (Get-Command $fn) @argsIn } catch { $r.error = $_.Exception.Message }
             return $r
-        } -ArgumentList $Command,$log,$resultJson,$TimeoutSeconds
+        } -ArgumentList $Function,$ArgumentList -ErrorAction Stop
         if ($res) {
-            $out.completed=$res.completed; $out.exitCode=$res.exitCode
             $out.childUser=$res.childUser; $out.childIsAdministrator=$res.childIsAdministrator
-            $out.elevationSucceeded=$res.elevationSucceeded; $out.error=$res.error
+            $out.elevationSucceeded=$res.childIsAdministrator; $out.result=$res.result; $out.error=$res.error
+            $out.completed = ($null -eq $res.error)
         }
-        $out.elevationAvailable = ($out.elevationSucceeded -eq $true)
     } catch {
         $out.error = $_.Exception.Message
     }
@@ -101,60 +96,59 @@ function Invoke-GuestJeaElevated {
 
 <#
 .SYNOPSIS
-    Run an entire guest SCRIPTBLOCK elevated through the JEA certification endpoint and
-    read back a structured result JSON the script writes to a file.
+    Thin caller-facing wrappers used by the gates. Each maps to exactly one trusted JEA function
+    with a validated argument set. No raw cmdlet/ScriptBlock/executable is ever forwarded.
 #>
-function Invoke-GuestJeaScriptElevated {
-    [CmdletBinding()]
-    param(
-        [System.Management.Automation.Runspaces.PSSession]$Session,
-        [System.Management.Automation.Runspaces.PSSession]$JeaSession,
-        [System.Management.Automation.PSCredential]$Cred,
-        [scriptblock]$ScriptBlock,
-        [hashtable]$ArgumentList = @{},
-        [string]$ResultDir = 'C:\pv-cert',
-        [int]$TimeoutSeconds = 900
-    )
-    if (-not $JeaSession) {
-        return [PSCustomObject]@{
-            elevation = [PSCustomObject]@{ elevationAvailable=$false; error='JEA certification session unavailable (endpoint PathVeer.Certification not registered).' }
-            result = $null
-        }
-    }
-    $marker     = [guid]::NewGuid().ToString('N')
-    $scriptFile = "$ResultDir\jea-script-$marker.ps1"
-    $argJson    = "$ResultDir\jea-script-$marker.args.json"
-    $resultJson = "$ResultDir\jea-script-$marker.result.json"
 
-    $guestScript = @'
-$argsIn = Get-Content '__ARGJSON__' -Raw | ConvertFrom-Json -AsHashtable
-$result = & {
-    param($a)
-__BODY__
-} $argsIn
-$result | ConvertTo-Json -Depth 8 | Set-Content -Path '__RESULTJSON__' -Encoding utf8
-'@
-    $bodyText    = $ScriptBlock.ToString()
-    $guestScript = $guestScript.Replace('__ARGJSON__', $argJson).Replace('__RESULTJSON__', $resultJson).Replace('__BODY__', $bodyText)
+function Invoke-GuestJeaInstall([System.Management.Automation.Runspaces.PSSession]$Session,
+                                [System.Management.Automation.Runspaces.PSSession]$JeaSession,
+                                [string]$Action='Install', [string[]]$Feature=@('RegisterShell','InstallTray')) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Invoke-PathVeerCertificationInstall' -ArgumentList @{ Action=$Action; Feature=$Feature }
+}
 
-    Invoke-Command -Session $JeaSession -ScriptBlock {
-        param($d,$f,$c,$aj,$a)
-        if (-not (Test-Path -LiteralPath $d -PathType Container)) { New-Item -ItemType Directory -Path $d -Force -ErrorAction Stop | Out-Null }
-        Set-Content -Path $f -Value $c -Encoding UTF8
-        $a | ConvertTo-Json -Depth 8 | Set-Content -Path $aj -Encoding utf8
-    } -ArgumentList $ResultDir,$scriptFile,$guestScript,$argJson,$ArgumentList | Out-Null
+function Invoke-GuestJeaCli([System.Management.Automation.Runspaces.PSSession]$Session,
+                            [System.Management.Automation.Runspaces.PSSession]$JeaSession,
+                            [string]$Verb='status', [string]$SubVerb='list', [string]$Argument='') {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Invoke-PathVeerCli' -ArgumentList @{ Verb=$Verb; SubVerb=$SubVerb; Argument=$Argument }
+}
 
-    $run = Invoke-GuestJeaElevated -Session $Session -JeaSession $JeaSession -Cred $Cred -Command "powershell.exe -File '$scriptFile'" -ResultDir $ResultDir -TimeoutSeconds $TimeoutSeconds
+function Get-GuestJeaServiceState([System.Management.Automation.Runspaces.PSSession]$Session,
+                                  [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Get-PathVeerServiceState'
+}
 
-    $rb = Invoke-Command -Session $JeaSession -ScriptBlock {
-        param($rj)
-        if (Test-Path $rj) { try { return Get-Content $rj -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json } catch {} }
-    } -ArgumentList $resultJson
+function Stop-GuestJeaService([System.Management.Automation.Runspaces.PSSession]$Session,
+                               [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Stop-PathVeerService'
+}
 
-    # Ownership-aware cleanup of the temporary files this helper created.
-    try { Invoke-Command -Session $JeaSession -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $scriptFile | Out-Null } catch {}
-    try { Invoke-Command -Session $JeaSession -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $argJson | Out-Null } catch {}
-    try { Invoke-Command -Session $JeaSession -ScriptBlock { param($f) Remove-Item $f -Force -ErrorAction SilentlyContinue } -ArgumentList $resultJson | Out-Null } catch {}
+function Start-GuestJeaService([System.Management.Automation.Runspaces.PSSession]$Session,
+                                [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Start-PathVeerService'
+}
 
-    return [PSCustomObject]@{ elevation = $run; result = $rb }
+function Stop-GuestJeaTray([System.Management.Automation.Runspaces.PSSession]$Session,
+                           [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Stop-PathVeerTray'
+}
+
+function Get-GuestJeaRouteState([System.Management.Automation.Runspaces.PSSession]$Session,
+                                [System.Management.Automation.Runspaces.PSSession]$JeaSession,
+                                [string]$Prefix='') {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Get-PathVeerRouteState' -ArgumentList @{ Prefix=$Prefix }
+}
+
+function Get-GuestJeaInstallManifest([System.Management.Automation.Runspaces.PSSession]$Session,
+                                     [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Get-PathVeerInstallManifest'
+}
+
+function Get-GuestJeaProgramDataState([System.Management.Automation.Runspaces.PSSession]$Session,
+                                      [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Get-PathVeerProgramDataState'
+}
+
+function Stop-GuestJeaServiceForRecovery([System.Management.Automation.Runspaces.PSSession]$Session,
+                                         [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Stop-GuestJeaService -Session $Session -JeaSession $JeaSession
 }

@@ -1,37 +1,37 @@
-# PathVeer Certification — JEA Session Configuration
+# PathVeer Certification — JEA Session Configuration (corrected, restricted)
 #
-# Registers the restricted certification control plane endpoint
-# 'PathVeer.Certification'. The connecting user (PV-CERT\pvcert, a UAC-filtered
-# standard token over PowerShell Direct) is mapped to the narrow role capability
-# 'PathVeerCertificationRole'. Execution occurs as a per-connection virtual account
-# that is a member of BUILTIN\Administrators, so privileged certification operations
-# run with full admin rights WITHOUT the filtered parent ever obtaining an elevated
-# token and WITHOUT any stored/passed password.
+# Registers the narrow certification control plane endpoint 'PathVeer.Certification'.
+# The connecting user (PV-CERT\pvcert, a UAC-filtered standard token over PowerShell Direct)
+# is mapped ONLY to the narrow 'PathVeerCertificationRole' role. Execution occurs as a
+# per-connection virtual account (standard JEA virtual-account behavior provides the
+# administrative identity required by certification) WITHOUT the filtered parent ever holding
+# an elevated token and WITHOUT any stored/passed password.
 #
-# This is the replacement for the rejected Scheduled-Task (RunLevel Highest)
-# bootstrap, which Windows denied with "Access is denied" from the filtered parent.
+# SECURITY POSTURE (corrected from bbcbf1d):
+#   - SessionType RestrictedRemoteServer (no FullLanguage; the restricted default applies).
+#   - RunAsVirtualAccount = $true; no RunAsVirtualAccountGroups (standard virtual-account
+#     identity is sufficient; adding BUILTIN\Administrators is unnecessary and broader).
+#   - RoleDefinitions authorizes ONLY PV-CERT\pvcert, NOT every local administrator.
+#   - No generic shell / arbitrary execution exposed. The role exposes only trusted module
+#     functions with validated parameters.
+#
+# This replaces the rejected Scheduled-Task (RunLevel Highest) bootstrap, which real-VM
+# Windows denied with "Access is denied" from the filtered PowerShell Direct parent.
 
 @{
     SchemaVersion        = '2.0.0.0'
     GUID                 = 'f4d2c0a1-7b3e-4c9a-9f12-3e5a7b8c9d01'
     SessionType          = 'RestrictedRemoteServer'
 
-    # Run as a temporary virtual account (not the operator's identity).
+    # Per-connection virtual account (standard JEA behavior provides the admin identity).
     RunAsVirtualAccount       = $true
-    RunAsVirtualAccountGroups = @('BUILTIN\Administrators')
+    RunAsVirtualAccountGroups = @()
 
-    # FullLanguage is required so legitimate gate script blocks may use a small
-    # number of approved .NET type calls (e.g. named-pipe enumeration). The security
-    # boundary is the VisibleCmdlets/VisibleExternalCommands allowlist in the role
-    # capability, NOT language mode. No unrestricted PowerShell is exposed.
-    LanguageMode = 'FullLanguage'
-
-    # The connecting account is a local Administrator (filtered token); map that
-    # group to the narrow certification role.
+    # Only the certification operator identity may use the endpoint. NOT every local admin.
     RoleDefinitions = @{
-        'BUILTIN\Administrators' = @{ RoleCapabilities = @('PathVeerCertificationRole') }
+        'PV-CERT\pvcert' = @{ RoleCapabilities = @('PathVeerCertificationRole') }
     }
 
-    # Audit transcripts land under the certification workspace.
-    TranscriptDirectory = 'C:\pv-cert\jea-transcripts'
+    # Audit transcripts land in a protected, non-guest-writable location.
+    TranscriptDirectory = 'C:\ProgramData\PathVeerCertificationJea\Transcripts'
 }

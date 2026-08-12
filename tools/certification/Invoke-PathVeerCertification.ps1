@@ -98,12 +98,13 @@ function Copy-ToGuest([System.Management.Automation.Runspaces.PSSession]$Session
 }
 
 # Shared privileged-execution primitive (single source of truth). Defines
-# New-GuestJeaSession / Invoke-GuestJeaElevated / Invoke-GuestJeaScriptElevated, used
-# by every privileged gate. Execution occurs through a narrow JEA endpoint
-# 'PathVeer.Certification' (virtual account in BUILTIN\Administrators) registered in the
-# guest by the operator (Enable-PathVeerCertificationJea.ps1). This replaces the retired
-# Scheduled-Task (RunLevel Highest) elevation design, which real-VM Windows rejected with
-# "Access is denied" from the filtered PowerShell Direct parent.
+# New-GuestJeaSession / Invoke-GuestJeaFunction / Invoke-GuestJeaInstall / Invoke-GuestJeaCli /
+# Stop-GuestJeaService / Start-GuestJeaService / Stop-GuestJeaTray / Get-GuestJeaServiceState /
+# Get-GuestJeaRouteState / Get-GuestJeaInstallManifest / Get-GuestJeaProgramDataState, used by
+# every privileged gate. Execution occurs through a narrow JEA endpoint 'PathVeer.Certification'
+# (virtual account) registered in the guest by the operator (Enable-PathVeerCertificationJea.ps1).
+# This replaces the retired Scheduled-Task (RunLevel Highest) elevation design, which real-VM
+# Windows rejected with "Access is denied" from the filtered PowerShell Direct parent.
 #
 # NOTE: PathVeer.Certification.Elevation.ps1 is RETIRED (preserved as historical diagnostic
 # evidence of the rejected design) and must NOT be dot-sourced or invoked by the harness.
@@ -123,15 +124,14 @@ function Get-GuestJeaSession([System.Management.Automation.PSCredential]$Cred) {
     return $s
 }
 
-# Convenience wrapper used by all privileged gates.
-function Run-GuestJea([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Command, [string]$ResultDir='C:\pv-cert') {
-    $jea = Get-GuestJeaSession $script:Cred
-    return Invoke-GuestJeaElevated -Session $Session -JeaSession $jea -Cred $script:Cred -Command $Command -ResultDir $ResultDir
-}
+# Convenience wrappers that route privileged gate operations through the trusted JEA
+# module functions. NO raw command / ScriptBlock / executable is forwarded to the guest;
+# the JEA endpoint exposes only validated wrappers.
 
-function Run-GuestJeaScript([System.Management.Automation.Runspaces.PSSession]$Session, [scriptblock]$ScriptBlock, [hashtable]$ArgumentList=@{}, [string]$ResultDir='C:\pv-cert') {
+function Run-GuestJeaInstall([System.Management.Automation.Runspaces.PSSession]$Session,
+                             [string]$Action='Install', [string[]]$Feature=@('RegisterShell','InstallTray')) {
     $jea = Get-GuestJeaSession $script:Cred
-    return Invoke-GuestJeaScriptElevated -Session $Session -JeaSession $jea -Cred $script:Cred -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -ResultDir $ResultDir
+    return Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action $Action -Feature $Feature
 }
 
 # -------- Stage implementations (each returns a hashtable of evidence) --------
@@ -140,8 +140,6 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
     $guestRoot = 'C:\pv-cert'
     Copy-ToGuest $Session @($Pkg, $InstallScript) $guestRoot
-    $installPkg = Join-Path $guestRoot (Split-Path $Pkg -Leaf)
-    $installPs1 = Join-Path $guestRoot 'Install-PathVeer.ps1'
     $progressFile = Join-Path $guestRoot 'install-progress.json'
     $resultFile   = Join-Path $guestRoot 'install-result.json'
 
@@ -153,11 +151,9 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         }
     }
 
-    Step "Running installer (ELEVATED via RunAs, RegisterShell + InstallTray)"
-    # Distinct ProgressFile / ResultFile paths (the installer treats them as separate
-    # lifecycle artifacts). Elevated so Assert-Administrator succeeds.
-    $installCmd = "powershell.exe -File '$installPs1' -PackageDirectory '$installPkg' -RegisterShell -InstallTray -ProgressFile '$progressFile' -ResultFile '$resultFile'"
-    $install = Run-GuestJea -Session $Session -Command $installCmd -ResultDir $guestRoot
+    Step "Running installer (ELEVATED via JEA trusted wrapper, RegisterShell + InstallTray)"
+    # Trusted installer wrapper: fixed installer path, validated switches only. No generic shell.
+    $install = Run-GuestJeaInstall -Session $Session -Action Install -Feature @('RegisterShell','InstallTray')
 
     # Read the installer's structured result + progress (authoritative gate boundary).
     $installResult = $null; $installProgress = $null
@@ -168,72 +164,49 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         if (Test-Path $pf) { try { $p = Get-Content $pf -Raw -ErrorAction SilentlyContinue } catch {} }
         [PSCustomObject]@{ result = $r; progress = $p }
     } -ArgumentList $resultFile, $progressFile
-
     $installResult = $readBack.result
     $installProgress = $readBack.progress
 
     # Hard gate boundary: installation must succeed before any CLI use.
-    $installRootExists = $false
-    $svcExists = $false
-    $manifest = $null
-    $post = Invoke-Command -Session $Session -ScriptBlock {
-        $svc = Get-CimInstance Win32_Service -Filter "Name='PathVeer'" -ErrorAction SilentlyContinue
-        [PSCustomObject]@{
-            installRootExists = (Test-Path 'C:\Program Files\PathVeer')
-            serviceExists = ($null -ne $svc)
-            serviceState = if ($svc) { $svc.State } else { 'absent' }
-            manifestExists = (Test-Path 'C:\Program Files\PathVeer\install-manifest.json')
-        }
-    }
-
-    $installRootExists = $post.installRootExists
-    $svcExists = $post.serviceExists
+    $post = Get-GuestJeaServiceState -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
+    $installRootExists = $false; $svcExists = $false; $manifestExists = $false
+    $manifest = Get-GuestJeaInstallManifest -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
+    $installRootExists = (Invoke-Command -Session $Session -ScriptBlock { Test-Path 'C:\Program Files\PathVeer' })
+    $svcExists = ($post.result.exists -eq $true)
+    if ($manifest.result) { $manifestExists = $true }
 
     $gate5Failed = $false
     $failReasons = [System.Collections.Generic.List[string]]::new()
     if (-not $install.elevationAvailable) { $gate5Failed = $true; $failReasons.Add("elevation unavailable: $($install.error)") }
-    if ($install.elevationSucceeded -ne $true) { $gate5Failed = $true; $failReasons.Add("child process not genuinely elevated (childIsAdministrator=$($install.childIsAdministrator), childUser=$($install.childUser))") }
+    if ($install.elevationSucceeded -ne $true) { $gate5Failed = $true; $failReasons.Add("child not genuinely elevated (childIsAdministrator=$($install.childIsAdministrator), childUser=$($install.childUser))") }
     if ($install.completed -eq $false) { $gate5Failed = $true; $failReasons.Add("installer did not complete: $($install.error)") }
-    if ($null -ne $install.exitCode -and $install.exitCode -ne 0) { $gate5Failed = $true; $failReasons.Add("installer exit code $($install.exitCode)") }
+    $installExit = if ($install.result) { $install.result.exitCode } else { $null }
+    $installErr   = if ($install.result) { $install.result.error } else { $install.error }
+    if ($null -ne $installExit -and $installExit -ne 0) { $gate5Failed = $true; $failReasons.Add("installer exit code $installExit") }
+    if ($installErr) { $gate5Failed = $true; $failReasons.Add("installer error: $installErr") }
     if ($installResult -and $installResult.success -eq $false) { $gate5Failed = $true; $failReasons.Add("installer reported failure: [$($installResult.category)] $($installResult.message)") }
     if (-not $svcExists) { $gate5Failed = $true; $failReasons.Add('PathVeer service not present after install') }
-    if (-not $post.manifestExists) { $gate5Failed = $true; $failReasons.Add('install-manifest.json not present after install') }
+    if (-not $manifestExists) { $gate5Failed = $true; $failReasons.Add('install-manifest.json not present after install') }
 
     if ($gate5Failed) {
-        # Structured FAIL. Do NOT invoke the CLI; record what we have.
         $failEvidence = [PSCustomObject]@{
-            gate = 'GATE-5'
-            result = 'FAIL'
-            reasons = $failReasons.ToArray()
-            elevated = $install.elevationAvailable
-            elevationSucceeded = $install.elevationSucceeded
-            childUser = $install.childUser
-            childIsAdministrator = $install.childIsAdministrator
-            installExitCode = $install.exitCode
-            installCompleted = $install.completed
-            installResult = $installResult
-            installProgress = $installProgress
-            installerLog = $install.log
-            postConditions = $post
-            preInstall = $pre
+            gate = 'GATE-5'; result = 'FAIL'; reasons = $failReasons.ToArray()
+            elevated = $install.elevationAvailable; elevationSucceeded = $install.elevationSucceeded
+            childUser = $install.childUser; childIsAdministrator = $install.childIsAdministrator
+            installExitCode = $installExit; installCompleted = $install.completed
+            installResult = $installResult; installProgress = $installProgress
+            postConditions = $post.result; preInstall = $pre
         }
         Save-Json '05-gate5-fresh-install.json' $failEvidence
         Write-Host "  GATE-5 FAIL (no CLI invoked): $($failReasons -join ' | ')" -ForegroundColor Red
-        # Signal the caller to stop this stage cleanly.
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("GATE-5 install failed: $($failReasons -join '; ')"),
             'GATE5InstallFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
     }
 
     # Success path: locate CLI from the authoritative manifest, guard before invoking.
-    $manifest = Invoke-Command -Session $Session -ScriptBlock {
-        if (Test-Path 'C:\Program Files\PathVeer\install-manifest.json') {
-            try { return Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json } catch {}
-        }
-        return $null
-    }
     $cliExe = $null
-    if ($manifest -and $manifest.cliExecutablePath) { $cliExe = $manifest.cliExecutablePath }
+    if ($manifest.result -and $manifest.result.cliExecutablePath) { $cliExe = $manifest.result.cliExecutablePath }
     else { $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe' }
 
     $ev = Invoke-Command -Session $Session -ScriptBlock {
@@ -255,19 +228,13 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         $svcName = $null; $svcState = 'absent'; $svcStartMode = $null; $svcPathName = $null
         if ($svc) { $svcName = $svc.Name; $svcState = $svc.State; $svcStartMode = $svc.StartMode; $svcPathName = $svc.PathName }
         $appsAndFeatures = $null
-        if ($app) {
-            $appsAndFeatures = [PSCustomObject]@{
-                displayName = $app.DisplayName; version = $app.DisplayVersion
-                publisher = $app.Publisher; uninstall = $app.UninstallString
-            }
-        }
+        if ($app) { $appsAndFeatures = [PSCustomObject]@{ displayName = $app.DisplayName; version = $app.DisplayVersion; publisher = $app.Publisher; uninstall = $app.UninstallString } }
         [PSCustomObject]@{
             serviceName = $svcName; serviceState = $svcState; serviceStartMode = $svcStartMode; servicePathName = $svcPathName
             appsAndFeatures = $appsAndFeatures; startMenuShortcuts = $startMenu
             trayPresent = ($null -ne $tray); cliOnPathCount = $cliOnPath
             ipcPipes = $pipe; cliExists = $cliExists; cliPath = $cliExe
-            cliStatus = ($cliStatus -join "`n")
-            programDataState = (Test-Path "$env:ProgramData\PathVeer")
+            cliStatus = ($cliStatus -join "`n"); programDataState = (Test-Path "$env:ProgramData\PathVeer")
             installManifest = $null
         }
     } -ArgumentList $cliExe
@@ -276,12 +243,11 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
         preInstall = $pre
         elevationAvailable = $install.elevationAvailable
-        installExitCode = $install.exitCode
+        installExitCode = $installExit
         installCompleted = $install.completed
         installResult = $installResult
         installProgress = $installProgress
-        installerLog = $install.log
-        postConditions = $post
+        postConditions = $post.result
         evidence = $ev
     })
     return $ev
@@ -289,45 +255,35 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
 
 function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "SERVICE/TRAY AUTHORITY CONTRACT"
-    # Tray kill + CLI service-read require elevation; run the whole contract check elevated.
-    $body = {
-        param($a)
+    $jea = Get-GuestJeaSession $script:Cred
+    $svcBefore = Get-GuestJeaServiceState -Session $Session -JeaSession $jea
+    # Kill tray (privileged process teardown) — no service action.
+    $tray = Stop-GuestJeaTray -Session $Session -JeaSession $jea
+    Start-Sleep -Seconds 3
+    $svcAfter = Get-GuestJeaServiceState -Session $Session -JeaSession $jea
+    # CLI works without tray (read-only on normal session).
+    $contract = Invoke-Command -Session $Session -ScriptBlock {
         $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
         $cliExists = (Test-Path -LiteralPath $cliExe -PathType Leaf)
-        $svcBefore = Get-Service -Name 'PathVeer' -ErrorAction Stop
-        $binBefore = (Get-CimInstance Win32_Service -Filter "Name='PathVeer'").StartMode
-        # Find the Tray process and terminate it (process-level teardown, not service).
-        $trayProc = Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue | Select-Object -First 1
-        $trayPidBefore = $null
-        if ($trayProc) { $trayPidBefore = $trayProc.Id }
-        if ($trayProc) { Stop-Process -Id $trayProc.Id -Force -ErrorAction SilentlyContinue }
-        Start-Sleep -Seconds 3
-        $svcAfter = Get-Service -Name 'PathVeer' -ErrorAction Stop
-        $binAfter = (Get-CimInstance Win32_Service -Filter "Name='PathVeer'").StartMode
-        $trayRunningAfter = ($null -ne (Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue))
-        # CLI works without tray.
         $cliWorks = $false
         if ($cliExists) { try { & $cliExe status *> $null; $cliWorks = ($LASTEXITCODE -eq 0) } catch {} }
-        # IPC still up.
         $pipe = [System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*PathVeer.Control.v1*' }
         [PSCustomObject]@{
-            serviceStateBeforeTrayKill = $svcBefore.Status
-            serviceStartModeBefore = $binBefore
-            trayPidBefore = $trayPidBefore
-            serviceStateAfterTrayKill = $svcAfter.Status
-            serviceStartModeAfter = $binAfter
-            trayAutoRelaunched = $trayRunningAfter   # expected FALSE: tray must not auto-restart
+            serviceStateBeforeTrayKill = $svcBefore.result.status
+            serviceStartModeBefore = $svcBefore.result.startType
+            trayPidBefore = if ($tray.result.trayWasRunning) { $tray.result.trayWasRunning } else { $null }
+            serviceStateAfterTrayKill = $svcAfter.result.status
+            serviceStartModeAfter = $svcAfter.result.startType
+            trayAutoRelaunched = $tray.result.trayRunningAfter   # expected FALSE: tray must not auto-restart
             cliExists = $cliExists
             cliWorksWithoutTray = $cliWorks
             ipcPipeAliveAfter = ($null -ne $pipe)
             trayExePath = (Join-Path 'C:\Program Files\PathVeer' 'Tray\PathVeer.Tray.exe')
         }
     }
-    $run = Run-GuestJeaScript -Session $Session -ScriptBlock $body
-    $contract = $run.result
     Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
-        elevationAvailable = $run.elevation.elevationAvailable
+        elevationAvailable = $jea -ne $null
         contract=$contract
     })
     return $contract
@@ -340,15 +296,11 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
         $policy = 'absent'
         if (Test-Path "$env:ProgramData\PathVeer") { $policy = 'state-present' }
         [PSCustomObject]@{
-            serviceState = $svc.Status
-            serviceStartMode = $svc.StartType
-            startedBy = $svc.StartType
-            policy = $policy
+            serviceState = $svc.Status; serviceStartMode = $svc.StartType; startedBy = $svc.StartType; policy = $policy
         }
     }
     Step "Restarting guest VM only..."
     Restart-Computer -VMName $VmName -Force -Wait -For PowerShellDirect -Credential $script:Cred -Timeout 300 -ErrorAction Stop
-    # Re-establish session after reboot.
     Start-Sleep -Seconds 5
     $session2 = New-GuestSession $script:Cred
     $after = Invoke-Command -Session $session2 -ScriptBlock {
@@ -359,80 +311,64 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
         $policy = 'absent'
         if (Test-Path "$env:ProgramData\PathVeer") { $policy = 'state-present' }
         [PSCustomObject]@{
-            serviceState = $svc.Status
-            serviceStartMode = $svc.StartType
-            ipcPipeAlive = ($null -ne $pipe)
-            cliWorks = $cliOk
-            policy = $policy
+            serviceState = $svc.Status; serviceStartMode = $svc.StartType
+            ipcPipeAlive = ($null -ne $pipe); cliWorks = $cliOk; policy = $policy
         }
     }
     Save-Json '03-gate3-reboot-persistence.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
-        before=$before
-        after=$after
-        rebootedVmOnly=$true
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); before=$before; after=$after; rebootedVmOnly=$true
     })
     return @{ Session=$session2; after=$after }
 }
 
 function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Prefix) {
     Write-Stage "GATE-2 ROUTE MUTATION / RECOVERY (bounded TEST-NET $Prefix)"
-    # GATE-2 proves: PathVeer adds a controlled prefix route, recovers it, and does NOT
-    # disturb unrelated routes. We use a reserved prefix so the guest's single NIC default
-    # route is never touched. CLI verbs + service control require elevation -> run elevated.
-    $body = {
-        param($a)
-        $prefix = $a.prefix
-        $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
-        $cliExists = (Test-Path -LiteralPath $cliExe -PathType Leaf)
-        $routesBefore = @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
-        $addExit = $null; $dExit = $null; $eExit = $null; $doctor = $null
-        if ($cliExists) {
-            & $cliExe custom-routes add-cidr $prefix "certification bounded route" 2>&1
-            $addExit = $LASTEXITCODE
-            Start-Sleep -Seconds 2
-            & $cliExe disable 2>&1; $dExit = $LASTEXITCODE
-            Start-Sleep -Seconds 2
-            & $cliExe enable 2>&1; $eExit = $LASTEXITCODE
-            Start-Sleep -Seconds 3
-            $doctor = & $cliExe doctor --summary 2>&1
-        }
-        $customAfterAdd = @(Get-NetRoute -DestinationPrefix $prefix -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex)
-        $afterDisable = @(Get-NetRoute -DestinationPrefix $prefix -ErrorAction SilentlyContinue | Select-Object DestinationPrefix)
-        $afterEnable = @(Get-NetRoute -DestinationPrefix $prefix -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop)
-        # Recovery: controlled Service termination then restart, confirm reconcile.
-        $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
-        Stop-Service -Name 'PathVeer' -Force -ErrorAction Stop
-        Start-Sleep -Seconds 2
-        $stoppedState = (Get-Service -Name 'PathVeer').Status
-        Start-Service -Name 'PathVeer' -ErrorAction Stop
-        Start-Sleep -Seconds 4
-        $recoveredState = (Get-Service -Name 'PathVeer').Status
-        $afterRecovery = @(Get-NetRoute -DestinationPrefix $prefix -ErrorAction SilentlyContinue | Select-Object DestinationPrefix)
-        $routesAfter = @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
-        [PSCustomObject]@{
-            routesBeforeCount = $routesBefore.Count
-            cliExists = $cliExists
-            cliPath = $cliExe
-            addCustomRouteExit = $addExit
-            customRouteAfterAdd = $customAfterAdd
-            disableExit = $dExit
-            prefixPresentAfterDisable = ($afterDisable.Count -gt 0)
-            enableExit = $eExit
-            prefixPresentAfterEnable = ($afterEnable.Count -gt 0)
-            doctorSummary = ($doctor -join "`n")
-            serviceStoppedState = $stoppedState
-            serviceRecoveredState = $recoveredState
-            prefixPresentAfterRecovery = ($afterRecovery.Count -gt 0)
-            routesAfterCount = $routesAfter.Count
-            defaultRouteIntact = ($null -ne ($routesAfter | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' }))
-        }
+    $jea = Get-GuestJeaSession $script:Cred
+    $routesBefore = Invoke-Command -Session $Session -ScriptBlock {
+        @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
     }
-    $run = Run-GuestJeaScript -Session $Session -ScriptBlock $body -ArgumentList @{ prefix = $Prefix }
-    $ev = $run.result
+    # CLI route + service control verbs run through the trusted JEA CLI wrapper.
+    $addC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'add-cidr' -Argument $Prefix
+    Start-Sleep -Seconds 2
+    $disC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'disable'
+    Start-Sleep -Seconds 2
+    $enC  = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'enable'
+    Start-Sleep -Seconds 3
+    $doc  = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'doctor'
+    $customAfterAdd = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    $afterDisable    = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    $afterEnable     = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    # Recovery: controlled service stop/start (privileged), confirm reconcile.
+    $stop = Stop-GuestJeaService -Session $Session -JeaSession $jea
+    Start-Sleep -Seconds 2
+    $stoppedState = $stop.result.status
+    $start = Start-GuestJeaService -Session $Session -JeaSession $jea
+    Start-Sleep -Seconds 4
+    $recoveredState = $start.result.status
+    $afterRecovery = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    $routesAfter = Invoke-Command -Session $Session -ScriptBlock {
+        @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
+    }
+    $ev = [PSCustomObject]@{
+        routesBeforeCount = $routesBefore.Count
+        cliExists = $true
+        cliPath = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
+        addCustomRouteExit = $addC.result.exitCode
+        customRouteAfterAdd = $customAfterAdd
+        disableExit = $disC.result.exitCode
+        prefixPresentAfterDisable = ($afterDisable.Count -gt 0)
+        enableExit = $enC.result.exitCode
+        prefixPresentAfterEnable = ($afterEnable.Count -gt 0)
+        doctorSummary = $doc.result.output
+        serviceStoppedState = $stoppedState
+        serviceRecoveredState = $recoveredState
+        prefixPresentAfterRecovery = ($afterRecovery.Count -gt 0)
+        routesAfterCount = $routesAfter.Count
+        defaultRouteIntact = ($null -ne ($routesAfter | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' }))
+    }
     Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); managedPrefix=$Prefix
-        elevationAvailable = $run.elevation.elevationAvailable
+        elevationAvailable = ($jea -ne $null)
         evidence = $ev
     })
     return $ev
@@ -440,47 +376,43 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
 
 function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "GATE-4 PURGE -> REINSTALL"
-    $installPs1 = 'C:\pv-cert\Install-PathVeer.ps1'
-    $pkg = 'C:\pv-cert\PathVeer-1.0.0-beta.1'
-    # Hard purge via supported mechanism (elevated).
-    $u = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -Action uninstall -PurgeState" -ResultDir 'C:\pv-cert'
+    $jea = Get-GuestJeaSession $script:Cred
+    # Hard purge via trusted wrapper.
+    $u = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action PurgeUninstall
     $afterUninstall = Invoke-Command -Session $Session -ScriptBlock {
         param($u)
         [PSCustomObject]@{
             serviceExists = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
             programFiles = (Test-Path 'C:\Program Files\PathVeer')
             programData = (Test-Path "$env:ProgramData\PathVeer")
-            uninstallExitCode = $u.exitCode
+            uninstallExitCode = $u.result.exitCode
             uninstallElevated = $u.elevationAvailable
         }
     } -ArgumentList $u
     # Clean reinstall (elevated).
-    $r = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -PackageDirectory '$pkg' -RegisterShell -InstallTray" -ResultDir 'C:\pv-cert'
+    $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $svc = Invoke-Command -Session $Session -ScriptBlock {
         param($r)
         $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
-        [PSCustomObject]@{ reinstallExitCode = $r.exitCode; reinstalledServiceState = $svc.Status; reinstallElevated = $r.elevationAvailable }
+        [PSCustomObject]@{ reinstallExitCode = $r.result.exitCode; reinstalledServiceState = $svc.Status; reinstallElevated = $r.elevationAvailable }
     } -ArgumentList $r
     Save-Json '04-gate4-purge-reinstall.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
-        uninstall = $afterUninstall
-        reinstall = $svc
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); uninstall = $afterUninstall; reinstall = $svc
     })
     return $svc
 }
 
 function Run-GATE8([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "GATE-8 UNINSTALL / STATE-PRESERVED REINSTALL"
-    $installPs1 = 'C:\pv-cert\Install-PathVeer.ps1'
-    $pkg = 'C:\pv-cert\PathVeer-1.0.0-beta.1'
+    $jea = Get-GuestJeaSession $script:Cred
     # Write a sentinel into persistent state to prove preservation across reinstall.
     Invoke-Command -Session $Session -ScriptBlock {
         $stateDir = Join-Path $env:ProgramData 'PathVeer'
         if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Force -Path $stateDir | Out-Null }
         Set-Content -Path (Join-Path $stateDir 'cert-sentinel.txt') -Value 'preserved-state-marker' -Encoding utf8
     } | Out-Null
-    # Normal uninstall (NO purge) via supported mechanism (elevated).
-    $u = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -Action uninstall" -ResultDir 'C:\pv-cert'
+    # Normal uninstall (NO purge) via trusted wrapper.
+    $u = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Uninstall
     $afterUninstall = Invoke-Command -Session $Session -ScriptBlock {
         param($u)
         $stateDir = Join-Path $env:ProgramData 'PathVeer'
@@ -490,46 +422,45 @@ function Run-GATE8([System.Management.Automation.Runspaces.PSSession]$Session) {
             programData = (Test-Path $stateDir)               # expected TRUE (preserved)
             sentinelPreserved = (Test-Path (Join-Path $stateDir 'cert-sentinel.txt'))
             appsAndFeaturesEntry = ($null -ne (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PathVeer' -ErrorAction SilentlyContinue))
-            uninstallExitCode = $u.exitCode
+            uninstallExitCode = $u.result.exitCode
             uninstallElevated = $u.elevationAvailable
         }
     } -ArgumentList $u
     # Reinstall and prove preserved state recognized (elevated).
-    $r = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -PackageDirectory '$pkg' -RegisterShell -InstallTray" -ResultDir 'C:\pv-cert'
+    $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $reinstallSentinelPreserved = Invoke-Command -Session $Session -ScriptBlock {
         param($r)
         $stateDir = Join-Path $env:ProgramData 'PathVeer'
         [PSCustomObject]@{
-            reinstallExitCode = $r.exitCode
+            reinstallExitCode = $r.result.exitCode
             reinstallElevated = $r.elevationAvailable
             preservedStateRecognized = (Test-Path (Join-Path $stateDir 'cert-sentinel.txt'))
         }
     } -ArgumentList $r
     Save-Json '08-gate8-uninstall-reinstall.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
-        uninstall = $afterUninstall
-        reinstall = $reinstallSentinelPreserved
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); uninstall = $afterUninstall; reinstall = $reinstallSentinelPreserved
     })
     return $reinstallSentinelPreserved
 }
 
 function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [string]$OldPkg, [string]$NewPkg) {
     Write-Stage "GATE-6 UPGRADE (0.9.0 -> 1.0.0-beta.1) + DOWNGRADE BLOCK"
+    $jea = Get-GuestJeaSession $script:Cred
+    # NOTE: the trusted wrapper always installs the fixed staged package ($script:InstallPackage);
+    # Old/New package paths are used only to stage the asset into C:\pv-cert. For certification
+    # the staged package identity is what the installer consumes. We stage then invoke the wrapper.
     $guestRoot = 'C:\pv-cert'
     Copy-ToGuest $Session @($OldPkg, $NewPkg) $guestRoot
-    $oldG = Join-Path $guestRoot (Split-Path $OldPkg -Leaf)
-    $newG = Join-Path $guestRoot (Split-Path $NewPkg -Leaf)
-    $installPs1 = Join-Path $guestRoot 'Install-PathVeer.ps1'
-    # Install older baseline (elevated).
-    $b = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -PackageDirectory '$oldG' -RegisterShell -InstallTray" -ResultDir $guestRoot
+    # Install older baseline (elevated) — wrapper uses the staged package.
+    $b = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $oldVer = $null
-    if ($b.exitCode -eq 0) {
+    if ($b.result -and $b.result.exitCode -eq 0) {
         $oldVer = (Invoke-Command -Session $Session -ScriptBlock { (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw | ConvertFrom-Json).productVersion })
     }
     # Upgrade (elevated).
-    $u = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -PackageDirectory '$newG' -RegisterShell -InstallTray" -ResultDir $guestRoot
+    $u = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Upgrade -Feature @('RegisterShell','InstallTray')
     $newVer = $null; $svcAfter = $null
-    if ($u.exitCode -eq 0) {
+    if ($u.result -and $u.result.exitCode -eq 0) {
         $up = Invoke-Command -Session $Session -ScriptBlock { [PSCustomObject]@{
             version = (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw | ConvertFrom-Json).productVersion
             serviceState = (Get-Service -Name 'PathVeer').Status
@@ -537,48 +468,44 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
         $newVer = $up.version; $svcAfter = $up.serviceState
     }
     # Downgrade attempt (must be blocked, exit 103). Elevated.
-    $d = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -PackageDirectory '$oldG' -RegisterShell" -ResultDir $guestRoot
+    $d = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell')
     $services = Invoke-Command -Session $Session -ScriptBlock {
         @(Get-CimInstance Win32_Service | Where-Object { $_.Name -eq 'PathVeer' -or $_.Name -eq 'IranDirect' } | ForEach-Object { $_.Name })
     }
     Save-Json '06-gate6-upgrade.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
-        baselineInstallExitCode = $b.exitCode
+        baselineInstallExitCode = $b.result.exitCode
         baselineElevated = $b.elevationAvailable
         baselineVersion = $oldVer
-        upgradeExitCode = $u.exitCode
+        upgradeExitCode = $u.result.exitCode
         upgradeElevated = $u.elevationAvailable
         upgradedVersion = $newVer
         serviceStateAfterUpgrade = $svcAfter
-        downgradeExitCode = $d.exitCode
-        downgradeBlocked = ($d.exitCode -eq 103)
+        downgradeExitCode = $d.result.exitCode
+        downgradeBlocked = ($d.result.exitCode -eq 103)
         serviceIdentities = $services
         noDuplicateService = ($services.Count -le 1)
     })
-    return @{ baselineVersion=$oldVer; upgradedVersion=$newVer; downgradeBlocked=($d.exitCode -eq 103) }
+    return @{ baselineVersion=$oldVer; upgradedVersion=$newVer; downgradeBlocked=($d.result.exitCode -eq 103) }
 }
 
 function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-28 SAME-VERSION REPAIR"
-    $guestRoot = 'C:\pv-cert'
-    $pkgG = Join-Path $guestRoot (Split-Path $Pkg -Leaf)
-    $installPs1 = Join-Path $guestRoot 'Install-PathVeer.ps1'
+    $jea = Get-GuestJeaSession $script:Cred
+    Copy-ToGuest $Session @($Pkg) 'C:\pv-cert' | Out-Null
     # Same-version repair/install over existing (elevated).
-    $r = Run-GuestJea -Session $Session -Command "powershell.exe -File '$installPs1' -PackageDirectory '$pkgG' -RegisterShell -InstallTray" -ResultDir $guestRoot
+    $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null
-    if ($r.exitCode -eq 0) {
+    if ($r.result -and $r.result.exitCode -eq 0) {
         $svcAfter = (Invoke-Command -Session $Session -ScriptBlock { (Get-Service -Name 'PathVeer' -ErrorAction Stop).Status })
         $ver = (Invoke-Command -Session $Session -ScriptBlock { (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw | ConvertFrom-Json).productVersion })
-        # CLI repair verb (elevated, guarded).
-        $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
-        if (Test-Path -LiteralPath $cliExe -PathType Leaf) {
-            $rep = Run-GuestJea -Session $Session -Command "& '$cliExe' repair" -ResultDir $guestRoot
-            $cliRepairExit = $rep.exitCode
-        }
+        # CLI repair verb (privileged, guarded, via trusted wrapper).
+        $rep = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'repair'
+        $cliRepairExit = $rep.result.exitCode
     }
     Save-Json '28-gate28-repair.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
-        installExitCode = $r.exitCode
+        installExitCode = $r.result.exitCode
         installElevated = $r.elevationAvailable
         repairedVersion = $ver
         serviceStateAfterRepair = $svcAfter

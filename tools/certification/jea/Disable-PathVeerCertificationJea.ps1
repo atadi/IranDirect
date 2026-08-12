@@ -6,7 +6,7 @@
     Removes ONLY the certification instrumentation this project created:
       - JEA endpoint registration 'PathVeer.Certification'
       - guest module path C:\Program Files\PathVeerCertificationJea
-      - generated transcripts under C:\pv-cert\jea-transcripts
+      - generated transcripts under C:\ProgramData\PathVeerCertificationJea\Transcripts
 
     It does NOT touch Windows system state, .NET runtimes, or any PathVeer product
     install. Safe to run with or without PathVeer present.
@@ -35,7 +35,7 @@ if ($existing) {
 $modulePath = Join-Path $env:ProgramFiles 'PathVeerCertificationJea'
 if (Test-Path $modulePath) { Remove-Item -Path $modulePath -Recurse -Force -ErrorAction SilentlyContinue }
 
-$transcripts = 'C:\pv-cert\jea-transcripts'
+$transcripts = 'C:\ProgramData\PathVeerCertificationJea\Transcripts'
 if (Test-Path $transcripts) { Remove-Item -Path $transcripts -Recurse -Force -ErrorAction SilentlyContinue }
 
 Write-Host 'Certification JEA control plane removed. Unrelated Windows/PathVeer state untouched.' -ForegroundColor Cyan

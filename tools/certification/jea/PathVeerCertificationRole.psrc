@@ -1,67 +1,46 @@
-# PathVeer Certification — JEA Role Capability (narrow, certification-only)
+# PathVeer Certification — JEA Role Capability (narrow, certification-only, trusted-module surface)
 #
-# This is the RESTRICTED privileged surface exposed to the certification harness.
-# It does NOT grant an unrestricted Administrator PowerShell endpoint. Only the
-# cmdlets/functions/external commands actually required by the certification gates
-# (GATE-5/2/4/6/8/22/28) are visible. The session runs as a JEA virtual account
-# (member of BUILTIN\Administrators) created per-connection; the connecting user
-# (PV-CERT\pvcert, a UAC-filtered standard token) never receives administrator
-# credentials and can only invoke the commands enumerated here.
+# SECURITY POSTURE (corrected from the rejected bbcbf1d design):
+#   - NO generic shell / arbitrary-execution primitive is exposed. powershell.exe, cmd.exe,
+#     wscript/cscript, Start-Process, Invoke-Expression, Invoke-Command, New-ScheduledTask are
+#     NOT visible. The only privileged behavior is the trusted module functions below.
+#   - NO generic filesystem/registry write primitives (no Set-Content/Set-Item/New-Item visible
+#     to the caller). The module performs narrowly scoped file operations against KNOWN
+#     PathVeer targets only.
+#   - VisibleFunctions are the certified wrappers; their caller-facing parameters are validated
+#     (ValidateSet / ValidatePattern) inside the module. The module is trusted code, not caller
+#     input, so it may use privileged PowerShell internally against fixed targets.
+#   - VisibleCmdlets is intentionally empty: the caller issues no raw cmdlets.
+#   - VisibleExternalCommands is intentionally empty: no executable is exposed to the caller.
+#     (The module internally reuses the already-running PowerShell host process; that path is
+#     fixed and not a caller-facing surface.)
 #
-# Authoritative source of truth. The guest bootstrap (Enable-PathVeerCertificationJea.ps1)
-# writes an equivalent copy of this file into the guest module path and registers it.
+# This is NOT an unrestricted Administrator PowerShell endpoint.
 
 @{
-    # Minimum required; the session is locked to the commands below.
-    VisibleCmdlets = @(
-        'Get-Service',
-        'Stop-Service',
-        'Start-Service',
-        'Restart-Service',
-        'Get-CimInstance',
-        'Get-Process',
-        'Stop-Process',
-        'Get-NetRoute',
-        'Test-Path',
-        'Get-Content',
-        'Set-Content',
-        'Get-Item',
-        'Get-ChildItem',
-        'Get-ItemProperty',
-        'New-Item',
-        'Get-Date'
+    VisibleCmdlets        = @()
+    VisibleFunctions      = @(
+        'Test-PathVeerCertificationAdmin',
+        'Get-PathVeerServiceState',
+        'Start-PathVeerService',
+        'Stop-PathVeerService',
+        'Stop-PathVeerTray',
+        'Get-PathVeerInstallManifest',
+        'Get-PathVeerInstalledFiles',
+        'Get-PathVeerRouteState',
+        'Invoke-PathVeerCertificationInstall',
+        'Invoke-PathVeerCli',
+        'Get-PathVeerProgramDataState'
     )
+    VisibleExternalCommands = @()
+    VisibleAliases         = @()
+    VisibleProviders        = @()
 
-    # Built-in functions used by gate script blocks.
-    VisibleFunctions = @(
-        'Join-Path',
-        'ConvertTo-Json',
-        'ConvertFrom-Json',
-        'Select-Object',
-        'Where-Object',
-        'ForEach-Object',
-        'Measure-Object',
-        'Start-Sleep',
-        'Write-Host',
-        'Out-Null'
-    )
-
-    # External executables allowed. Only the PathVeer CLI and a controlled
-    # powershell.exe host (used to launch the installer script elevated).
-    # Arbitrary executables are NOT permitted.
-    VisibleExternalCommands = @(
-        'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
-        'C:\Program Files\PathVeer\Cli\PathVeer.Cli.exe'
-    )
-
-    VisibleAliases = @()
-    VisibleProviders = @()
-
-    # No extra modules imported; no startup scripts beyond the locked surface.
-    ModulesToImport = @()
+    # The trusted module supplies the implementation. Functions are validated internally.
+    ModulesToImport = @('PathVeerCertificationJea')
     ScriptsToProcess = @()
 
-    # Audit trail of every certification command executed through the endpoint.
-    # Ownership-aware cleanup removes this directory on Disable-PathVeerCertificationJea.ps1.
-    TranscriptDirectory = 'C:\pv-cert\jea-transcripts'
+    # Audit transcripts in a PROTECTED location (not C:\pv-cert). The bootstrap creates it
+    # with ACLs so ordinary/filtered pvcert cannot modify or delete them.
+    TranscriptDirectory = 'C:\ProgramData\PathVeerCertificationJea\Transcripts'
 }
