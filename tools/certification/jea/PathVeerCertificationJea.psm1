@@ -149,11 +149,19 @@ function Invoke-PathVeerCertificationInstall {
     } catch {
         $errorMsg = $_.Exception.Message
     }
+    # Capture the JEA virtual-account child identity. This function runs INSIDE the elevated
+    # RunAsVirtualAccount context, so GetCurrent() reports the virtual account (proven admin).
+    # The harness reads these to report genuine elevation without re-probing; a null/blank value
+    # means the operation never reached identity capture (e.g. invocation rejected upstream).
+    $childId = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $childWp = New-Object System.Security.Principal.WindowsPrincipal($childId)
     [PSCustomObject]@{
         action = $Action
         feature = $Feature
         exitCode = $exitCode
         error = $errorMsg
+        childUser = $childId.Name
+        childIsAdministrator = $childWp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
         serviceState = (Get-PathVeerServiceState)
         manifest = (Get-PathVeerInstallManifest)
     }

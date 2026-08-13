@@ -62,27 +62,61 @@ function Invoke-GuestJeaFunction {
     }
     $out.elevationAvailable = $true
     try {
-        # Argument validation is enforced on the guest by the function's parameter attributes.
-        # Only validated function names (whitelist) are forwarded.
-        $allowed = @(
-            'Test-PathVeerCertificationAdmin','Get-PathVeerServiceState','Start-PathVeerService',
-            'Stop-PathVeerService','Stop-PathVeerTray','Get-PathVeerInstallManifest',
-            'Get-PathVeerInstalledFiles','Get-PathVeerRouteState','Invoke-PathVeerCertificationInstall',
-            'Invoke-PathVeerCli','Get-PathVeerProgramDataState'
-        )
-        if ($allowed -notcontains $Function) { throw "Function '$Function' is not an allowed certification operation." }
-        # NoLanguage-safe invocation: a bare trusted-function call (name + splat) with no type
-        # literals / New-Object / Get-Command (those are NOT exposed in the JEA runspace).
-        $res = Invoke-Command -Session $JeaSession -ScriptBlock {
-            param($fn,$argsIn)
-            $r = [PSCustomObject]@{ result=$null; error=$null }
-            try { $r.result = & $fn @argsIn } catch { $r.error = $_.Exception.Message }
-            return $r
-        } -ArgumentList $Function,$ArgumentList -ErrorAction Stop
+        # NoLanguage-safe invocation: build a LITERAL trusted-function call (function name + validated
+        # arguments inlined as literals). The RestrictedRemoteServer / NoLanguage JEA caller forbids the
+        # call operator (&), splatting (@), subexpressions ($()), and dynamic invocation -- so we emit a
+        # bare command with fixed literal arguments, exactly the pattern the control-plane probe proved
+        # works. Every interpolated value is validated against a fixed set (never a caller-supplied path),
+        # so this remains a narrow API, not arbitrary execution.
+        $sbText = switch ($Function) {
+            'Test-PathVeerCertificationAdmin'    { 'Test-PathVeerCertificationAdmin' }
+            'Get-PathVeerServiceState'          { 'Get-PathVeerServiceState' }
+            'Start-PathVeerService'             { 'Start-PathVeerService' }
+            'Stop-PathVeerService'              { 'Stop-PathVeerService' }
+            'Stop-PathVeerTray'                 { 'Stop-PathVeerTray' }
+            'Get-PathVeerInstallManifest'       { 'Get-PathVeerInstallManifest' }
+            'Get-PathVeerInstalledFiles'        { 'Get-PathVeerInstalledFiles' }
+            'Get-PathVeerProgramDataState'      { 'Get-PathVeerProgramDataState' }
+            'Get-PathVeerCertificationBoundary' { 'Get-PathVeerCertificationBoundary' }
+            'Get-PathVeerRouteState'            {
+                $p = [string]($ArgumentList['Prefix'] ?? '')
+                if ($p -notmatch '^[0-9./a-fA-F:]{0,45}$') { throw 'Invalid Prefix argument.' }
+                "Get-PathVeerRouteState -Prefix '$p'"
+            }
+            'Invoke-PathVeerCertificationInstall' {
+                $a = [string]($ArgumentList['Action'] ?? 'Install')
+                $f = [array]($ArgumentList['Feature'] ?? @('RegisterShell','InstallTray'))
+                $validActions = @('Install','Upgrade','Repair','Uninstall','PurgeUninstall')
+                $validFeat = @('RegisterShell','InstallTray')
+                if ($validActions -notcontains $a) { throw 'Invalid Action argument.' }
+                foreach ($x in $f) { if ($validFeat -notcontains $x) { throw 'Invalid Feature argument.' } }
+                $feat = ($f | ForEach-Object { "-Feature '$_'" }) -join ' '
+                "Invoke-PathVeerCertificationInstall -Action '$a' $feat"
+            }
+            'Invoke-PathVeerCli'                 {
+                $v = [string]($ArgumentList['Verb'] ?? 'status')
+                $sv = [string]($ArgumentList['SubVerb'] ?? 'list')
+                $arg = [string]($ArgumentList['Argument'] ?? '')
+                $validVerbs = @('status','repair','doctor','enable','disable','custom-routes')
+                $validSub = @('add-cidr','list')
+                if ($validVerbs -notcontains $v) { throw 'Invalid Verb argument.' }
+                if ($validSub -notcontains $sv) { throw 'Invalid SubVerb argument.' }
+                if ($arg -notmatch '^[\d./\sA-Za-z0-9-]{0,120}$') { throw 'Invalid Argument.' }
+                "Invoke-PathVeerCli -Verb '$v' -SubVerb '$sv' -Argument '$arg'"
+            }
+            default { throw "Function '$Function' is not an allowed certification operation." }
+        }
+        $sb = [scriptblock]::Create($sbText)
+        $res = Invoke-Command -Session $JeaSession -ScriptBlock $sb -ErrorAction Stop
         if ($res) {
-            $out.childUser=$res.childUser; $out.childIsAdministrator=$res.childIsAdministrator
-            $out.elevationSucceeded=$res.childIsAdministrator; $out.result=$res.result; $out.error=$res.error
-            $out.completed = ($null -eq $res.error)
+            # Child identity is reported by the trusted function (captured in the JEA virtual-account
+            # context). A null/blank identity means the operation never reached identity capture.
+            if ($res.PSObject.Properties.Match('childUser').Count) { $out.childUser = $res.childUser }
+            if ($res.PSObject.Properties.Match('childIsAdministrator').Count) { $out.childIsAdministrator = $res.childIsAdministrator }
+            $out.elevationSucceeded = ($out.childIsAdministrator -eq $true)
+            $out.result = $res
+            $out.error = if ($res.PSObject.Properties.Match('error').Count) { $res.error } else { $null }
+            $out.completed = ($null -eq $out.error)
         }
     } catch {
         $out.error = $_.Exception.Message

@@ -193,7 +193,11 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     $gate5Failed = $false
     $failReasons = [System.Collections.Generic.List[string]]::new()
     if (-not $install.elevationAvailable) { $gate5Failed = $true; $failReasons.Add("elevation unavailable: $($install.error)") }
-    if ($install.elevationSucceeded -ne $true) { $gate5Failed = $true; $failReasons.Add("child not genuinely elevated (childIsAdministrator=$($install.childIsAdministrator), childUser=$($install.childUser))") }
+    # Only classify as "child not genuinely elevated" when the install actually completed and
+    # reached identity capture. If the invocation was rejected upstream (e.g. NoLanguage syntax),
+    # completed=$false and the "did not complete" reason already explains the real cause -- do not
+    # mislabel it as a loss of JEA virtual-account elevation (which the control plane already proved).
+    if ($install.completed -eq $true -and $install.elevationSucceeded -ne $true) { $gate5Failed = $true; $failReasons.Add("child not genuinely elevated (childIsAdministrator=$($install.childIsAdministrator), childUser=$($install.childUser))") }
     if ($install.completed -eq $false) { $gate5Failed = $true; $failReasons.Add("installer did not complete: $($install.error)") }
     $installExit = if ($install.result) { $install.result.exitCode } else { $null }
     $installErr   = if ($install.result) { $install.result.error } else { $install.error }
