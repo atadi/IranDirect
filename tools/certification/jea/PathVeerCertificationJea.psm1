@@ -208,8 +208,8 @@ function Invoke-PathVeerCertificationInstall {
         if (-not (Test-Path -LiteralPath $hostExe)) {
             throw ("Windows PowerShell executable not found at expected certification host path: " + $hostExe)
         }
+        $installerStarted = $true   # the verified host process is now launched (synchronous '&' below)
         & $hostExe @psiArgs
-        $installerStarted   = $true
         $installerReturned  = $true
         $installerExitCode  = $LASTEXITCODE
         if (Test-Path -LiteralPath $resultFile) {
