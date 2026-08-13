@@ -83,8 +83,12 @@ function Restore-Clean {
     } catch {
         throw "Certification checkpoint '$CertificationSnapshot' not found or could not be restored on VM '$VmName'. Create it from the clean Windows baseline AFTER registering the JEA endpoint (Enable-PathVeerCertificationJea.ps1), then re-run. Do NOT use PV-CLEAN-WINDOWS for certification runs. ($($_.Exception.Message))"
     }
-    Start-VM -Name $VmName -ErrorAction Stop
-    (Get-VM -Name $VmName) | Wait-VM -For Heartbeat -Timeout 300 -ErrorAction Stop
+    # A Standard checkpoint captured while Running may already be Running after restore,
+    # so do NOT unconditionally Start-VM (unsafe state transition). Reuse Assert-VmRunning,
+    # which starts the VM only when it is not already Running, then waits for heartbeat.
+    # This works regardless of whether the restored certification checkpoint was captured
+    # Running or Off. New-GuestSession's retry loop establishes PowerShell Direct after.
+    Assert-VmRunning
     Start-Sleep -Seconds 5
 }
 
