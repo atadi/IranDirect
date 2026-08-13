@@ -175,19 +175,30 @@ function Assert-CertificationStaging([System.Management.Automation.Runspaces.PSS
     Step "Protected certification payloads present (operator-staged): $trustedInstaller + $payloadDir"
 }
 
+function Assert-CandidateMatchesProtected([string]$CandidatePackage, [string]$ExpectedPackageId) {
+    # SECURITY (Option A semantics): the harness installs ONLY the operator-staged protected
+    # payload (ExpectedPackageId). It must NOT silently accept a -CandidatePackage that names a
+    # different release while the VM installs the checkpointed protected candidate. Fail loud on
+    # identity mismatch so the operator never passes candidate X while the VM installs candidate Y.
+    $leaf = [System.IO.Path]::GetFileName($CandidatePackage)
+    if ($leaf -ne $ExpectedPackageId) {
+        throw ("CANDIDATE IDENTITY MISMATCH: -CandidatePackage basename '$leaf' does not match the operator-staged protected certification payload '$ExpectedPackageId'. The harness installs only the protected payload staged via Enable-PathVeerCertificationJea.ps1; pass the matching candidate package.")
+    }
+    Step "Candidate identity matches protected payload: $leaf"
+}
+
 function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
     $guestRoot = 'C:\pv-cert'
-    Copy-ToGuest $Session @($Pkg, $InstallScript) 'C:\pv-cert\incoming'
-    # SECURITY (Option A): promotion from untrusted incoming into the PROTECTED certification
-    # tree (Trusted\Install-PathVeer.ps1 + Payloads\<package>) is an explicit elevated
-    # operator/bootstrap action ONLY. PV-CERT\pvcert (this filtered session) is DENIED write to
-    # the protected tree, and must NOT gain a JEA function that turns pvcert-controlled incoming
-    # bytes into privileged executed content. The harness therefore never promotes; it fails
-    # loud if the protected payloads are not already staged by the operator/bootstrap before
-    # the PV-CERT-HARNESS checkpoint was taken.
-    $pkgId = [System.IO.Path]::GetFileName($Pkg)
-    Assert-CertificationStaging -Session $Session -PackageId $pkgId
+    # SECURITY (Option A): the operator bootstrap is the ONLY trust transition. PV-CERT-HARNESS
+    # already contains the protected, operator-approved installer + payload. The harness performs
+    # NO runtime copy of executable bytes into the guest (the old Copy-ToGuest into the untrusted
+    # C:\pv-cert\incoming was obsolete and unconsumed after Option A). It only ASSERTS those
+    # protected artifacts exist and installs the fixed protected package. pvcert cannot choose the
+    # privileged executable bytes.
+    $expectedPackageId = 'PathVeer-1.0.0-beta.1'
+    Assert-CandidateMatchesProtected -CandidatePackage $Pkg -ExpectedPackageId $expectedPackageId
+    Assert-CertificationStaging -Session $Session -PackageId $expectedPackageId
     $progressFile = Join-Path $guestRoot 'install-progress.json'
     $resultFile   = Join-Path $guestRoot 'install-result.json'
 
@@ -499,14 +510,17 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
     Write-Stage "GATE-6 UPGRADE (0.9.0 -> 1.0.0-beta.1) + DOWNGRADE BLOCK"
     $jea = Get-GuestJeaSession $script:Cred
     # NOTE: the trusted wrapper always installs the fixed staged package ($script:InstallPackage);
-    # Old/New package paths are used only to stage the asset into C:\pv-cert. For certification
-    # the staged package identity is what the installer consumes. We stage then invoke the wrapper.
+    # Old/New package paths are used ONLY to validate candidate identity against the protected
+    # operator-staged payload (Option A: no runtime copy of executable bytes; the harness asserts
+    # the protected payload exists and installs it). GATE-6's 0.9.0->1.0.0-beta.1 framing is
+    # simulated by the wrapper; only the 1.0.0-beta.1 payload must be operator-staged.
     $guestRoot = 'C:\pv-cert'
-    Copy-ToGuest $Session @($OldPkg, $NewPkg) 'C:\pv-cert\incoming'
+    $expectedPackageId = 'PathVeer-1.0.0-beta.1'
+    Assert-CandidateMatchesProtected -CandidatePackage $NewPkg -ExpectedPackageId $expectedPackageId
     # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.
     # The trusted wrapper always installs the fixed staged package ($script:InstallPackage =
     # PathVeer-1.0.0-beta.1); fail loud if that protected payload is not operator-staged.
-    Assert-CertificationStaging -Session $Session -PackageId 'PathVeer-1.0.0-beta.1'
+    Assert-CertificationStaging -Session $Session -PackageId $expectedPackageId
     # Install older baseline (elevated) — wrapper uses the staged package.
     $b = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $oldVer = $null
@@ -548,11 +562,13 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
 function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-28 SAME-VERSION REPAIR"
     $jea = Get-GuestJeaSession $script:Cred
-    Copy-ToGuest $Session @($Pkg) 'C:\pv-cert\incoming' | Out-Null
+    # SECURITY (Option A): no runtime copy of executable bytes into the guest. The harness only
+    # validates candidate identity and asserts the protected payload exists, then installs it.
+    $expectedPackageId = 'PathVeer-1.0.0-beta.1'
+    Assert-CandidateMatchesProtected -CandidatePackage $Pkg -ExpectedPackageId $expectedPackageId
     # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.
     # Fail loud if the protected payload (PathVeer-1.0.0-beta.1) is not operator-staged.
-    $pkgId = [System.IO.Path]::GetFileName($Pkg)
-    Assert-CertificationStaging -Session $Session -PackageId $pkgId
+    Assert-CertificationStaging -Session $Session -PackageId $expectedPackageId
     # Same-version repair/install over existing (elevated).
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null
