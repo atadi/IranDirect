@@ -151,19 +151,43 @@ function Run-GuestJeaInstall([System.Management.Automation.Runspaces.PSSession]$
 
 # -------- Stage implementations (each returns a hashtable of evidence) --------
 
+function Assert-CertificationStaging([System.Management.Automation.Runspaces.PSSession]$Session, [string]$PackageId) {
+    # SECURITY (Option A): the trusted installer executes ONLY already-protected artifacts
+    # (C:\ProgramData\PathVeerCertificationJea\Trusted\Install-PathVeer.ps1 + Payloads\<pkg>).
+    # Those MUST be staged by the explicit elevated operator/bootstrap BEFORE PV-CERT-HARNESS
+    # is taken. PV-CERT\pvcert (this filtered session) is denied write to the protected tree and
+    # must never promote pvcert-controlled incoming bytes itself. We therefore REFUSE to install
+    # if the protected payloads are missing, rather than promoting untrusted content.
+    # PackageId MUST match $script:InstallPackage in PathVeerCertificationJea.psm1.
+    $base = 'C:\ProgramData\PathVeerCertificationJea'
+    $trustedInstaller = Join-Path $base 'Trusted\Install-PathVeer.ps1'
+    $payloadDir = Join-Path $base ('Payloads\' + $PackageId)
+    $present = Invoke-Command -Session $Session -ScriptBlock {
+        param($ti, $pd)
+        [PSCustomObject]@{ installer = (Test-Path -LiteralPath $ti); payload = (Test-Path -LiteralPath $pd) }
+    } -ArgumentList $trustedInstaller, $payloadDir
+    if (-not $present.installer) {
+        throw ("CERTIFICATION STAGING MISSING: $trustedInstaller. Stage the trusted installer into the protected tree via the elevated operator bootstrap (Enable-PathVeerCertificationJea.ps1) BEFORE taking PV-CERT-HARNESS. The harness does not promote untrusted incoming content.")
+    }
+    if (-not $present.payload) {
+        throw ("CERTIFICATION STAGING MISSING: $payloadDir. Stage the candidate payload into the protected tree via the elevated operator bootstrap BEFORE taking PV-CERT-HARNESS. The harness does not promote untrusted incoming content.")
+    }
+    Step "Protected certification payloads present (operator-staged): $trustedInstaller + $payloadDir"
+}
+
 function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
     $guestRoot = 'C:\pv-cert'
     Copy-ToGuest $Session @($Pkg, $InstallScript) 'C:\pv-cert\incoming'
-    # Narrow, validated promotion of the staged incoming artifacts into the PROTECTED
-    # certification tree (Trusted\Install-PathVeer.ps1 + Payloads\<package>) via the JEA
-    # virtual-account session. The filtered pvcert parent never writes these dirs (the ACL
-    # denies it); only the trusted promotion function, running as the elevated JEA account,
-    # performs the one-way incoming -> protected transition. PackageId must match the
-    # trusted installer's consumed payload directory (module $script:InstallPackage leaf).
+    # SECURITY (Option A): promotion from untrusted incoming into the PROTECTED certification
+    # tree (Trusted\Install-PathVeer.ps1 + Payloads\<package>) is an explicit elevated
+    # operator/bootstrap action ONLY. PV-CERT\pvcert (this filtered session) is DENIED write to
+    # the protected tree, and must NOT gain a JEA function that turns pvcert-controlled incoming
+    # bytes into privileged executed content. The harness therefore never promotes; it fails
+    # loud if the protected payloads are not already staged by the operator/bootstrap before
+    # the PV-CERT-HARNESS checkpoint was taken.
     $pkgId = [System.IO.Path]::GetFileName($Pkg)
-    Step "Promoting staged artifacts into protected certification tree (narrow, validated)"
-    Publish-GuestJeaPayload -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred) -PackageId $pkgId | Out-Null
+    Assert-CertificationStaging -Session $Session -PackageId $pkgId
     $progressFile = Join-Path $guestRoot 'install-progress.json'
     $resultFile   = Join-Path $guestRoot 'install-result.json'
 
@@ -479,12 +503,10 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
     # the staged package identity is what the installer consumes. We stage then invoke the wrapper.
     $guestRoot = 'C:\pv-cert'
     Copy-ToGuest $Session @($OldPkg, $NewPkg) 'C:\pv-cert\incoming'
-    # Promote the staged NEW package into the PROTECTED tree before the trusted install
-    # (same narrow one-way transition as GATE-5). The trusted wrapper installs the fixed
-    # staged package identity, so promote the NewPkg leaf.
-    $newPkgId = [System.IO.Path]::GetFileName($NewPkg)
-    Step "Promoting staged artifacts into protected certification tree (narrow, validated)"
-    Publish-GuestJeaPayload -Session $Session -JeaSession $jea -PackageId $newPkgId | Out-Null
+    # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.
+    # The trusted wrapper always installs the fixed staged package ($script:InstallPackage =
+    # PathVeer-1.0.0-beta.1); fail loud if that protected payload is not operator-staged.
+    Assert-CertificationStaging -Session $Session -PackageId 'PathVeer-1.0.0-beta.1'
     # Install older baseline (elevated) — wrapper uses the staged package.
     $b = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $oldVer = $null
@@ -527,10 +549,10 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     Write-Stage "GATE-28 SAME-VERSION REPAIR"
     $jea = Get-GuestJeaSession $script:Cred
     Copy-ToGuest $Session @($Pkg) 'C:\pv-cert\incoming' | Out-Null
-    # Promote the staged package into the PROTECTED tree before the trusted repair install.
+    # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.
+    # Fail loud if the protected payload (PathVeer-1.0.0-beta.1) is not operator-staged.
     $pkgId = [System.IO.Path]::GetFileName($Pkg)
-    Step "Promoting staged artifacts into protected certification tree (narrow, validated)"
-    Publish-GuestJeaPayload -Session $Session -JeaSession $jea -PackageId $pkgId | Out-Null
+    Assert-CertificationStaging -Session $Session -PackageId $pkgId
     # Same-version repair/install over existing (elevated).
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null

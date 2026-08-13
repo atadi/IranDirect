@@ -103,13 +103,8 @@ function Invoke-GuestJeaFunction {
                 $validSub = @('add-cidr','list')
                 if ($validVerbs -notcontains $v) { throw 'Invalid Verb argument.' }
                 if ($validSub -notcontains $sv) { throw 'Invalid SubVerb argument.' }
-                if ($arg -notmatch '^[\\d./\sA-Za-z0-9-]{0,120}$') { throw 'Invalid Argument.' }
+                if ($arg -notmatch '^[\d./\sA-Za-z0-9-]{0,120}$') { throw 'Invalid Argument.' }
                 "Invoke-PathVeerCli -Verb '$v' -SubVerb '$sv' -Argument '$arg'"
-            }
-            'Publish-PathVeerCertificationPayload' {
-                $pkg = [string]($ArgumentList['PackageId'] ?? 'PathVeer-1.0.0-beta.1')
-                if ($pkg -notmatch '^PathVeer-\d+\.\d+\.\d+(?:-beta\.\d+)?$') { throw 'Invalid PackageId argument.' }
-                "Publish-PathVeerCertificationPayload -PackageId '$pkg'"
             }
             default { throw "Function '$Function' is not an allowed certification operation." }
         }
@@ -141,12 +136,6 @@ function Invoke-GuestJeaInstall([System.Management.Automation.Runspaces.PSSessio
                                 [System.Management.Automation.Runspaces.PSSession]$JeaSession,
                                 [string]$Action='Install', [string[]]$Feature=@('RegisterShell','InstallTray')) {
     return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Invoke-PathVeerCertificationInstall' -ArgumentList @{ Action=$Action; Feature=$Feature }
-}
-
-function Publish-GuestJeaPayload([System.Management.Automation.Runspaces.PSSession]$Session,
-                                 [System.Management.Automation.Runspaces.PSSession]$JeaSession,
-                                 [string]$PackageId='PathVeer-1.0.0-beta.1') {
-    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Publish-PathVeerCertificationPayload' -ArgumentList @{ PackageId=$PackageId }
 }
 
 function Invoke-GuestJeaCli([System.Management.Automation.Runspaces.PSSession]$Session,
