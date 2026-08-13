@@ -165,7 +165,6 @@ function Assert-CandidateMatchesProtected([string]$CandidatePackage, [string]$Ex
 
 function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
-    $guestRoot = 'C:\pv-cert'
     # SECURITY (Option A): the operator bootstrap is the ONLY trust transition. PV-CERT-HARNESS
     # already contains the protected, operator-approved installer + payload. The harness performs
     # NO runtime copy of executable bytes into the guest (the old Copy-ToGuest into the untrusted
@@ -173,11 +172,10 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     # the protected tree from the filtered pvcert session (the Option-A ACL denies it, by design).
     # Instead it validates the Desktop-side candidate identity, then delegates to the trusted JEA
     # wrapper, which enforces the exact protected installer + payload preconditions inside the
-    # privileged virtual-account context. pvcert cannot choose the privileged executable bytes.
+    # privileged virtual-account context and returns the installer's structured result. pvcert
+    # cannot choose the privileged executable bytes.
     $expectedPackageId = 'PathVeer-1.0.0-beta.1'
     Assert-CandidateMatchesProtected -CandidatePackage $Pkg -ExpectedPackageId $expectedPackageId
-    $progressFile = Join-Path $guestRoot 'install-progress.json'
-    $resultFile   = Join-Path $guestRoot 'install-result.json'
 
     $pre = Invoke-Command -Session $Session -ScriptBlock {
         [PSCustomObject]@{
@@ -192,16 +190,15 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     $install = Run-GuestJeaInstall -Session $Session -Action Install -Feature @('RegisterShell','InstallTray')
 
     # Read the installer's structured result + progress (authoritative gate boundary).
+    # The trusted function now writes the installer's -ResultFile/-ProgressFile into the JEA
+    # virtual account's TEMP, reads them back, and surfaces them on $install.result. The harness
+    # therefore consumes the structured result directly from the trusted return object and never
+    # reads C:\pv-cert\install-*.json (the installer was never given those paths to write).
     $installResult = $null; $installProgress = $null
-    $readBack = Invoke-Command -Session $Session -ScriptBlock {
-        param($rf, $pf)
-        $r = $null; $p = $null
-        if (Test-Path $rf) { try { $r = Get-Content $rf -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json } catch {} }
-        if (Test-Path $pf) { try { $p = Get-Content $pf -Raw -ErrorAction SilentlyContinue } catch {} }
-        [PSCustomObject]@{ result = $r; progress = $p }
-    } -ArgumentList $resultFile, $progressFile
-    $installResult = $readBack.result
-    $installProgress = $readBack.progress
+    if ($install.result) {
+        $installResult   = $install.result.installerResult
+        $installProgress = $install.result.installerProgress
+    }
 
     # Hard gate boundary: installation must succeed before any CLI use.
     $post = Get-GuestJeaServiceState -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
@@ -220,11 +217,20 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     # mislabel it as a loss of JEA virtual-account elevation (which the control plane already proved).
     if ($install.completed -eq $true -and $install.elevationSucceeded -ne $true) { $gate5Failed = $true; $failReasons.Add("child not genuinely elevated (childIsAdministrator=$($install.childIsAdministrator), childUser=$($install.childUser))") }
     if ($install.completed -eq $false) { $gate5Failed = $true; $failReasons.Add("installer did not complete: $($install.error)") }
-    $installExit = if ($install.result) { $install.result.exitCode } else { $null }
-    $installErr   = if ($install.result) { $install.result.error } else { $install.error }
-    if ($null -ne $installExit -and $installExit -ne 0) { $gate5Failed = $true; $failReasons.Add("installer exit code $installExit") }
-    if ($installErr) { $gate5Failed = $true; $failReasons.Add("installer error: $installErr") }
-    if ($installResult -and $installResult.success -eq $false) { $gate5Failed = $true; $failReasons.Add("installer reported failure: [$($installResult.category)] $($installResult.message)") }
+    # --- Installer lifecycle (from the trusted function's explicit fields, not the wrapper's
+    #     misleading 'completed' flag). 'installCompleted=true' historically meant only "the JEA
+    #     call returned without an error string", which is NOT proof the installer ran. These
+    #     fields disambiguate installer start / return / exit / error. ---
+    $ir = $install.result
+    if ($null -eq $ir) { $gate5Failed = $true; $failReasons.Add('trusted install function returned no result object') }
+    else {
+        if ($ir.installerInvocationAttempted -ne $true) { $gate5Failed = $true; $failReasons.Add('installer invocation was not attempted by the trusted wrapper') }
+        if ($ir.installerStarted -ne $true) { $gate5Failed = $true; $failReasons.Add('installer process did not start') }
+        if ($ir.installerReturned -ne $true) { $gate5Failed = $true; $failReasons.Add("installer process did not return: $($ir.installerError)") }
+        if ($null -ne $ir.installerExitCode -and $ir.installerExitCode -ne 0) { $gate5Failed = $true; $failReasons.Add("installer exit code $($ir.installerExitCode)") }
+        if ($ir.installerError) { $gate5Failed = $true; $failReasons.Add("installer error: $($ir.installerError)") }
+        if ($ir.installerResult -and $ir.installerResult.success -eq $false) { $gate5Failed = $true; $failReasons.Add("installer reported failure: [$($ir.installerResult.category)] $($ir.installerResult.message)") }
+    }
     if (-not $svcExists) { $gate5Failed = $true; $failReasons.Add('PathVeer service not present after install') }
     if (-not $manifestExists) { $gate5Failed = $true; $failReasons.Add('install-manifest.json not present after install') }
 
@@ -233,8 +239,18 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
             gate = 'GATE-5'; result = 'FAIL'; reasons = $failReasons.ToArray()
             elevated = $install.elevationAvailable; elevationSucceeded = $install.elevationSucceeded
             childUser = $install.childUser; childIsAdministrator = $install.childIsAdministrator
-            installExitCode = $installExit; installCompleted = $install.completed
-            installResult = $installResult; installProgress = $installProgress
+            # Explicit installer lifecycle (replaces the misleading 'installCompleted').
+            trustedInstallFunctionReached  = ($null -ne $install.childUser)
+            installerPathValidated         = if ($ir) { $ir.installerPathValidated } else { $null }
+            payloadPathValidated           = if ($ir) { $ir.payloadPathValidated } else { $null }
+            installerInvocationAttempted   = if ($ir) { $ir.installerInvocationAttempted } else { $null }
+            installerStarted               = if ($ir) { $ir.installerStarted } else { $null }
+            installerReturned              = if ($ir) { $ir.installerReturned } else { $null }
+            installerExitCode              = if ($ir) { $ir.installerExitCode } else { $null }
+            installerError                 = if ($ir) { $ir.installerError } else { $null }
+            installerResult                = $installResult
+            installerProgress              = $installProgress
+            installCompleted               = $install.completed
             postConditions = $post.result; preInstall = $pre
         }
         Save-Json '05-gate5-fresh-install.json' $failEvidence
@@ -491,7 +507,6 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
     # operator-staged payload (Option A: no runtime copy of executable bytes; the harness asserts
     # the protected payload exists and installs it). GATE-6's 0.9.0->1.0.0-beta.1 framing is
     # simulated by the wrapper; only the 1.0.0-beta.1 payload must be operator-staged.
-    $guestRoot = 'C:\pv-cert'
     $expectedPackageId = 'PathVeer-1.0.0-beta.1'
     Assert-CandidateMatchesProtected -CandidatePackage $NewPkg -ExpectedPackageId $expectedPackageId
     # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.

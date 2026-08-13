@@ -127,36 +127,74 @@ function Invoke-PathVeerCertificationInstall {
         # fixed set, so no arbitrary feature name or filesystem path can reach the installer.
         [string]$Feature = 'RegisterShell,InstallTray'
     )
-    $exitCode = $null; $logFile = $null; $errorMsg = $null
+    # Lifecycle / result capture. These DISAMBIGUATE the installer's actual execution from the
+    # wrapper's own return. They replace the misleading single 'completed' flag the harness used to
+    # read, because 'wrapper returned without an error string' is NOT 'installer completed'.
+    $installerPathValidated        = $false
+    $payloadPathValidated          = $false
+    $installerInvocationAttempted  = $false
+    $installerStarted              = $false
+    $installerReturned             = $false
+    $installerExitCode             = $null
+    $installerError                = $null
+    $installerResult               = $null
+    $installerProgress             = $null
+
+    $exitCode = $null; $errorMsg = $null; $featList = @()
     try {
         if (-not (Test-Path -LiteralPath $script:InstallScript)) {
             throw "Certification installer not staged at $($script:InstallScript). Stage the package first."
         }
-        # Build a fixed, validated argument list. No caller-supplied paths/strings reach the process.
-        $psiArgs = @('-File', $script:InstallScript)
-        switch ($Action) {
-            'Install'         { $psiArgs += '-PackageDirectory'; $psiArgs += $script:InstallPackage }
-            'Upgrade'         { $psiArgs += '-PackageDirectory'; $psiArgs += $script:InstallPackage }
-            'Repair'          { $psiArgs += '-PackageDirectory'; $psiArgs += $script:InstallPackage }
-            'Uninstall'       { $psiArgs += '-Action'; $psiArgs += 'uninstall' }
-            'PurgeUninstall'  { $psiArgs += '-Action'; $psiArgs += 'uninstall'; $psiArgs += '-PurgeState' }
+        $installerPathValidated = $true
+        if (-not (Test-Path -LiteralPath $script:InstallPackage)) {
+            throw "Certification payload not staged at $($script:InstallPackage). Stage the package first."
         }
+        $payloadPathValidated = $true
+
+        # The installer writes STRUCTURED result/progress to files when given -ResultFile/-ProgressFile
+        # (see Install-PathVeer.ps1 Phase 37.2 contract). We place them in the JEA virtual account's own
+        # TEMP and read them back HERE (privileged context), then surface them in the return object, so
+        # the harness never needs to read protected or untrusted paths itself. No caller-supplied path.
+        $resultFile   = Join-Path $env:TEMP ('pathveer-cert-install-' + [guid]::NewGuid().ToString('N') + '.json')
+        $progressFile = Join-Path $env:TEMP ('pathveer-cert-progress-' + [guid]::NewGuid().ToString('N') + '.json')
+
+        # Build a fixed, validated argument list. No caller-supplied paths/strings reach the process.
+        $psiArgs = @('-NoProfile', '-File', $script:InstallScript)
+        $psiArgs += '-Action';  $psiArgs += $Action
+        $psiArgs += '-PackageDirectory'; $psiArgs += $script:InstallPackage
         # Split + validate the comma-joined feature string against the fixed set (trusted code).
-        $featList = @()
         foreach ($tok in ($Feature -split ',')) {
             $t = $tok.Trim()
             if ($t -eq 'RegisterShell' -or $t -eq 'InstallTray') { $featList += $t }
         }
+        if ($featList.Count -eq 0) { throw 'No valid feature specified.' }
         if ($Action -in @('Install','Upgrade','Repair')) {
             foreach ($f in $featList) { $psiArgs += "-$f" }
         }
+        $psiArgs += '-ResultFile';   $psiArgs += $resultFile
+        $psiArgs += '-ProgressFile'; $psiArgs += $progressFile
+
         # Use the SAME powershell host that is already running the JEA session (trusted, fixed).
         # This is NOT exposed to the caller as an arbitrary-execution primitive; the path and
-        # arguments are entirely fixed/validated here.
-        & (Get-Process -Id $pid).Path @psiArgs
-        $exitCode = $LASTEXITCODE
+        # arguments are entirely fixed/validated here. Synchronous ('&' waits for the child).
+        $installerInvocationAttempted = $true
+        $hostExe = (Get-Process -Id $pid).Path
+        & $hostExe @psiArgs
+        $installerStarted   = $true
+        $installerReturned  = $true
+        $installerExitCode  = $LASTEXITCODE
+        if (Test-Path -LiteralPath $resultFile) {
+            try { $installerResult = (Get-Content -LiteralPath $resultFile -Raw -ErrorAction Stop | ConvertFrom-Json) } catch {}
+        }
+        if (Test-Path -LiteralPath $progressFile) {
+            try { $installerProgress = (Get-Content -LiteralPath $progressFile -Raw -ErrorAction Stop) } catch {}
+        }
     } catch {
         $errorMsg = $_.Exception.Message
+        if (-not $installerError) { $installerError = $errorMsg }
+    } finally {
+        Remove-Item -LiteralPath $resultFile   -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $progressFile -ErrorAction SilentlyContinue
     }
     # Capture the JEA virtual-account child identity. This function runs INSIDE the elevated
     # RunAsVirtualAccount context, so GetCurrent() reports the virtual account (proven admin).
@@ -167,8 +205,19 @@ function Invoke-PathVeerCertificationInstall {
     [PSCustomObject]@{
         action = $Action
         feature = $featList
-        exitCode = $exitCode
-        error = $errorMsg
+        # Backward-compatible aliases: GATE-6/28 and the bridge read .exitCode / .error. These map
+        # to the explicit installer lifecycle fields below so the richer schema is additive, not a break.
+        exitCode = $installerExitCode
+        error = $installerError
+        installerPathValidated = $installerPathValidated
+        payloadPathValidated = $payloadPathValidated
+        installerInvocationAttempted = $installerInvocationAttempted
+        installerStarted = $installerStarted
+        installerReturned = $installerReturned
+        installerExitCode = $installerExitCode
+        installerError = $installerError
+        installerResult = $installerResult
+        installerProgress = $installerProgress
         childUser = $childId.Name
         childIsAdministrator = $childWp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
         serviceState = (Get-PathVeerServiceState)
