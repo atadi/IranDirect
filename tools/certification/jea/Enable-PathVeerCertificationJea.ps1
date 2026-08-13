@@ -75,6 +75,7 @@ Write-Host "Trusted module installed to: $moduleBase" -ForegroundColor Cyan
 #     Trusted\     -> operator-promoted installer script (executed by privileged JEA)
 #     Payloads\    -> operator-promoted package payload (consumed by privileged JEA)
 #     Transcripts\ -> audit logs
+#     Results\     -> privileged installer result/progress files (deterministic; not $env:TEMP)
 # ACL: SYSTEM + local Administrators = FullControl; ordinary/filtered PV-CERT\pvcert = NO WRITE.
 # The filtered pvcert caller is NOT a member of these; we also explicitly DENY the pvcert SID
 # to be safe against group membership surprises, and disable inheritance so no relaxed inherited
@@ -83,7 +84,8 @@ $baseDir    = Join-Path $env:ProgramData 'PathVeerCertificationJea'
 $trustedDir = Join-Path $baseDir 'Trusted'
 $payloadDir = Join-Path $baseDir 'Payloads'
 $transcriptDir = Join-Path $baseDir 'Transcripts'
-foreach ($d in @($baseDir,$trustedDir,$payloadDir,$transcriptDir)) {
+$resultsDir = Join-Path $baseDir 'Results'
+foreach ($d in @($baseDir,$trustedDir,$payloadDir,$transcriptDir,$resultsDir)) {
     New-Item -ItemType Directory -Force -Path $d | Out-Null
 }
 
@@ -101,7 +103,7 @@ $noWrite = [System.Security.AccessControl.FileSystemRights]::Write -bor [System.
 $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
 $propagate = [System.Security.AccessControl.PropagationFlags]::None
 
-foreach ($d in @($baseDir,$trustedDir,$payloadDir,$transcriptDir)) {
+foreach ($d in @($baseDir,$trustedDir,$payloadDir,$transcriptDir,$resultsDir)) {
     $acl = Get-Acl -Path $d
     $acl.SetAccessRuleProtection($true, $false)   # disable inheritance; drop inherited ACEs
     $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }

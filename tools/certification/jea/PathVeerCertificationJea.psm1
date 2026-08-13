@@ -30,6 +30,13 @@ $script:StateRoot       = Join-Path $env:ProgramData 'PathVeer'
 # C:\pv-cert is explicitly UNTRUSTED incoming staging. It is referenced here ONLY to explain
 # that it must NOT be executed; no executable content is ever read from it by privileged code.
 $script:UntrustedIncoming = 'C:\pv-cert\incoming'
+# DETERMINISTIC protected result directory for privileged installer result/progress files.
+# Deliberately NOT $env:TEMP / $env:TMP / [IO.Path]::GetTempPath(): in a JEA WinRM virtual-account
+# session those environment variables are not guaranteed to be populated, which would make
+# Join-Path $env:TEMP (...) produce a null path and the following Remove-Item -LiteralPath $null
+# throw (masking the real error and preventing a lifecycle object from being returned). We use a
+# static path under the protected certification root instead, created/ACL'd by the bootstrap.
+$script:ResultsDir = Join-Path $script:BaseDir 'Results'
 
 function Test-PathVeerCertificationAdmin {
     <#
@@ -139,6 +146,8 @@ function Invoke-PathVeerCertificationInstall {
     $installerError                = $null
     $installerResult               = $null
     $installerProgress             = $null
+    $resultFile   = $null
+    $progressFile = $null
 
     $exitCode = $null; $errorMsg = $null; $featList = @()
     try {
@@ -152,11 +161,15 @@ function Invoke-PathVeerCertificationInstall {
         $payloadPathValidated = $true
 
         # The installer writes STRUCTURED result/progress to files when given -ResultFile/-ProgressFile
-        # (see Install-PathVeer.ps1 Phase 37.2 contract). We place them in the JEA virtual account's own
-        # TEMP and read them back HERE (privileged context), then surface them in the return object, so
-        # the harness never needs to read protected or untrusted paths itself. No caller-supplied path.
-        $resultFile   = Join-Path $env:TEMP ('pathveer-cert-install-' + [guid]::NewGuid().ToString('N') + '.json')
-        $progressFile = Join-Path $env:TEMP ('pathveer-cert-progress-' + [guid]::NewGuid().ToString('N') + '.json')
+        # (see Install-PathVeer.ps1 Phase 37.2 contract). We place them in a DETERMINISTIC protected
+        # certification directory (NOT $env:TEMP, which is not guaranteed populated in a JEA WinRM
+        # virtual-account session). The harness never reads these paths directly; the structured
+        # contents are surfaced in the return object. No caller-supplied path.
+        if (-not (Test-Path -LiteralPath $script:ResultsDir -PathType Container)) {
+            New-Item -ItemType Directory -Force -Path $script:ResultsDir | Out-Null
+        }
+        $resultFile   = Join-Path $script:ResultsDir ('pathveer-cert-install-' + [guid]::NewGuid().ToString('N') + '.json')
+        $progressFile = Join-Path $script:ResultsDir ('pathveer-cert-progress-' + [guid]::NewGuid().ToString('N') + '.json')
 
         # Build a fixed, validated argument list. No caller-supplied paths/strings reach the process.
         $psiArgs = @('-NoProfile', '-File', $script:InstallScript)
@@ -193,8 +206,11 @@ function Invoke-PathVeerCertificationInstall {
         $errorMsg = $_.Exception.Message
         if (-not $installerError) { $installerError = $errorMsg }
     } finally {
-        Remove-Item -LiteralPath $resultFile   -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $progressFile -ErrorAction SilentlyContinue
+        # Null-safe cleanup: only remove if a path was actually assigned. A null path must never cause
+        # Remove-Item -LiteralPath to throw, because that would mask the real error and prevent the
+        # lifecycle object from being returned to the caller.
+        if ($resultFile)   { Remove-Item -LiteralPath $resultFile   -ErrorAction SilentlyContinue }
+        if ($progressFile) { Remove-Item -LiteralPath $progressFile -ErrorAction SilentlyContinue }
     }
     # Capture the JEA virtual-account child identity. This function runs INSIDE the elevated
     # RunAsVirtualAccount context, so GetCurrent() reports the virtual account (proven admin).
