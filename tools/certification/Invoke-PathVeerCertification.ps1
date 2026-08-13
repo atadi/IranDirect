@@ -155,6 +155,15 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
     $guestRoot = 'C:\pv-cert'
     Copy-ToGuest $Session @($Pkg, $InstallScript) 'C:\pv-cert\incoming'
+    # Narrow, validated promotion of the staged incoming artifacts into the PROTECTED
+    # certification tree (Trusted\Install-PathVeer.ps1 + Payloads\<package>) via the JEA
+    # virtual-account session. The filtered pvcert parent never writes these dirs (the ACL
+    # denies it); only the trusted promotion function, running as the elevated JEA account,
+    # performs the one-way incoming -> protected transition. PackageId must match the
+    # trusted installer's consumed payload directory (module $script:InstallPackage leaf).
+    $pkgId = [System.IO.Path]::GetFileName($Pkg)
+    Step "Promoting staged artifacts into protected certification tree (narrow, validated)"
+    Publish-GuestJeaPayload -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred) -PackageId $pkgId | Out-Null
     $progressFile = Join-Path $guestRoot 'install-progress.json'
     $resultFile   = Join-Path $guestRoot 'install-result.json'
 
@@ -470,6 +479,12 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
     # the staged package identity is what the installer consumes. We stage then invoke the wrapper.
     $guestRoot = 'C:\pv-cert'
     Copy-ToGuest $Session @($OldPkg, $NewPkg) 'C:\pv-cert\incoming'
+    # Promote the staged NEW package into the PROTECTED tree before the trusted install
+    # (same narrow one-way transition as GATE-5). The trusted wrapper installs the fixed
+    # staged package identity, so promote the NewPkg leaf.
+    $newPkgId = [System.IO.Path]::GetFileName($NewPkg)
+    Step "Promoting staged artifacts into protected certification tree (narrow, validated)"
+    Publish-GuestJeaPayload -Session $Session -JeaSession $jea -PackageId $newPkgId | Out-Null
     # Install older baseline (elevated) — wrapper uses the staged package.
     $b = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $oldVer = $null
@@ -512,6 +527,10 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     Write-Stage "GATE-28 SAME-VERSION REPAIR"
     $jea = Get-GuestJeaSession $script:Cred
     Copy-ToGuest $Session @($Pkg) 'C:\pv-cert\incoming' | Out-Null
+    # Promote the staged package into the PROTECTED tree before the trusted repair install.
+    $pkgId = [System.IO.Path]::GetFileName($Pkg)
+    Step "Promoting staged artifacts into protected certification tree (narrow, validated)"
+    Publish-GuestJeaPayload -Session $Session -JeaSession $jea -PackageId $pkgId | Out-Null
     # Same-version repair/install over existing (elevated).
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null

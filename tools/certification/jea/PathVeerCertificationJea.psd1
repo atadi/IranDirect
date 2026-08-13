@@ -16,7 +16,8 @@
         'Invoke-PathVeerCertificationInstall',
         'Invoke-PathVeerCli',
         'Get-PathVeerProgramDataState',
-        'Get-PathVeerCertificationBoundary'
+        'Get-PathVeerCertificationBoundary',
+        'Publish-PathVeerCertificationPayload'
     )
     CmdletsToExport    = @()
     VariablesToExport  = @()

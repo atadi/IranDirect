@@ -178,6 +178,82 @@ function Invoke-PathVeerCertificationInstall {
 
 <#
 .SYNOPSIS
+    Narrow, caller-validated promotion of untrusted incoming staging into the PROTECTED
+    certification tree. Runs as the JEA virtual account (admin), NOT the filtered pvcert
+    session, so the ordinary parent never gains write to Trusted/Payloads. This is the
+    run-time equivalent of the bootstrap's one-way trust transition: it promotes ONLY the
+    fixed allow-listed installer + package from C:\pv-cert\incoming into the protected
+    Trusted/Payloads roots with deterministic names, then re-applies the pvcert-denied ACL.
+#>
+function Publish-PathVeerCertificationPayload {
+    [CmdletBinding()]
+    param(
+        # Fixed expected package identifier. Must match the trusted installer's consumed
+        # payload directory (this module's $script:InstallPackage leaf).
+        [string]$PackageId = 'PathVeer-1.0.0-beta.1'
+    )
+    $incomingInstaller = Join-Path $script:UntrustedIncoming 'Install-PathVeer.ps1'
+    $incomingPayload   = Join-Path $script:UntrustedIncoming $PackageId
+    $promotedInstaller = Join-Path $script:TrustedDir 'Install-PathVeer.ps1'
+    $promotedPayload   = Join-Path $script:PayloadDir  $PackageId
+
+    # Validation: only the exact allow-listed filenames/dirs may cross the boundary.
+    if (-not (Test-Path -LiteralPath $incomingInstaller)) {
+        throw "Certification staging missing: $incomingInstaller. Stage the candidate package + installer into C:\pv-cert\incoming first."
+    }
+    if (-not (Test-Path -LiteralPath $incomingPayload)) {
+        throw "Certification staging missing: $incomingPayload. Stage the candidate package into C:\pv-cert\incoming first."
+    }
+    if ([System.IO.Path]::GetFileName($incomingInstaller) -ne 'Install-PathVeer.ps1') {
+        throw 'Unexpected installer filename; only Install-PathVeer.ps1 may be promoted.'
+    }
+    if ($PackageId -notmatch '^PathVeer-\d+\.\d+\.\d+(?:-beta\.\d+)?$') {
+        throw "Unexpected package identifier '$PackageId'; only fixed PathVeer release identifiers may be promoted."
+    }
+    # Provenance + destination containment: source must stay inside untrusted incoming,
+    # destination must stay inside the protected certification tree. No arbitrary paths.
+    $inA  = [System.IO.Path]::GetFullPath($incomingInstaller)
+    $inP  = [System.IO.Path]::GetFullPath($incomingPayload)
+    $outA = [System.IO.Path]::GetFullPath($promotedInstaller)
+    $outP = [System.IO.Path]::GetFullPath($promotedPayload)
+    $incRoot  = [System.IO.Path]::GetFullPath($script:UntrustedIncoming)
+    $protRoot = [System.IO.Path]::GetFullPath($script:BaseDir)
+    if (-not ($inA.StartsWith($incRoot,  [System.StringComparison]::OrdinalIgnoreCase))) { throw 'Installer source outside incoming.' }
+    if (-not ($inP.StartsWith($incRoot,  [System.StringComparison]::OrdinalIgnoreCase))) { throw 'Payload source outside incoming.' }
+    if (-not ($outA.StartsWith($protRoot,[System.StringComparison]::OrdinalIgnoreCase))) { throw 'Installer destination outside protected tree.' }
+    if (-not ($outP.StartsWith($protRoot,[System.StringComparison]::OrdinalIgnoreCase))) { throw 'Payload destination outside protected tree.' }
+
+    # One-way promotion (fixed names). Overwrites only the deterministic protected targets.
+    Copy-Item -Path $incomingInstaller -Destination $promotedInstaller -Force
+    Copy-Item -Path $incomingPayload -Destination $promotedPayload -Recurse -Force
+
+    # Re-apply the protected ACL (SYSTEM + Administrators allow; pvcert denied) so the
+    # promoted files inherit the pvcert-denied rules (mirrors bootstrap Enable-...Jea.ps1).
+    $sysSid = [System.Security.Principal.SecurityIdentifier]'S-1-5-18'
+    $adm    = [System.Security.Principal.NTAccount]'BUILTIN\Administrators'
+    $full   = [System.Security.AccessControl.FileSystemRights]::FullControl
+    $pvcertSid = $null
+    try { $pvcertSid = ([System.Security.Principal.NTAccount]'PV-CERT\pvcert').Translate([System.Security.Principal.SecurityIdentifier]) } catch {}
+    foreach ($f in @($promotedInstaller, $promotedPayload)) {
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        $acl = Get-Acl -Path $f
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adm, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+        if ($pvcertSid) { $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Deny'))) }
+        Set-Acl -Path $f -AclObject $acl
+    }
+
+    [PSCustomObject]@{
+        promotedInstaller = $promotedInstaller
+        promotedPayload   = $promotedPayload
+        packageId         = $PackageId
+    }
+}
+
+<#
+.SYNOPSIS
     Trusted CLI wrapper. Invokes ONLY the known PathVeer.Cli.exe with a closed verb set.
 #>
 function Invoke-PathVeerCli {
