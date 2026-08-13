@@ -121,8 +121,11 @@ function Invoke-PathVeerCertificationInstall {
         [ValidateSet('Install','Upgrade','Repair','Uninstall','PurgeUninstall')]
         [string]$Action = 'Install',
 
-        [ValidateSet('RegisterShell','InstallTray')]
-        [string[]]$Feature = @('RegisterShell','InstallTray')
+        # Single comma-joined string of allowed features. The Desktop bridge emits exactly ONE -Feature
+        # binding with a quoted comma-joined literal (NoLanguage-safe: named param + quoted string, no
+        # array/comma-operator syntax). The trusted module splits + validates internally against the
+        # fixed set, so no arbitrary feature name or filesystem path can reach the installer.
+        [string]$Feature = 'RegisterShell,InstallTray'
     )
     $exitCode = $null; $logFile = $null; $errorMsg = $null
     try {
@@ -138,8 +141,14 @@ function Invoke-PathVeerCertificationInstall {
             'Uninstall'       { $psiArgs += '-Action'; $psiArgs += 'uninstall' }
             'PurgeUninstall'  { $psiArgs += '-Action'; $psiArgs += 'uninstall'; $psiArgs += '-PurgeState' }
         }
+        # Split + validate the comma-joined feature string against the fixed set (trusted code).
+        $featList = @()
+        foreach ($tok in ($Feature -split ',')) {
+            $t = $tok.Trim()
+            if ($t -eq 'RegisterShell' -or $t -eq 'InstallTray') { $featList += $t }
+        }
         if ($Action -in @('Install','Upgrade','Repair')) {
-            foreach ($f in $Feature) { $psiArgs += "-$f" }
+            foreach ($f in $featList) { $psiArgs += "-$f" }
         }
         # Use the SAME powershell host that is already running the JEA session (trusted, fixed).
         # This is NOT exposed to the caller as an arbitrary-execution primitive; the path and
@@ -157,7 +166,7 @@ function Invoke-PathVeerCertificationInstall {
     $childWp = New-Object System.Security.Principal.WindowsPrincipal($childId)
     [PSCustomObject]@{
         action = $Action
-        feature = $Feature
+        feature = $featList
         exitCode = $exitCode
         error = $errorMsg
         childUser = $childId.Name

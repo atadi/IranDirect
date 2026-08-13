@@ -87,11 +87,13 @@ function Invoke-GuestJeaFunction {
                 $a = [string]($ArgumentList['Action'] ?? 'Install')
                 $f = [array]($ArgumentList['Feature'] ?? @('RegisterShell','InstallTray'))
                 $validActions = @('Install','Upgrade','Repair','Uninstall','PurgeUninstall')
-                $validFeat = @('RegisterShell','InstallTray')
                 if ($validActions -notcontains $a) { throw 'Invalid Action argument.' }
-                foreach ($x in $f) { if ($validFeat -notcontains $x) { throw 'Invalid Feature argument.' } }
-                $feat = ($f | ForEach-Object { "-Feature '$_'" }) -join ' '
-                "Invoke-PathVeerCertificationInstall -Action '$a' $feat"
+                foreach ($x in $f) { if ($x -ne 'RegisterShell' -and $x -ne 'InstallTray') { throw 'Invalid Feature argument.' } }
+                # Emit ONE -Feature binding with a comma-joined, validated, quoted literal. The comma is
+                # inside the quoted string (data), so no array/comma-operator syntax crosses the NoLanguage
+                # boundary. The trusted module splits + validates the value internally.
+                $feat = ($f | ForEach-Object { $_ }) -join ','
+                "Invoke-PathVeerCertificationInstall -Action '$a' -Feature '$feat'"
             }
             'Invoke-PathVeerCli'                 {
                 $v = [string]($ArgumentList['Verb'] ?? 'status')
