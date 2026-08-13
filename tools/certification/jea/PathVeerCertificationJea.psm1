@@ -187,11 +187,15 @@ function Invoke-PathVeerCertificationInstall {
         $psiArgs += '-ResultFile';   $psiArgs += $resultFile
         $psiArgs += '-ProgressFile'; $psiArgs += $progressFile
 
-        # Use the SAME powershell host that is already running the JEA session (trusted, fixed).
-        # This is NOT exposed to the caller as an arbitrary-execution primitive; the path and
-        # arguments are entirely fixed/validated here. Synchronous ('&' waits for the child).
+        # Launch an EXPLICIT powershell host to run the installer.
+        # DO NOT use (Get-Process -Id $pid).Path here: inside a JEA/WinRM session $pid is
+        # wsmprovhost.exe, which does not accept -File/-NoProfile and would silently fail to
+        # execute the installer (script returns without entering the install body, no result file).
+        # An explicit powershell.exe is always available to the virtual account and runs the
+        # installer as the same privileged identity. The path and arguments are fixed/validated here.
+        # Synchronous ('&' waits for the child to exit).
         $installerInvocationAttempted = $true
-        $hostExe = (Get-Process -Id $pid).Path
+        $hostExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         & $hostExe @psiArgs
         $installerStarted   = $true
         $installerReturned  = $true
