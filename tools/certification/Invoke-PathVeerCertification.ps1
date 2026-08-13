@@ -151,30 +151,6 @@ function Run-GuestJeaInstall([System.Management.Automation.Runspaces.PSSession]$
 
 # -------- Stage implementations (each returns a hashtable of evidence) --------
 
-function Assert-CertificationStaging([System.Management.Automation.Runspaces.PSSession]$Session, [string]$PackageId) {
-    # SECURITY (Option A): the trusted installer executes ONLY already-protected artifacts
-    # (C:\ProgramData\PathVeerCertificationJea\Trusted\Install-PathVeer.ps1 + Payloads\<pkg>).
-    # Those MUST be staged by the explicit elevated operator/bootstrap BEFORE PV-CERT-HARNESS
-    # is taken. PV-CERT\pvcert (this filtered session) is denied write to the protected tree and
-    # must never promote pvcert-controlled incoming bytes itself. We therefore REFUSE to install
-    # if the protected payloads are missing, rather than promoting untrusted content.
-    # PackageId MUST match $script:InstallPackage in PathVeerCertificationJea.psm1.
-    $base = 'C:\ProgramData\PathVeerCertificationJea'
-    $trustedInstaller = Join-Path $base 'Trusted\Install-PathVeer.ps1'
-    $payloadDir = Join-Path $base ('Payloads\' + $PackageId)
-    $present = Invoke-Command -Session $Session -ScriptBlock {
-        param($ti, $pd)
-        [PSCustomObject]@{ installer = (Test-Path -LiteralPath $ti); payload = (Test-Path -LiteralPath $pd) }
-    } -ArgumentList $trustedInstaller, $payloadDir
-    if (-not $present.installer) {
-        throw ("CERTIFICATION STAGING MISSING: $trustedInstaller. Stage the trusted installer into the protected tree via the elevated operator bootstrap (Enable-PathVeerCertificationJea.ps1) BEFORE taking PV-CERT-HARNESS. The harness does not promote untrusted incoming content.")
-    }
-    if (-not $present.payload) {
-        throw ("CERTIFICATION STAGING MISSING: $payloadDir. Stage the candidate payload into the protected tree via the elevated operator bootstrap BEFORE taking PV-CERT-HARNESS. The harness does not promote untrusted incoming content.")
-    }
-    Step "Protected certification payloads present (operator-staged): $trustedInstaller + $payloadDir"
-}
-
 function Assert-CandidateMatchesProtected([string]$CandidatePackage, [string]$ExpectedPackageId) {
     # SECURITY (Option A semantics): the harness installs ONLY the operator-staged protected
     # payload (ExpectedPackageId). It must NOT silently accept a -CandidatePackage that names a
@@ -193,12 +169,13 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     # SECURITY (Option A): the operator bootstrap is the ONLY trust transition. PV-CERT-HARNESS
     # already contains the protected, operator-approved installer + payload. The harness performs
     # NO runtime copy of executable bytes into the guest (the old Copy-ToGuest into the untrusted
-    # C:\pv-cert\incoming was obsolete and unconsumed after Option A). It only ASSERTS those
-    # protected artifacts exist and installs the fixed protected package. pvcert cannot choose the
-    # privileged executable bytes.
+    # C:\pv-cert\incoming was obsolete and unconsumed after Option A). The harness does NOT inspect
+    # the protected tree from the filtered pvcert session (the Option-A ACL denies it, by design).
+    # Instead it validates the Desktop-side candidate identity, then delegates to the trusted JEA
+    # wrapper, which enforces the exact protected installer + payload preconditions inside the
+    # privileged virtual-account context. pvcert cannot choose the privileged executable bytes.
     $expectedPackageId = 'PathVeer-1.0.0-beta.1'
     Assert-CandidateMatchesProtected -CandidatePackage $Pkg -ExpectedPackageId $expectedPackageId
-    Assert-CertificationStaging -Session $Session -PackageId $expectedPackageId
     $progressFile = Join-Path $guestRoot 'install-progress.json'
     $resultFile   = Join-Path $guestRoot 'install-result.json'
 
@@ -518,9 +495,8 @@ function Run-GATE6([System.Management.Automation.Runspaces.PSSession]$Session, [
     $expectedPackageId = 'PathVeer-1.0.0-beta.1'
     Assert-CandidateMatchesProtected -CandidatePackage $NewPkg -ExpectedPackageId $expectedPackageId
     # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.
-    # The trusted wrapper always installs the fixed staged package ($script:InstallPackage =
-    # PathVeer-1.0.0-beta.1); fail loud if that protected payload is not operator-staged.
-    Assert-CertificationStaging -Session $Session -PackageId $expectedPackageId
+    # The trusted wrapper enforces the exact protected installer + payload preconditions inside the
+    # privileged virtual-account context; the harness does not inspect protected paths from pvcert.
     # Install older baseline (elevated) — wrapper uses the staged package.
     $b = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $oldVer = $null
@@ -567,8 +543,8 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     $expectedPackageId = 'PathVeer-1.0.0-beta.1'
     Assert-CandidateMatchesProtected -CandidatePackage $Pkg -ExpectedPackageId $expectedPackageId
     # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.
-    # Fail loud if the protected payload (PathVeer-1.0.0-beta.1) is not operator-staged.
-    Assert-CertificationStaging -Session $Session -PackageId $expectedPackageId
+    # The trusted wrapper enforces the protected installer + payload preconditions inside the
+    # privileged virtual-account context; the harness does not inspect protected paths from pvcert.
     # Same-version repair/install over existing (elevated).
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null
