@@ -195,7 +195,19 @@ function Invoke-PathVeerCertificationInstall {
         # installer as the same privileged identity. The path and arguments are fixed/validated here.
         # Synchronous ('&' waits for the child to exit).
         $installerInvocationAttempted = $true
-        $hostExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        # Resolve the Windows PowerShell host WITHOUT relying on nullable JEA environment variables.
+        # $env:SystemRoot / $env:WINDIR / $env:TEMP are frequently ABSENT inside a
+        # RunAsVirtualAccount WinRM session (this exact null-bind broke the prior attempt), so we
+        # resolve the system directory via the OS itself, not an env var. GetFolderPath(System)
+        # returns e.g. 'C:\Windows\system32' through kernel folder resolution and is always
+        # available to the virtual account. (We intentionally launch Windows PowerShell, never
+        # wsmprovhost.exe.)
+        $systemDir = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::System)
+        if (-not $systemDir) { $systemDir = 'C:\Windows\system32' }
+        $hostExe = Join-Path $systemDir 'WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $hostExe)) {
+            throw ("Windows PowerShell executable not found at expected certification host path: " + $hostExe)
+        }
         & $hostExe @psiArgs
         $installerStarted   = $true
         $installerReturned  = $true
