@@ -132,6 +132,17 @@ $incomingPayload   = Join-Path 'C:\pv-cert\incoming' 'PathVeer-1.0.0-beta.1'
 # Prefer operator-provided trusted sources from $SourceDir.
 $srcInstaller = Join-Path $SourceDir 'Install-PathVeer.ps1'
 $srcPayload   = Join-Path $SourceDir 'PathVeer-1.0.0-beta.1'
+# Deterministic, replace-based promotion. The protected destination may already exist from a
+# previous PV-CERT-HARNESS / bootstrap run. A bare `Copy-Item -Recurse` against an existing
+# destination NESTS the source inside the stale destination (e.g. Payloads\1.0.0-beta.1\
+# 1.0.0-beta.1\...), leaving the canonical root stale and the new candidate orphaned underneath.
+# Remove the existing protected version path FIRST so the copy below produces exactly one fresh,
+# flat candidate directory. We remove only the specific promoted item (not the whole Trusted/
+# Payloads tree) so container ACLs and any other versions are preserved, and pvcert still cannot
+# write/delete these protected paths (no caller-visible promotion API is added).
+if (Test-Path -LiteralPath $promotedInstaller) { Remove-Item -LiteralPath $promotedInstaller -Force }
+if (Test-Path -LiteralPath $promotedPayload)   { Remove-Item -LiteralPath $promotedPayload -Recurse -Force }
+
 if (Test-Path $srcInstaller) { Copy-Item -Path $srcInstaller -Destination $promotedInstaller -Force }
 elseif (Test-Path $incomingInstaller) { Copy-Item -Path $incomingInstaller -Destination $promotedInstaller -Force }
 else { Write-Host "WARNING: no installer source found at $srcInstaller or $incomingInstaller; JEA install will fail until promoted." -ForegroundColor Yellow }
