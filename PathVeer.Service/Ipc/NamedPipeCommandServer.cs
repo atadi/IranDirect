@@ -126,12 +126,17 @@ public class NamedPipeCommandServer
         CancellationToken cancellationToken)
     {
         await using NamedPipeServerStream pipe =
-            new(
+            NamedPipeServerStreamAcl.Create(
                 pipeName,
                 PipeDirection.InOut,
-                maxNumberOfServerInstances: 1,
+                1,
                 PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous);
+                PipeOptions.Asynchronous,
+                0,
+                0,
+                PathVeerPipeSecurity.Build(),
+                HandleInheritability.None,
+                (PipeAccessRights)0);
 
         await pipe.WaitForConnectionAsync(
             cancellationToken);
