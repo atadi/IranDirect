@@ -213,7 +213,16 @@ function Invoke-PathVeerCertificationInstall {
             throw ("Windows PowerShell executable not found at expected certification host path: " + $hostExe)
         }
         $installerStarted = $true   # the verified host process is now launched (synchronous '&' below)
-        & $hostExe @psiArgs
+        # Suppress the child installer's OWN console (stdout) output. The trusted function's
+        # structured contract is the SINGLE PSCustomObject returned below (L241); the child's
+        # stdout must NOT enter the JEA success stream, or Invoke-Command returns
+        # [child stdout...] + [final object] as an Object[] and the Desktop bridge's
+        # $res.PSObject.Properties.Match('childUser') sees 0 matches -> null/false telemetry
+        # (exactly the real-VM GATE-5 childUser=null / childIsAdministrator=false symptom).
+        # Diagnostic evidence is preserved: stderr is untouched, and the installer writes its
+        # real result/progress to $resultFile/$progressFile (parsed below), not to stdout.
+        # $LASTEXITCODE is set by the external process and is unaffected by stdout suppression.
+        $null = & $hostExe @psiArgs
         $installerReturned  = $true
         $installerExitCode  = $LASTEXITCODE
         if (Test-Path -LiteralPath $resultFile) {
