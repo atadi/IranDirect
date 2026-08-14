@@ -311,7 +311,56 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
 
 function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "SERVICE/TRAY AUTHORITY CONTRACT"
+    # Normalize a ServiceController enum value regardless of how it was obtained:
+    #  - native [System.ServiceProcess.ServiceControllerStatus]/[ServiceStartMode] enum
+    #  - deserialized remoting wrapper: @{ value = 4; Value = "Running" }  (Invoke-Command over a
+    #    session serializes enums as this PSObject with int 'value' + string 'Value')
+    #  - plain string
+    #  - bare int (numeric fallback mapped for the two fields this contract asserts)
+    function Get-EnumString($obj) {
+        if ($null -eq $obj) { return $null }
+        if ($obj -is [string]) { return [string]$obj }
+        try {
+            if ($obj.PSObject.Properties['Value'] -and $obj.Value) { return [string]$obj.Value }
+        } catch {}
+        try {
+            if ($obj.PSObject.Properties['value']) {
+                $v = $obj.value
+                if ($v -is [string] -and $v) { return [string]$v }
+                if ($v -is [int]) {
+                    # ServiceControllerStatus: 4 = Running. ServiceStartMode: 2 = Automatic.
+                    if ($v -eq 4) { return 'Running' }
+                    if ($v -eq 2) { return 'Automatic' }
+                    return [string]$v
+                }
+            }
+        } catch {}
+        return [string]$obj
+    }
     $jea = Get-GuestJeaSession $script:Cred
+    # --- Tray precondition (coverage): ensure Tray is genuinely running under the NORMAL certification
+    #     user (the PowerShell Direct session identity), NOT the JEA virtual admin. This makes the
+    #     "running Tray -> terminated -> Service stays Running" assertion a real test instead of a
+    #     silently-skipped precondition. If Tray cannot be established we must NOT silently pass. ---
+    $trayExe = Join-Path 'C:\Program Files\PathVeer' 'Tray\PathVeer.Tray.exe'
+    $trayPreconditionEstablished = $false
+    try {
+        $trayRunningNow = Invoke-Command -Session $Session -ScriptBlock {
+            param($trayExe)
+            if (-not (Test-Path -LiteralPath $trayExe -PathType Leaf)) { return $false }
+            $p = Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue
+            if ($null -eq $p) {
+                # Launch as the normal user (same session scope) — NOT the JEA virtual admin.
+                Start-Process -FilePath $trayExe -ErrorAction Stop
+                Start-Sleep -Seconds 2
+                $p = Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue
+            }
+            return ($null -ne $p)
+        } -ArgumentList $trayExe
+        $trayPreconditionEstablished = ($trayRunningNow -eq $true)
+    } catch {
+        $trayPreconditionEstablished = $false
+    }
     # --- Desktop-side JEA reads (no remoting scope leakage) ---
     $svcBefore = Get-GuestJeaServiceState -Session $Session -JeaSession $jea   # service state BEFORE Tray stop
     $trayStop  = Stop-GuestJeaTray -Session $Session -JeaSession $jea           # privileged Tray teardown (no service action)
@@ -364,11 +413,12 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
     # --- Desktop combines EXPLICIT values into the contract (Defects 1-4, truthful semantics) ---
     $contract = [PSCustomObject]@{
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
-        serviceStateBeforeTrayKill   = $svcBefore.result.status
-        serviceStartModeBefore       = $svcBefore.result.startType
+        serviceStateBeforeTrayKill   = (Get-EnumString $svcBefore.result.status)
+        serviceStartModeBefore       = (Get-EnumString $svcBefore.result.startType)
         trayWasRunningBefore         = $trayStop.result.trayWasRunning          # truthful Boolean (was Tray running?)
-        serviceStateAfterTrayKill    = $svcAfter.result.status
-        serviceStartModeAfter        = $svcAfter.result.startType
+        trayPreconditionEstablished  = $trayPreconditionEstablished             # Tray genuinely ran under normal user before stop
+        serviceStateAfterTrayKill    = (Get-EnumString $svcAfter.result.status)
+        serviceStartModeAfter        = (Get-EnumString $svcAfter.result.startType)
         trayProcessPresentAfterWait  = $remote.trayProcessPresentAfterWait      # fresh post-wait read (Defect 3)
         cliExists                    = $remote.cliExists
         cliAttemptCount              = $remote.cliAttemptCount
@@ -397,6 +447,7 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
     }
     if (-not $contract.cliExists) { $reasons += "cli-executable-missing" }
     if (-not $contract.cliWorksWithoutTray) { $reasons += "cli-status-failed-without-tray (exit: $($contract.cliExitCode))" }
+    if (-not $contract.trayPreconditionEstablished) { $reasons += "tray-precondition-not-established (Tray was never running under the normal user; contract not actually exercised)" }
     if (-not $contract.ipcPipeNamePresentAfter) { $reasons += "ipc-pipe-name-absent-after-install" }
 
     if ($reasons.Count) {
