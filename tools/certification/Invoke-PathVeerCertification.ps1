@@ -266,7 +266,7 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     else { $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe' }
 
     $ev = Invoke-Command -Session $Session -ScriptBlock {
-        param($cliExe)
+        param($cliExe, $installManifest)
         $svc = Get-CimInstance Win32_Service -Filter "Name='PathVeer'" -ErrorAction SilentlyContinue
         $app = $null
         try {
@@ -291,9 +291,9 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
             trayPresent = ($null -ne $tray); cliOnPathCount = $cliOnPath
             ipcPipes = $pipe; cliExists = $cliExists; cliPath = $cliExe
             cliStatus = ($cliStatus -join "`n"); programDataState = (Test-Path "$env:ProgramData\PathVeer")
-            installManifest = $null
+            installManifest = $installManifest
         }
-    } -ArgumentList $cliExe
+    } -ArgumentList $cliExe, $manifest.result
 
     Save-Json '05-gate5-fresh-install.json' ([PSCustomObject]@{
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -312,35 +312,111 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
 function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "SERVICE/TRAY AUTHORITY CONTRACT"
     $jea = Get-GuestJeaSession $script:Cred
-    $svcBefore = Get-GuestJeaServiceState -Session $Session -JeaSession $jea
-    # Kill tray (privileged process teardown) — no service action.
-    $tray = Stop-GuestJeaTray -Session $Session -JeaSession $jea
+    # --- Desktop-side JEA reads (no remoting scope leakage) ---
+    $svcBefore = Get-GuestJeaServiceState -Session $Session -JeaSession $jea   # service state BEFORE Tray stop
+    $trayStop  = Stop-GuestJeaTray -Session $Session -JeaSession $jea           # privileged Tray teardown (no service action)
+    # Bounded observation window, THEN measure fresh state. Do NOT infer post-wait state from the stop return.
     Start-Sleep -Seconds 3
-    $svcAfter = Get-GuestJeaServiceState -Session $Session -JeaSession $jea
-    # CLI works without tray (read-only on normal session).
-    $contract = Invoke-Command -Session $Session -ScriptBlock {
-        $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
+    $svcAfter  = Get-GuestJeaServiceState -Session $Session -JeaSession $jea   # service state AFTER Tray stop
+
+    # --- Remote facts ONLY (normal PowerShell Direct session): no Desktop variables referenced inside,
+    #     so the cross-runspace null bug cannot recur. CLI existence + bounded readiness probe output,
+    #     fresh Tray process presence, named-pipe-name presence. ---
+    $remote = Invoke-Command -Session $Session -ScriptBlock {
+        $cliExe  = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
+        $trayExe = Join-Path 'C:\Program Files\PathVeer' 'Tray\PathVeer.Tray.exe'
         $cliExists = (Test-Path -LiteralPath $cliExe -PathType Leaf)
-        $cliWorks = $false
-        if ($cliExists) { try { & $cliExe status *> $null; $cliWorks = ($LASTEXITCODE -eq 0) } catch {} }
+
+        # Bounded deterministic readiness probe: poll the read-only CLI status until success OR a fixed
+        # timeout. No blind sleep. Records every attempt so timing vs. product-IPC races are distinguishable.
+        $cliProbeTimeoutSeconds = 20
+        $cliAttemptIntervalSeconds = 1
+        $cliAttempts = @()
+        $cliHealthyDuringPoll = $false
+        if ($cliExists) {
+            $elapsed = 0
+            while ($elapsed -lt $cliProbeTimeoutSeconds) {
+                $out = $null; $code = $null
+                try { $out = (& $cliExe status 2>&1); $code = $LASTEXITCODE } catch { $code = -1 }
+                $cliAttempts += [PSCustomObject]@{ attempt = ($cliAttempts.Count + 1); exitCode = $code; output = ($out -join "`n") }
+                if ($code -eq 0) { $cliHealthyDuringPoll = $true; break }
+                Start-Sleep -Seconds $cliAttemptIntervalSeconds
+                $elapsed += $cliAttemptIntervalSeconds
+            }
+        }
+        $finalAttempt = if ($cliAttempts.Count) { $cliAttempts[-1] } else { $null }
+        $svc = Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue
+        $trayProcPresent = ($null -ne (Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue))
         $pipe = [System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*PathVeer.Control.v1*' }
         [PSCustomObject]@{
-            serviceStateBeforeTrayKill = $svcBefore.result.status
-            serviceStartModeBefore = $svcBefore.result.startType
-            trayPidBefore = if ($tray.result.trayWasRunning) { $tray.result.trayWasRunning } else { $null }
-            serviceStateAfterTrayKill = $svcAfter.result.status
-            serviceStartModeAfter = $svcAfter.result.startType
-            trayAutoRelaunched = $tray.result.trayRunningAfter   # expected FALSE: tray must not auto-restart
             cliExists = $cliExists
-            cliWorksWithoutTray = $cliWorks
-            ipcPipeAliveAfter = ($null -ne $pipe)
-            trayExePath = (Join-Path 'C:\Program Files\PathVeer' 'Tray\PathVeer.Tray.exe')
+            cliAttemptCount = $cliAttempts.Count
+            cliExitCode = if ($finalAttempt) { $finalAttempt.exitCode } else { $null }
+            cliStdoutStderr = if ($finalAttempt) { $finalAttempt.output } else { $null }
+            cliHealthyDuringPoll = $cliHealthyDuringPoll
+            serviceStateAtCliAttempt = if ($svc) { $svc.Status } else { 'absent' }
+            trayProcessPresentAfterWait = $trayProcPresent
+            ipcPipeNamePresentAfter = ($null -ne $pipe)
+            trayExePath = $trayExe
         }
     }
+
+    # --- Desktop combines EXPLICIT values into the contract (Defects 1-4, truthful semantics) ---
+    $contract = [PSCustomObject]@{
+        capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        serviceStateBeforeTrayKill   = $svcBefore.result.status
+        serviceStartModeBefore       = $svcBefore.result.startType
+        trayWasRunningBefore         = $trayStop.result.trayWasRunning          # truthful Boolean (was Tray running?)
+        serviceStateAfterTrayKill    = $svcAfter.result.status
+        serviceStartModeAfter        = $svcAfter.result.startType
+        trayProcessPresentAfterWait  = $remote.trayProcessPresentAfterWait      # fresh post-wait read (Defect 3)
+        cliExists                    = $remote.cliExists
+        cliAttemptCount              = $remote.cliAttemptCount
+        cliExitCode                  = $remote.cliExitCode
+        cliStdoutStderr              = $remote.cliStdoutStderr
+        cliHealthyDuringPoll         = $remote.cliHealthyDuringPoll
+        cliWorksWithoutTray          = $remote.cliHealthyDuringPoll             # exit 0 during bounded poll (no Tray)
+        serviceStateAtCliAttempt     = $remote.serviceStateAtCliAttempt
+        ipcPipeNamePresentAfter      = $remote.ipcPipeNamePresentAfter          # name enumeration ONLY (truthful name)
+        trayExePath                  = $remote.trayExePath
+    }
+
+    # --- Contract assertions (Defect 6): fail loudly, never silently continue ---
+    $reasons = @()
+    if ($contract.serviceStateBeforeTrayKill -ne 'Running') {
+        $reasons += "service-not-Running-before-tray-kill (was: $($contract.serviceStateBeforeTrayKill))"
+    }
+    if ($contract.serviceStateAfterTrayKill -ne 'Running') {
+        $reasons += "service-not-Running-after-tray-kill (was: $($contract.serviceStateAfterTrayKill))"
+    }
+    if ($contract.serviceStartModeBefore -ne $contract.serviceStartModeAfter) {
+        $reasons += "service-start-mode-changed (before: $($contract.serviceStartModeBefore) after: $($contract.serviceStartModeAfter))"
+    }
+    if ($contract.trayWasRunningBefore -and $contract.trayProcessPresentAfterWait) {
+        $reasons += "tray-still-present-after-stop (auto-relaunch suspected during observation window)"
+    }
+    if (-not $contract.cliExists) { $reasons += "cli-executable-missing" }
+    if (-not $contract.cliWorksWithoutTray) { $reasons += "cli-status-failed-without-tray (exit: $($contract.cliExitCode))" }
+    if (-not $contract.ipcPipeNamePresentAfter) { $reasons += "ipc-pipe-name-absent-after-install" }
+
+    if ($reasons.Count) {
+        $fail = [PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            elevationAvailable = ($jea -ne $null)
+            contract = $contract
+            failReasons = $reasons
+        }
+        Save-Json '22-servicetray-contract.json' $fail
+        Write-Host ("  SERVICE/TRAY CONTRACT FAIL: " + ($reasons -join ' | ')) -ForegroundColor Red
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Service/Tray authority contract not satisfied: " + ($reasons -join '; ')),
+            'ServiceTrayContractFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
+
     Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
-        elevationAvailable = $jea -ne $null
-        contract=$contract
+        capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        elevationAvailable = ($jea -ne $null)
+        contract = $contract
     })
     return $contract
 }
