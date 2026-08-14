@@ -140,36 +140,65 @@ if (Test-Path $srcPayload) { Copy-Item -Path $srcPayload -Destination $promotedP
 elseif (Test-Path $incomingPayload) { Copy-Item -Path $incomingPayload -Destination $promotedPayload -Recurse -Force }
 else { Write-Host "WARNING: no payload source found at $srcPayload or $incomingPayload; JEA install will fail until promoted." -ForegroundColor Yellow }
 
-# Re-apply ACLs on the promoted items so the ENTIRE promoted tree inherits the protected
-# (pvcert-denied) rules. Copy-Item preserves the SOURCE file's explicit ACEs and does NOT inherit
-# the destination parent's inheritable ACEs, so a directory-level Set-Acl with InheritanceFlags=None
-# would leave the copied child files (package.json, package-hashes.sha256, binaries) carrying their
-# untrusted source ACL. The JEA virtual-account child (a member of local Administrators) then fails
-# with 'Access denied' reading the operator-approved payload. We therefore normalize the ACL on the
-# directory (with ContainerInherit|ObjectInherit so future children inherit) AND recursively on every
-# existing file/subdirectory so the privileged identity can read the payload and write Results.
-foreach ($root in @($promotedInstaller, $promotedPayload)) {
-    if (-not (Test-Path -LiteralPath $root)) { continue }
-    # Directory: inheritable allow for SYSTEM+Administrators, deny write for pvcert.
-    $dirAcl = Get-Acl -Path $root
-    $dirAcl.SetAccessRuleProtection($true, $false)
-    $dirAcl.Access | ForEach-Object { $dirAcl.RemoveAccessRule($_) | Out-Null }
-    $dirAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, $inherit, $propagate, 'Allow')))
-    $dirAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, $inherit, $propagate, 'Allow')))
-    if ($pvcertSid) { $dirAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, $inherit, $propagate, 'Deny'))) }
-    Set-Acl -Path $root -AclObject $dirAcl
-    # Recurse every existing child (file or subdirectory): explicit allow for SYSTEM+Administrators,
-    # deny write for pvcert. This guarantees copied package files carry the privileged read grant.
-    $dirs = @(Get-ChildItem -LiteralPath $root -Recurse -Directory -ErrorAction SilentlyContinue)
-    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue)
-    foreach ($item in ($dirs + $files)) {
-        $fa = Get-Acl -Path $item.FullName
-        $fa.SetAccessRuleProtection($true, $false)
-        $fa.Access | ForEach-Object { $fa.RemoveAccessRule($_) | Out-Null }
-        $fa.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
-        $fa.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
-        if ($pvcertSid) { $fa.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Deny'))) }
-        Set-Acl -Path $item.FullName -AclObject $fa
+# --- Type-aware ACL normalization ---------------------------------------------
+# A FILE is protected by FileSecurity: explicit ACEs only, InheritanceFlags.None (a file cannot
+# carry container-inheritance flags). A DIRECTORY uses DirectorySecurity with
+# ContainerInherit|ObjectInherit so the rule propagates to every descendant. Mixing the two throws
+# exactly "No flags can be set. Parameter name: inheritanceFlags" -- the 90288ff bootstrap failure,
+# where the trusted installer FILE (Trusted\Install-PathVeer.ps1) was normalized with directory
+# inheritance flags and the whole payload ACL pass aborted before it ever ran.
+#
+# Copy-Item preserves the SOURCE file's explicit ACEs and does NOT inherit the destination parent's
+# inheritable ACEs, so promoted payload files (package.json, package-hashes.sha256, binaries) can
+# keep their untrusted source ACL -> the JEA virtual-account child fails reading the operator-approved
+# package with 'Access denied'. Normalize recursively so every file/subdirectory in the promoted tree
+# carries the protected (pvcert-denied) rules. Treat each item by its REAL type so directory
+# inheritance flags are never applied to a file.
+function Set-PathVeerCertificationFileAcl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath
+    )
+    $acl = Get-Acl -LiteralPath $LiteralPath
+    $acl.SetAccessRuleProtection($true, $false)   # drop inherited ACEs
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+    if ($pvcertSid) {
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Deny')))
+    }
+    Set-Acl -LiteralPath $LiteralPath -AclObject $acl
+}
+
+function Set-PathVeerCertificationDirectoryAcl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath
+    )
+    $acl = Get-Acl -LiteralPath $LiteralPath
+    $acl.SetAccessRuleProtection($true, $false)   # drop inherited ACEs
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, $inherit, $propagate, 'Allow')))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, $inherit, $propagate, 'Allow')))
+    if ($pvcertSid) {
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, $inherit, $propagate, 'Deny')))
+    }
+    Set-Acl -LiteralPath $LiteralPath -AclObject $acl
+}
+
+# Trusted installer is a FILE.
+if (Test-Path -LiteralPath $promotedInstaller) { Set-PathVeerCertificationFileAcl -LiteralPath $promotedInstaller }
+
+# Trusted payload is a DIRECTORY; normalize it and every descendant by real type.
+if (Test-Path -LiteralPath $promotedPayload) {
+    Set-PathVeerCertificationDirectoryAcl -LiteralPath $promotedPayload
+    foreach ($sub in @(Get-ChildItem -LiteralPath $promotedPayload -Recurse -Directory -ErrorAction SilentlyContinue)) {
+        Set-PathVeerCertificationDirectoryAcl -LiteralPath $sub.FullName
+    }
+    foreach ($file in @(Get-ChildItem -LiteralPath $promotedPayload -Recurse -File -ErrorAction SilentlyContinue)) {
+        Set-PathVeerCertificationFileAcl -LiteralPath $file.FullName
     }
 }
 Write-Host "Trusted installer promoted to: $promotedInstaller" -ForegroundColor Cyan
