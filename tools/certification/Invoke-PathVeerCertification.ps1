@@ -320,15 +320,23 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
     function Get-EnumString($obj) {
         if ($null -eq $obj) { return $null }
         if ($obj -is [string]) { return [string]$obj }
+        # native enum (not remoted) -> string name
+        if ($obj -is [System.Enum]) { return $obj.ToString() }
+        # bare int numeric fallback (ServiceControllerStatus: 4 = Running; ServiceStartMode: 2 = Automatic)
+        if ($obj -is [int]) {
+            if ($obj -eq 4) { return 'Running' }
+            if ($obj -eq 2) { return 'Automatic' }
+            return [string]$obj
+        }
+        # remoting wrapper: { Value = "Running" } (string) wins; { value = 4 } (int) fallback
         try {
-            if ($obj.PSObject.Properties['Value'] -and $obj.Value) { return [string]$obj.Value }
+            if ($obj.PSObject.Properties['Value'] -and $obj.Value -is [string] -and $obj.Value) { return [string]$obj.Value }
         } catch {}
         try {
             if ($obj.PSObject.Properties['value']) {
                 $v = $obj.value
                 if ($v -is [string] -and $v) { return [string]$v }
                 if ($v -is [int]) {
-                    # ServiceControllerStatus: 4 = Running. ServiceStartMode: 2 = Automatic.
                     if ($v -eq 4) { return 'Running' }
                     if ($v -eq 2) { return 'Automatic' }
                     return [string]$v
