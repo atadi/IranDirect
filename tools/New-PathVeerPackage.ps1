@@ -61,10 +61,13 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 
 $PackageRoot = Join-Path $OutputDirectory "PathVeer-$Version"
 
-# Framework-dependent deployment is deliberate: it keeps the package small and
-# lets the shared .NET runtime be serviced independently for security updates.
-# The runtime prerequisite is documented in the install guide.
-$SelfContained = $false
+# Self-contained deployment is REQUIRED for the certified clean-Windows baseline,
+# which intentionally does NOT preinstall .NET. A framework-dependent package fails at
+# runtime on such a host (Service Control Manager Event 7009 + ".NET location: Not found").
+# Self-contained win-x64 bundles the .NET 10 runtime (and the WindowsDesktop runtime for
+# Tray) into each component so Service, CLI and Tray run with no machine-wide .NET.
+# Larger package, but no external prerequisite on the target.
+$SelfContained = $true
 
 $Components = @(
     @{ Name = 'Service'; Project = 'PathVeer.Service\PathVeer.Service.csproj' }
