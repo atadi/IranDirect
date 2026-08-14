@@ -59,11 +59,15 @@ function Get-PathVeerServiceState {
     param()
     $svc = Get-Service -Name $script:ServiceName -ErrorAction SilentlyContinue
     if (-not $svc) { return [PSCustomObject]@{ exists=$false; status='absent'; startType=$null } }
-    $bin = (Get-CimInstance Win32_Service -Filter "Name='$($script:ServiceName)'" -ErrorAction SilentlyContinue).StartMode
+    # NOTE: do NOT use Get-CimInstance Win32_Service for StartType. The restricted JEA session
+    # cannot resolve Get-CimInstance (CimCmdlets is intentionally not exposed; it remains in the
+    # forbidden command list), so the CIM call throws and the trusted wrapper crashes during
+    # post-install result construction. The ServiceController returned by Get-Service already
+    # exposes StartType, which is sufficient and JEA-safe.
     [PSCustomObject]@{
         exists = $true
         status = $svc.Status
-        startType = $bin
+        startType = $svc.StartType
         name = $svc.Name
     }
 }
