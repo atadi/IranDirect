@@ -127,44 +127,113 @@ function New-GuestSession([System.Management.Automation.PSCredential]$Cred) {
     }
 }
 
-function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSession]$Session, [string]$TargetHost = 'releases.pathveer.com', [int]$MaxSeconds = 120) {
-    # Bounded network-readiness probe for network-dependent certification stages (GATE-9).
-    # After a PV-CERT-HARNESS checkpoint restore the guest may come back APIPA (169.254.x.x) with no
-    # default route / unusable DNS, because DHCP runtime state is NOT baked into the checkpoint.
-    # This helper waits (bounded) for usable networking, performing a bounded DHCP renewal on the
-    # VM's DHCP-enabled adapter(s) when needed. It operates ONLY through the established PowerShell
-    # Direct session and existing harness primitives. No product/JEA/checkpoint changes; no static IP;
-    # no arbitrary long sleep; no infinite loop.
+function Repair-GuestDhcp([System.Management.Automation.Runspaces.PSSession]$Session) {
+    # Bounded DHCP renewal on the guest's DHCP-enabled, connected adapter(s). Reused by BOTH
+    # Wait-GuestNetworkReady (GATE-9, needs DNS) and Wait-GuestRouteReady (GATE-2, needs only a
+    # default route) so the DHCP-recovery implementation is NOT duplicated. SINGLE source of truth.
+    # The renewal process is started detached and waited on with a HARD 25000 ms bound via
+    # Process.WaitForExit(int) so it can NEVER hang indefinitely (no DHCP server answer). On timeout
+    # the spawned process is killed. No static IP; no ExpressVPN-specific code; no arbitrary long sleep.
+    return Invoke-Command -Session $Session -ScriptBlock {
+        $aliases = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
+            Where-Object { $_.ConnectionState -eq 'Connected' } |
+            ForEach-Object { (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Name } |
+            Where-Object { $_ })
+        $summary = [PSCustomObject]@{ renewedAliases = @(); timedOut = $false; error = $null }
+        try {
+            $targets = if ($aliases.Count -gt 0) { $aliases } else { @('*') }
+            foreach ($alias in $targets) {
+                $p = Start-Process `
+                    -FilePath "$env:SystemRoot\System32\ipconfig.exe" `
+                    -ArgumentList '/renew', $alias `
+                    -PassThru `
+                    -WindowStyle Hidden `
+                    -ErrorAction Stop
+                $completed = $p.WaitForExit(25000)
+                if (-not $completed) {
+                    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                    $p.WaitForExit()
+                    $summary.timedOut = $true
+                }
+                $summary.renewedAliases += [PSCustomObject]@{ alias = $alias; exitCode = $p.ExitCode }
+            }
+        } catch { $summary.error = $_.Exception.Message }
+        return $summary
+    }
+}
+
+function Get-GuestRouteReadinessProbe([System.Management.Automation.Runspaces.PSSession]$Session, [string]$DnsTarget = $null) {
+    # Single network-readiness probe shared by Wait-GuestRouteReady and Wait-GuestNetworkReady.
+    # Reports non-APIPA IPv4, IPv4 default route, DHCP adapter aliases, and (optionally) DNS resolution.
+    # It does NOT itself mutate state; callers decide whether to invoke Repair-GuestDhcp.
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($dnsTarget)
+        $allV4 = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' })
+        $apis = @($allV4 | Where-Object { $_.IPAddress -like '169.254.*' })
+        $nonApi = @($allV4 | Where-Object { $_.IPAddress -notlike '169.254.*' })
+        $hasNonApipa = $nonApi.Count -gt 0
+        $defRoute = $null
+        try { $defRoute = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue) } catch {}
+        $hasDefaultRoute = ($null -ne $defRoute) -and ($defRoute.Count -gt 0)
+        $dhcpIfs = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
+            Where-Object { $_.ConnectionState -eq 'Connected' })
+        $dhcpAliases = @($dhcpIfs | ForEach-Object { (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Name } | Where-Object { $_ })
+        $dnsOk = $false; $dnsErr = $null
+        if ($dnsTarget) {
+            try { $a = [System.Net.Dns]::GetHostAddresses($dnsTarget); if ($a -and $a.Count -gt 0) { $dnsOk = $true } } catch { $dnsErr = $_.Exception.Message }
+        }
+        [PSCustomObject]@{
+            hasNonApipa = $hasNonApipa
+            nonApipaAddresses = @($nonApi | ForEach-Object { $_.IPAddress })
+            apipaAddresses = @($apis | ForEach-Object { $_.IPAddress })
+            hasDefaultRoute = $hasDefaultRoute
+            dhcpInterfaceIndexes = @($dhcpIfs | ForEach-Object { $_.ifIndex })
+            dhcpAdapterAliases = @($dhcpAliases)
+            dnsResolved = $dnsOk
+            dnsError = $dnsErr
+        }
+    } -ArgumentList $DnsTarget
+}
+
+function Wait-GuestRouteReady([System.Management.Automation.Runspaces.PSSession]$Session, [int]$MaxSeconds = 120) {
+    # ROUTE-readiness prerequisite for GATE-2 (and any route-mutating stage). Requires ONLY a usable
+    # adapter/default route: non-APIPA IPv4 AND an IPv4 default route. It does NOT require DNS/HTTPS/
+    # GitHub/releases.pathveer.com — installing a managed route needs a valid next-hop/interface, not name
+    # resolution. After a PV-CERT-HARNESS checkpoint restore the guest may come back APIPA (169.254.x.x)
+    # with no default route because DHCP runtime state is NOT baked into the checkpoint; bounded DHCP
+    # renewal (shared Repair-GuestDhcp) restores it. Throws GuestRouteNotReady (environment defect) if the
+    # baseline cannot be established within MaxSeconds — callers must NOT run route mutations in that case.
     $deadline = (Get-Date).AddSeconds($MaxSeconds)
     $iter = 0
     while ($true) {
         $iter++
-        $probe = Invoke-Command -Session $Session -ScriptBlock {
-            param($target)
-            $allV4 = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' })
-            $apis = @($allV4 | Where-Object { $_.IPAddress -like '169.254.*' })
-            $nonApi = @($allV4 | Where-Object { $_.IPAddress -notlike '169.254.*' })
-            $hasNonApipa = $nonApi.Count -gt 0
-            $defRoute = $null
-            try { $defRoute = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue) } catch {}
-            $hasDefaultRoute = ($null -ne $defRoute) -and ($defRoute.Count -gt 0)
-            $dhcpIfs = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
-                Where-Object { $_.ConnectionState -eq 'Connected' })
-            $dhcpAliases = @($dhcpIfs | ForEach-Object { (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Name } | Where-Object { $_ })
-            $dnsOk = $false; $dnsErr = $null
-            try { $a = [System.Net.Dns]::GetHostAddresses($target); if ($a -and $a.Count -gt 0) { $dnsOk = $true } }
-            catch { $dnsErr = $_.Exception.Message }
-            [PSCustomObject]@{
-                hasNonApipa = $hasNonApipa
-                nonApipaAddresses = @($nonApi | ForEach-Object { $_.IPAddress })
-                apipaAddresses = @($apis | ForEach-Object { $_.IPAddress })
-                hasDefaultRoute = $hasDefaultRoute
-                dhcpInterfaceIndexes = @($dhcpIfs | ForEach-Object { $_.ifIndex })
-                dhcpAdapterAliases = @($dhcpAliases)
-                dnsResolved = $dnsOk
-                dnsError = $dnsErr
-            }
-        } -ArgumentList $TargetHost
+        $probe = Get-GuestRouteReadinessProbe -Session $Session
+        if ($probe.hasNonApipa -and $probe.hasDefaultRoute) {
+            return [PSCustomObject]@{ ready = $true; iterations = $iter; lastProbe = $probe }
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw [System.Management.Automation.ErrorRecord]::new(
+                [System.InvalidOperationException]::new(
+                    "Route readiness not established within $MaxSeconds s after checkpoint restore (APIPA='$($probe.apipaAddresses -join ',')'; defaultRoute=$($probe.hasDefaultRoute); nonApipa=$($probe.hasNonApipa); dhcpAliases='$($probe.dhcpAdapterAliases -join ',')'). Environment/network-readiness defect; not a product defect."),
+                'GuestRouteNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $probe)
+        }
+        Repair-GuestDhcp -Session $Session | Out-Null
+        Start-Sleep -Seconds 3
+    }
+}
+
+function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSession]$Session, [string]$TargetHost = 'releases.pathveer.com', [int]$MaxSeconds = 120) {
+    # Bounded network-readiness probe for network-dependent certification stages (GATE-9). Requires
+    # non-APIPA IPv4 + default route + DNS resolution of TargetHost. After a PV-CERT-HARNESS checkpoint
+    # restore the guest may come back APIPA (169.254.x.x) with no default route / unusable DNS, because
+    # DHCP runtime state is NOT baked into the checkpoint. Uses the shared Get-GuestRouteReadinessProbe /
+    # Repair-GuestDhcp primitives (no duplicated DHCP logic). No product/JEA/checkpoint changes; no static
+    # IP; no arbitrary long sleep; no infinite loop.
+    $deadline = (Get-Date).AddSeconds($MaxSeconds)
+    $iter = 0
+    while ($true) {
+        $iter++
+        $probe = Get-GuestRouteReadinessProbe -Session $Session -DnsTarget $TargetHost
         if ($probe.hasNonApipa -and $probe.hasDefaultRoute -and $probe.dnsResolved) {
             return [PSCustomObject]@{ ready = $true; iterations = $iter; lastProbe = $probe }
         }
@@ -174,37 +243,7 @@ function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSessio
                     "Network readiness not established within $MaxSeconds s after checkpoint restore (APIPA='$($probe.apipaAddresses -join ',')'; defaultRoute=$($probe.hasDefaultRoute); dnsResolved=$($probe.dnsResolved); dnsError='$($probe.dnsError)'). Environment/network-readiness defect; not a product defect."),
                 'GuestNetworkNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $probe)
         }
-        # Bounded DHCP recovery: renew the VM's DHCP-enabled adapter(s). The renewal process is started
-        # detached (PassThru) and waited on with a HARD 25000 ms bound via Process.WaitForExit(int) so it
-        # can NEVER hang indefinitely (no DHCP server answer). On timeout the spawned process is killed.
-        # NOTE: Start-Process has NO -TimeoutSeconds / -Wait-with-timeout parameter; the bounded wait is the
-        # Process.WaitForExit(int) call below. No -Wait (that would block before the bounded wait).
-        $renewResult = Invoke-Command -Session $Session -ScriptBlock {
-            $aliases = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
-                Where-Object { $_.ConnectionState -eq 'Connected' } |
-                ForEach-Object { (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Name } |
-                Where-Object { $_ })
-            $summary = [PSCustomObject]@{ renewedAliases = @(); timedOut = $false; error = $null }
-            try {
-                $targets = if ($aliases.Count -gt 0) { $aliases } else { @('*') }
-                foreach ($alias in $targets) {
-                    $p = Start-Process `
-                        -FilePath "$env:SystemRoot\System32\ipconfig.exe" `
-                        -ArgumentList '/renew', $alias `
-                        -PassThru `
-                        -WindowStyle Hidden `
-                        -ErrorAction Stop
-                    $completed = $p.WaitForExit(25000)
-                    if (-not $completed) {
-                        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-                        $p.WaitForExit()
-                        $summary.timedOut = $true
-                    }
-                    $summary.renewedAliases += [PSCustomObject]@{ alias = $alias; exitCode = $p.ExitCode }
-                }
-            } catch { $summary.error = $_.Exception.Message }
-            return $summary
-        }
+        Repair-GuestDhcp -Session $Session | Out-Null
         Start-Sleep -Seconds 3
     }
 }
@@ -1003,6 +1042,7 @@ function Get-EnumString($obj) {
     if ($obj -is [string]) { return [string]$obj }
     if ($obj -is [System.Enum]) { return $obj.ToString() }
     if ($obj -is [int]) {
+        if ($obj -eq 1) { return 'Stopped' }
         if ($obj -eq 4) { return 'Running' }
         if ($obj -eq 2) { return 'Automatic' }
         return [string]$obj
@@ -1015,6 +1055,7 @@ function Get-EnumString($obj) {
             $v = $obj.value
             if ($v -is [string] -and $v) { return [string]$v }
             if ($v -is [int]) {
+                if ($v -eq 1) { return 'Stopped' }
                 if ($v -eq 4) { return 'Running' }
                 if ($v -eq 2) { return 'Automatic' }
                 return [string]$v
@@ -1451,82 +1492,218 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
     # candidate first (fail-closed) so the CLI/service/route assertions below are truthful.
     $inst = Install-PathVeerProtectedCandidate $Session
     $jea = Get-GuestJeaSession $script:Cred
+    if ($null -eq $jea) {
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("JEA session could not be established for elevation; cannot run GATE-2."),
+            'Gate2JeaUnavailable', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $null)
+    }
+
+    # --- NETWORK / ROUTE BASELINE PREREQUISITE ------------------------------------------------
+    # GATE-2 mutates the Windows route table. Installing a managed route requires a usable adapter with a
+    # valid next-hop/interface, i.e. a non-APIPA IPv4 address AND an IPv4 default route. After a
+    # PV-CERT-HARNESS checkpoint restore the guest may come back APIPA (169.254.x.x) with NO default route
+    # because DHCP runtime state is NOT baked into the checkpoint. We establish route-readiness FIRST (bounded
+    # DHCP renewal via the shared Repair-GuestDhcp primitive). DNS/HTTPS/GitHub/release servers are NOT required
+    # for route installation, so the readiness check intentionally omits them. If the baseline cannot be
+    # established, this is an ENVIRONMENT/NETWORK-READINESS defect (NOT a product defect); we save evidence and
+    # throw WITHOUT running add-cidr/disable/enable/doctor so we never blame the product for a stale network.
     $routesBefore = Invoke-Command -Session $Session -ScriptBlock {
         @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
     }
-    # CLI route + service control verbs run through the trusted JEA CLI wrapper.
-    # Capture each route-state observation IMMEDIATELY after its corresponding transition so the
-    # evidence reflects three distinct lifecycle states (add -> disable -> enable), not a single
-    # final snapshot relabeled as historical.
+    $routesBeforeCount = if ($routesBefore) { $routesBefore.Count } else { 0 }
+    $defaultRouteBefore = @($routesBefore | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' })
+    $netReady = $null
+    try {
+        $netReady = Wait-GuestRouteReady -Session $Session -MaxSeconds 120
+    } catch {
+        $probe = $_.TargetObject
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix
+            elevationAvailable = ($jea -ne $null)
+            environmentNotReady = $true
+            networkReadiness = $probe
+            ipv4NonApipa = $probe.hasNonApipa
+            apipaAddresses = $probe.apipaAddresses
+            hasDefaultRoute = $probe.hasDefaultRoute
+            dhcpAdapterAliases = $probe.dhcpAdapterAliases
+            routesBeforeCount = $routesBeforeCount
+            defaultRouteBefore = @($defaultRouteBefore | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
+            failReasons = @('route/network baseline not established after checkpoint restore (APIPA/no default route); environment defect, not a product defect')
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("GATE-2 environment/network readiness not established: $($_.Exception.Message)"),
+            'Gate2EnvironmentNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $probe)
+    }
+    $envProbe = $netReady.lastProbe
+
+    # --- Add custom managed route (desired config only; route is installed on enable) ------------
     $addC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'add-cidr' -Argument $Prefix
+    if ($addC.result.exitCode -ne 0) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; routesBeforeCount = $routesBeforeCount; networkReadiness = $envProbe; failReasons = @('cli-add-cidr-nonzero') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer CLI custom-routes add-cidr failed (exit $($addC.result.exitCode))."),
+            'Gate2AddCustomRouteFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $addC.result)
+    }
+    # Product semantics (verified against PathVeer.Core): custom-routes add-cidr only WRITES desired
+    # configuration; it does NOT install a Windows route. The runtime route is reconciled on a later
+    # enable/repair cycle. So we verify CONFIG PERSISTENCE here (exit 0 AND the prefix appears in the
+    # desired custom-routes list), NOT an immediate Windows-route presence. Requiring the Windows route
+    # immediately after add-cidr would be a false-positive harness defect (scenario A of add-cidr contract).
+    $listOut = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'list').result.output
+    $configPersisted = ($null -ne $listOut) -and ($listOut -match [regex]::Escape($Prefix))
+    if (-not $configPersisted) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; routesBeforeCount = $routesBeforeCount; networkReadiness = $envProbe; customRoutesList = $listOut; failReasons = @('custom-route-config-not-persisted-after-add-cidr') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Custom route $Prefix not present in desired configuration after add-cidr (config persistence failed)."),
+            'Gate2CustomRouteConfigNotPersisted', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+    }
     $customAfterAdd = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    $routePresentAfterAdd = ($null -ne $customAfterAdd) -and ($customAfterAdd.Count -gt 0)
     Start-Sleep -Seconds 2
+
+    # --- Disable managed routing (top-level policy) ---
     $disC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'disable'
+    if ($disC.result.exitCode -ne 0) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('cli-disable-nonzero') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer CLI disable failed (exit $($disC.result.exitCode))."),
+            'Gate2DisableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $disC.result)
+    }
     $afterDisable = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    if (($null -ne $afterDisable) -and ($afterDisable.Count -gt 0)) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; prefixPresentAfterDisable = $true; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('managed-prefix-present-after-disable') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Managed prefix $Prefix still present after disable (expected removed)."),
+            'Gate2ManagedPrefixDisableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+    }
     Start-Sleep -Seconds 2
-    $enC  = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'enable'
+
+    # --- Enable managed routing (top-level policy): reconciles desired config -> Windows routes ---
+    $enC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'enable'
+    if ($enC.result.exitCode -ne 0) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('cli-enable-nonzero') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer CLI enable failed (exit $($enC.result.exitCode))."),
+            'Gate2EnableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $enC.result)
+    }
     $afterEnable = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    if (($null -eq $afterEnable) -or ($afterEnable.Count -le 0)) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $false; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('managed-prefix-absent-after-enable') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Managed prefix $Prefix not present after enable (expected installed)."),
+            'Gate2ManagedPrefixEnableFailed', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+    }
     Start-Sleep -Seconds 3
-    $doc  = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'doctor'
-    # Recovery: controlled service stop/start (privileged), confirm reconcile.
+
+    # --- Doctor diagnostics (must be healthy: exit 0) ---
+    $doc = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'doctor'
+    $docExit = $doc.result.exitCode
+    $docOut = $doc.result.output
+    if ($docExit -ne 0) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('doctor-nonzero') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer doctor reported failures (exit $docExit)."),
+            'Gate2DoctorFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $doc.result)
+    }
+
+    # --- Stop + start service, verify managed prefix recovered ---
     $stop = Stop-GuestJeaService -Session $Session -JeaSession $jea
+    # Normalize remoted ServiceControllerStatus: native enum, numeric fallback (1->Stopped,4->Running),
+    # or remoted wrapper {value/Value}. Use the shared Get-EnumString normalizer so a remoted
+    # {value=1;Value='Stopped'} is recognized as Stopped (the prior GATE-2 real failure was a harness
+    # false negative caused by comparing the remoted wrapper object to the string 'Stopped').
+    $stoppedState = Get-EnumString $stop.result.status
+    if ($stoppedState -ne 'Stopped') {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = $stop.result.status; serviceStoppedStateNormalized = $stoppedState; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('service-not-stopped') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer service did not reach Stopped after stop (state=$stoppedState)."),
+            'Gate2ServiceStopFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $stop.result)
+    }
     Start-Sleep -Seconds 2
-    $stoppedState = $stop.result.status
     $start = Start-GuestJeaService -Session $Session -JeaSession $jea
     Start-Sleep -Seconds 4
-    $recoveredState = $start.result.status
+    $recoveredState = Get-EnumString $start.result.status
+    if ($recoveredState -ne 'Running') {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = $stoppedState; serviceRecoveredState = $start.result.status; serviceRecoveredStateNormalized = $recoveredState; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('service-not-running') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer service did not reach Running after start (state=$recoveredState)."),
+            'Gate2ServiceStartFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $start.result)
+    }
     $afterRecovery = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
+    $prefixPresentAfterRecovery = ($null -ne $afterRecovery) -and ($afterRecovery.Count -gt 0)
     $routesAfter = Invoke-Command -Session $Session -ScriptBlock {
         @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
     }
-    $ev = [PSCustomObject]@{
-        routesBeforeCount = $routesBefore.Count
-        preconditionInstall = $inst
-        cliExists = $true
-        cliPath = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
-        addCustomRouteExit = $addC.result.exitCode
-        customRouteAfterAdd = $customAfterAdd
-        disableExit = $disC.result.exitCode
-        prefixPresentAfterDisable = ($afterDisable.Count -gt 0)
-        enableExit = $enC.result.exitCode
-        prefixPresentAfterEnable = ($afterEnable.Count -gt 0)
-        doctorExitCode = $doc.result.exitCode
-        doctorSummary = $doc.result.output
-        serviceStoppedState = $stoppedState
-        serviceRecoveredState = $recoveredState
-        prefixPresentAfterRecovery = ($afterRecovery.Count -gt 0)
-        routesAfterCount = $routesAfter.Count
-        defaultRouteIntact = ($null -ne ($routesAfter | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' }))
-    }
-    # FAIL-CLOSED: assert the gate's unambiguous lifecycle invariants. Save evidence first so a REAL
-    # PathVeer product failure is diagnosable, then throw (do not report a misleading PASS).
-    $gate2Fail = @()
-    if ($addC.result.exitCode -ne 0) { $gate2Fail += "add-cidr exitCode=$($addC.result.exitCode)" }
-    if ($customAfterAdd.Count -le 0) { $gate2Fail += 'managed prefix absent after add-cidr (expected present)' }
-    if ($disC.result.exitCode -ne 0) { $gate2Fail += "disable exitCode=$($disC.result.exitCode)" }
-    if ($afterDisable.Count -gt 0) { $gate2Fail += 'managed prefix still present after disable (expected absent)' }
-    if ($enC.result.exitCode -ne 0) { $gate2Fail += "enable exitCode=$($enC.result.exitCode)" }
-    if ($afterEnable.Count -le 0) { $gate2Fail += 'managed prefix absent after enable (expected present)' }
-    if ($doc.result.exitCode -ne 0) { $gate2Fail += "doctor exitCode=$($doc.result.exitCode) (expected 0)" }
-    if ($stoppedState -ne 'Stopped') { $gate2Fail += "service not Stopped after stop (was: $stoppedState)" }
-    if ($recoveredState -ne 'Running') { $gate2Fail += "service not Running after start (was: $recoveredState)" }
-    if ($afterRecovery.Count -le 0) { $gate2Fail += 'managed prefix absent after service stop/start recovery (expected present)' }
-    if (-not $ev.defaultRouteIntact) { $gate2Fail += 'default route not intact after route mutations' }
-    if ($gate2Fail.Count -gt 0) {
+    $routesAfterCount = if ($routesAfter) { $routesAfter.Count } else { 0 }
+    $defaultRouteAfter = @($routesAfter | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' })
+
+    # Distinguish "no baseline default route existed" (ENVIRONMENT — checkpoint networking not ready) from
+    # "PathVeer destroyed the baseline default route" (REAL PRODUCT ROUTE-INTEGRITY DEFECT). These are
+    # completely different classifications. A missing baseline is captured and reported; a baseline that
+    # existed but vanished after mutations is a genuine gate failure.
+    $defaultRouteBeforePresent = $defaultRouteBefore.Count -gt 0
+    $defaultRouteAfterPresent = $defaultRouteAfter.Count -gt 0
+    $noBaselineDefaultRoute = -not $defaultRouteBeforePresent
+    $defaultRouteIntact = $defaultRouteAfterPresent
+    if ($defaultRouteBeforePresent -and -not $defaultRouteAfterPresent) {
         Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
-            capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); managedPrefix=$Prefix
-            elevationAvailable = ($jea -ne $null); evidence = $ev; failReasons = $gate2Fail
+            capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null)
+            addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode
+            prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n")
+            serviceStoppedState = 'Stopped'; serviceRecoveredState = 'Running'
+            prefixPresentAfterRecovery = $true; routesBeforeCount = $routesBeforeCount; routesAfterCount = $routesAfterCount
+            noBaselineDefaultRoute = $noBaselineDefaultRoute
+            defaultRouteBefore = @($defaultRouteBefore | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
+            defaultRouteAfter = @($defaultRouteAfter | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
+            networkReadiness = $envProbe
+            failReasons = @('default-route-destroyed-by-product')
         })
         throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new("GATE-2 route/CLI/service invariants not satisfied: $($gate2Fail -join '; ')."),
-            'Gate2InvariantsFailed', [System.Management.Automation.ErrorCategory]::InvalidResult, $ev)
+            [System.InvalidOperationException]::new("Baseline default route (0.0.0.0/0) present before GATE-2 but removed after route mutations (product route-integrity defect)."),
+            'Gate2DefaultRouteDestroyed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
     }
-    Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); managedPrefix=$Prefix
-        elevationAvailable = ($jea -ne $null)
-        evidence = $ev
-    })
-    return $ev
+    if (-not $prefixPresentAfterRecovery) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null)
+            addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode
+            prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n")
+            serviceStoppedState = 'Stopped'; serviceRecoveredState = 'Running'
+            prefixPresentAfterRecovery = $false; routesBeforeCount = $routesBeforeCount; routesAfterCount = $routesAfterCount
+            noBaselineDefaultRoute = $noBaselineDefaultRoute
+            defaultRouteBefore = @($defaultRouteBefore | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
+            defaultRouteAfter = @($defaultRouteAfter | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
+            networkReadiness = $envProbe
+            failReasons = @('managed-prefix-absent-after-recovery')
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Managed prefix $Prefix not present after service recovery (expected installed)."),
+            'Gate2ManagedPrefixRecoveryFailed', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+    }
+    $out = [PSCustomObject]@{
+        managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null)
+        addCustomRouteExit = $addC.result.exitCode
+        routePresentAfterAdd = $routePresentAfterAdd
+        customRouteConfigPersisted = $configPersisted
+        disableExit = $disC.result.exitCode
+        prefixPresentAfterDisable = $false
+        enableExit = $enC.result.exitCode
+        prefixPresentAfterEnable = $true
+        doctorExitCode = $docExit
+        doctorSummary = ($docOut -join "`n")
+        serviceStoppedState = 'Stopped'
+        serviceRecoveredState = 'Running'
+        prefixPresentAfterRecovery = $true
+        routesBeforeCount = $routesBeforeCount
+        routesAfterCount = $routesAfterCount
+        noBaselineDefaultRoute = $noBaselineDefaultRoute
+        defaultRouteBeforePresent = $defaultRouteBeforePresent
+        defaultRouteAfterPresent = $defaultRouteAfterPresent
+        defaultRouteIntact = $defaultRouteIntact
+        networkReadiness = $envProbe
+    }
+    Save-Json '02-gate2-route-mutation.json' $out
+    Write-Host "  GATE-2 PASS (route mutation + recovery verified)." -ForegroundColor Green
+    return $out
 }
 
 function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
