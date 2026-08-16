@@ -854,11 +854,10 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
         throw
     }
 
-    # VERIFY success: restore the baseline and report PASS.
+    # VERIFY success: report PASS. Restoration of the certification baseline is owned EXCLUSIVELY by
+    # the top-level final cleanup block (single restoration authority). GATE5VERIFY success leaves
+    # PreserveVmState = $false, so the final block runs Restore-Clean exactly once. Do NOT restore here.
     Write-Host "`n  GATE-5 PASS / CLOSED (interactive-desktop authority contract verified)." -ForegroundColor Green
-    Write-Host "  Restoring certification baseline '$CertificationSnapshot'..." -ForegroundColor Yellow
-    Restore-Clean
-    Write-Host "  Guest restored to certification baseline '$CertificationSnapshot'." -ForegroundColor Green
     return $contractOut
 }
 
@@ -1605,7 +1604,9 @@ foreach ($st in $stages) {
             if ($null -eq $sess) { $sess = New-GuestSession $script:Cred }
             try {
                 Run-GATE5VERIFY $sess | Out-Null
-                # Success path inside Run-GATE5VERIFY already restored the baseline.
+                # Success path: restoration of the certification baseline is owned solely by the
+                # top-level final cleanup block (single restoration authority). Leave PreserveVmState
+                # = $false so it restores exactly once.
                 $script:PreserveVmState = $false
             } catch {
                 $errName = $_.Exception.GetType().Name
