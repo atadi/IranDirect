@@ -619,7 +619,9 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     # Get-GuestJeaInstallManifest returns a wrapper; the authoritative manifest is under .result.
     $manifest = $manifestResponse.result
     $svcResponse = Get-GuestJeaServiceState -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
-    $live = Invoke-Command -Session $Session -ScriptBlock {
+    $live = $null
+    try {
+        $live = Invoke-Command -Session $Session -ScriptBlock {
         param($trayValueName, $runKey)
         $svcExists = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
         $svc = if ($svcExists) { Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue } else { $null }
@@ -629,8 +631,41 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
             Select-Object -ExpandProperty SessionId -Unique | Where-Object { $_ -ne $null })
         $trayProc = @(Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue)
         # Read-only owner mapping for interactive-session attribution (no token manipulation).
-        # Use the shared Get-ProcessOwnerInfo helper (CIM GetOwner method, not the unsupported
+        # This helper runs INSIDE the VM runspace (Win32_Process instances live on the VM). It is
+        # intentionally defined here, NOT in the Desktop script scope, because a Desktop-scoped
+        # function is NOT available inside the Invoke-Command remote runspace. Uses the
+        # Win32_Process.GetOwner CIM METHOD via Invoke-CimMethod (NOT the unsupported
         # $cimInstance.GetOwner() that silently returned null in a prior real run).
+        function Get-ProcessOwnerInfo([int]$ProcessId) {
+            $out = [PSCustomObject]@{
+                success = $false; processId = $ProcessId; sessionId = $null
+                domain = $null; user = $null; identity = $null
+                errorType = $null; errorMessage = $null
+            }
+            try {
+                $proc = Get-CimInstance -ClassName Win32_Process -Filter "Handle='$ProcessId'" -ErrorAction Stop
+                if ($null -eq $proc) {
+                    $out.errorType = 'ProcessNotFound'
+                    $out.errorMessage = "no Win32_Process with Handle=$ProcessId"
+                    return $out
+                }
+                $out.sessionId = $proc.SessionId
+                $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction Stop
+                if ($owner -and $owner.ReturnValue -eq 0 -and $owner.Domain -and $owner.User) {
+                    $out.domain = $owner.Domain
+                    $out.user = $owner.User
+                    $out.identity = ($owner.Domain + '\' + $owner.User)
+                    $out.success = $true
+                } else {
+                    $out.errorType = 'GetOwnerReturned'
+                    $out.errorMessage = "GetOwner ReturnValue=$($owner.ReturnValue) Domain='$($owner.Domain)' User='$($owner.User)'"
+                }
+            } catch {
+                $out.errorType = 'OwnerResolutionError'
+                $out.errorMessage = $_.Exception.Message
+            }
+            return $out
+        }
         $explorerOwnerBySession = @{}
         foreach ($ep in (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
             $oi = Get-ProcessOwnerInfo ([int]$ep.Handle)
@@ -662,6 +697,24 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
             normalUserIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
         }
     } -ArgumentList 'PathVeer Tray', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    } catch {
+        # The live interactive-state/owner probe threw inside or across the VM remote runspace
+        # (e.g. a command undefined in the remote runspace). Write CURRENT-run failure evidence
+        # with this run's gate5RunId so a stale prior 22 cannot masquerade as this run's result.
+        # Do NOT delete/overwrite the valid 23/05 prepared/fresh-install evidence.
+        Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            gate5RunId = $prepGate5RunId
+            result = 'HARNESS/PROBE FAILURE'
+            classification = 'HARNESS/PROBE FAILURE'
+            probeStage = 'interactive-live-state'
+            errorType = 'InteractiveLiveStateProbeThrew'
+            errorMessage = $_.Exception.Message
+            notes = @('Invoke-Command for live interactive state/owner probe threw. Current-run failure evidence written; stale prior 22 must not be treated as this run.')
+        })
+        # Preserve the VM (existing preservation behavior) and rethrow.
+        throw
+    }
 
     $expectedTrayPath = $prep.installManifest.trayExecutablePath
     $liveStateNorm = (Get-EnumString $live.serviceState)
@@ -701,7 +754,8 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     #     as interactive evidence. The Tray must be running in a PV-CERT\pvcert Explorer session, AND that
     #     Explorer must belong to PV-CERT\pvcert (another interactive account may own a different Explorer
     #     session, which must NOT satisfy the proof). The Tray itself must be owned by PV-CERT\pvcert if
-    #     ownership is observable. Owner attribution uses the shared Get-ProcessOwnerInfo CIM-method helper.
+    #     ownership is observable. Owner attribution uses the in-runspace Get-ProcessOwnerInfo CIM-method helper
+    #     (defined inside the VM remote ScriptBlock, since Desktop-scoped functions are not visible there).
     #     If OWNER RESOLUTION ITSELF fails, that is a HARNESS/PROBE failure (not a user-action failure) and
     #     must NOT be reported as 'interactive precondition required'. ---
     $interactiveExplorerSessionIds = $live.interactiveExplorerSessionIds
@@ -832,43 +886,6 @@ function Get-EnumString($obj) {
         }
     } catch {}
     return [string]$obj
-}
-
-function Get-ProcessOwnerInfo([int]$ProcessId) {
-    # Read-only process-owner resolution via the Win32_Process.GetOwner CIM METHOD.
-    # NOTE: Win32_Process.GetOwner is a CIM *method*, not a property. It MUST be invoked through
-    # Invoke-CimMethod on the CimInstance (Get-CimInstance). A CimInstance has NO .GetOwner() method;
-    # calling $cimInstance.GetOwner() throws MethodInvocationException, which must NOT be swallowed
-    # into a null owner (that produced a false INCOMPLETE in a prior real run). All failures are
-    # returned as structured diagnostics. No elevation, no JEA widening, no token APIs.
-    $out = [PSCustomObject]@{
-        success = $false; processId = $ProcessId; sessionId = $null
-        domain = $null; user = $null; identity = $null
-        errorType = $null; errorMessage = $null
-    }
-    try {
-        $proc = Get-CimInstance -ClassName Win32_Process -Filter "Handle='$ProcessId'" -ErrorAction Stop
-        if ($null -eq $proc) {
-            $out.errorType = 'ProcessNotFound'
-            $out.errorMessage = "no Win32_Process with Handle=$ProcessId"
-            return $out
-        }
-        $out.sessionId = $proc.SessionId
-        $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction Stop
-        if ($owner -and $owner.ReturnValue -eq 0 -and $owner.Domain -and $owner.User) {
-            $out.domain = $owner.Domain
-            $out.user = $owner.User
-            $out.identity = ($owner.Domain + '\' + $owner.User)
-            $out.success = $true
-        } else {
-            $out.errorType = 'GetOwnerReturned'
-            $out.errorMessage = "GetOwner ReturnValue=$($owner.ReturnValue) Domain='$($owner.Domain)' User='$($owner.User)'"
-        }
-    } catch {
-        $out.errorType = 'OwnerResolutionError'
-        $out.errorMessage = $_.Exception.Message
-    }
-    return $out
 }
 
 function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session, $PreparedEvidence = $null) {
