@@ -194,149 +194,137 @@ function Register-NormalUserTrayRunEntry([System.Management.Automation.Runspaces
     # HARNESS-ONLY: no product source, no JEA change, no new launch primitive, no HKLM, no token theft,
     # no SYSTEM, no CreateProcessAsUser. If this step fails it is HARNESS/PREPARATION FAILURE, never a
     # product failure.
+    #
+    # REGISTRY BOUNDARY (hardened): the VM remote block uses Microsoft.Win32.Registry (NOT the
+    # PowerShell Registry provider, which silently no-oped New-Item in a PowerShell Direct session and
+    # surfaced a raw ItemNotFound). The remote block NEVER writes Desktop evidence files -- it returns
+    # ONE structured object for both PASS and FAIL. All 21-tray-run-entry.json persistence happens
+    # DESKTOP-side via Save-Json, so certification evidence is never silently swallowed inside the VM.
     $expectedIdentity = 'PV-CERT\pvcert'
     # Must EXACTLY match the product installer's TrayRunValueName (tools/Install-PathVeer.ps1:107).
     $runValueName = 'PathVeer Tray'
-    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $registrySubPath = 'Software\Microsoft\Windows\CurrentVersion\Run'
 
     $reg = Invoke-Command -Session $Session -ScriptBlock {
-        param($trayExePath, $runValueName, $runKey, $expectedIdentity, $evidenceDir)
+        param($trayExePath, $runValueName, $registrySubPath, $expectedIdentity)
+        # Identity guard MUST come first -- never mutate under the wrong identity.
         $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
         $sid = $id.User.Value
         $name = $id.Name
         $sessionId = (Get-Process -Id $pid).SessionId
-
-        # --- Identity guard: must be the normal certification user, never the JEA virtual account. ---
-        if ($name -ne $expectedIdentity) {
-            throw "unexpected normal-user identity at registry write point: '$name' (expected '$expectedIdentity')"
-        }
-
-        # --- Exact same value shape as Set-TrayStartupEntry: a quoted executable path. ---
-        $value = "`"$trayExePath`""
-
-        # --- Deterministic creation: the PRECEDING pattern `if (-not (Test-Path)) { New-Item -Force
-        #     | Out-Null }` used a NONTERMINATING New-Item. In a PowerShell Direct session the
-        #     registry provider has been observed to silently fail that New-Item (key never created,
-        #     no exception), after which `Set-ItemProperty -ErrorAction Stop` threw a raw
-        #     ItemNotFound ("Cannot find path 'HKCU:\...\Run' because it does not exist"). That raw
-        #     provider error escaped and terminated PREP. Here we make creation explicit and proven:
-        #     attempt creation with terminating semantics, then ASSERT the key exists before writing.
-        #     Any failure emits STRUCTURED evidence (classification/errorType/errorMessage/identity)
-        #     to 21-tray-run-entry.json BEFORE rethrowing -- no raw provider error escapes silently. ---
-        function Write-TrayRunFailure($classification, $errorType, $errorMessage) {
-            $fail = [PSCustomObject]@{
-                capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
-                classification = $classification
-                errorType = $errorType
-                errorMessage = $errorMessage
-                currentIdentity = $name
-                currentSid = $sid
-                runKey = $runKey
-                runValueName = $runValueName
-            }
-            try { $fail | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $evidenceDir '21-tray-run-entry.json') -Encoding utf8 } catch {}
-        }
-
-        $runKeyExistedBefore   = (Test-Path -LiteralPath $runKey)
-        $runKeyCreateAttempted = $false
-        if (-not $runKeyExistedBefore) {
-            $runKeyCreateAttempted = $true
-            try {
-                New-Item -Path $runKey -Force -ErrorAction Stop | Out-Null
-            } catch {
-                Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunKeyCreateFailed' "cannot create Run key '$runKey': $($_.Exception.Message)"
-                throw [System.Management.Automation.ErrorRecord]::new(
-                    [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: cannot create Run key '$runKey': $($_.Exception.Message)"),
-                    'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
-            }
-        }
-        $runKeyExistsAfterCreate = (Test-Path -LiteralPath $runKey)
-        if (-not $runKeyExistsAfterCreate) {
-            Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunKeyAbsentAfterCreate' "Run key '$runKey' still absent after creation attempt"
-            throw [System.Management.Automation.ErrorRecord]::new(
-                [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: Run key '$runKey' still absent after creation attempt"),
-                'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
-        }
-
-        # --- Write the Run value (explicit terminating semantics). ---
-        $runEntryWriteAttempted = $true
-        try {
-            Set-ItemProperty -Path $runKey -Name $runValueName -Value $value -ErrorAction Stop
-        } catch {
-            Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunValueWriteFailed' "cannot write Run value '$runValueName' at '$runKey': $($_.Exception.Message)"
-            throw [System.Management.Automation.ErrorRecord]::new(
-                [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: cannot write Run value '$runValueName' at '$runKey': $($_.Exception.Message)"),
-                'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
-        }
-
-        # --- Read back from the SAME normal-user session (proves the write landed). ---
-        $runEntryReadBackSucceeded = $false
-        try {
-            $read = (Get-ItemProperty -Path $runKey -Name $runValueName -ErrorAction Stop).$runValueName
-            $runEntryReadBackSucceeded = $true
-        } catch {
-            Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunValueReadBackFailed' "cannot read back Run value '$runValueName' at '$runKey': $($_.Exception.Message)"
-            throw [System.Management.Automation.ErrorRecord]::new(
-                [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: cannot read back Run value '$runValueName' at '$runKey': $($_.Exception.Message)"),
-                'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
-        }
-
-        # --- Supplemental: capture the key owner SID if the provider exposes it. NOTE: the owner
-        #     SID is NOT asserted as a hard invariant (registry ACL ownership is not the proof of
-        #     which user's HKCU was mutated). The authority proof is: WindowsIdentity == pvcert,
-        #     HKEY_USERS\<pvcert SID> exists, the write occurred through that HKCU, and the exact
-        #     value reads back. Owner SID is recorded only when available. ---
-        $ownerSid = $null
-        try {
-            $acl = Get-Acl -LiteralPath $runKey
-            $o = $acl.Owner
-            if ($o -match '^S-1-') { $ownerSid = $o }
-            else { $ownerSid = ([System.Security.Principal.NTAccount]::new($o)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
-        } catch { $ownerSid = $null }
-
-        [PSCustomObject]@{
+        $result = [PSCustomObject]@{
+            success = $false
+            classification = $null
+            errorType = $null
+            errorMessage = $null
             normalUserIdentity = $name
             normalUserSid = $sid
             normalUserProfile = $env:USERPROFILE
             powerShellDirectSessionId = $sessionId
-            trayRunEntryRegistered = $true
-            trayRunEntryPath = $runKey
-            trayRunEntryValue = $read
-            trayRunEntryOwnerSid = $ownerSid
-            trayExecutablePathExpected = $trayExePath
-            valueMatchesExpected = ($read -eq $value)
-            runKeyExistedBefore = $runKeyExistedBefore
-            runKeyCreateAttempted = $runKeyCreateAttempted
-            runKeyExistsAfterCreate = $runKeyExistsAfterCreate
-            runEntryWriteAttempted = $runEntryWriteAttempted
-            runEntryReadBackSucceeded = $runEntryReadBackSucceeded
+            registrySubPath = $registrySubPath
+            runValueName = $runValueName
+            expectedValue = ("`"$trayExePath`"")
+            actualValue = $null
+            createSubKeySucceeded = $false
+            writeSucceeded = $false
+            readBackSucceeded = $false
+            valueMatchesExpected = $false
         }
-    } -ArgumentList $trayExePath, $runValueName, $runKey, $expectedIdentity, $EvidenceDir
+        try {
+            if ($name -ne $expectedIdentity) {
+                $result.classification = 'HARNESS/PREPARATION FAILURE'
+                $result.errorType = 'IdentityGuardFailed'
+                $result.errorMessage = "unexpected normal-user identity at registry write point: '$name' (expected '$expectedIdentity')"
+                return $result
+            }
 
-    # --- Owner SID must equal the observed pvcert SID; value must match the authoritative manifest path. ---
-    if (-not $reg.valueMatchesExpected) {
-        Save-Json '21-tray-run-entry.json' ([PSCustomObject]@{
-            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
-            registration = $reg; result = 'FAIL'
-            reason = 'Run-entry value does not match the authoritative manifest Tray executable path'
-        })
-        throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new('HARNESS/PREPARATION FAILURE: Tray Run entry value mismatch'),
-            'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
-    }
-    # --- Value must match the authoritative manifest path; owner SID is SUPPLEMENTAL only
-    #     (registry ACL ownership is not the proof of which user's HKCU was mutated). The hard
-    #     authority proof is the value read-back match below. Owner SID mismatch is recorded in
-    #     evidence as a non-fatal observation, never a HARNESS/PREPARATION failure. ---
-    if ($reg.trayRunEntryOwnerSid -and $reg.trayRunEntryOwnerSid -ne $reg.normalUserSid) {
-        Write-Host ("  WARN: Run-key owner SID '$($reg.trayRunEntryOwnerSid)' != pvcert SID '$($reg.normalUserSid)' (supplemental; value read-back is the authority proof).") -ForegroundColor Yellow
-    }
+            # Prove the current user's HKCU hive is loaded under HKEY_USERS\<SID> before mutating.
+            $hku = Get-Item -LiteralPath "Registry::HKEY_USERS\$sid" -ErrorAction SilentlyContinue
+            if ($null -eq $hku) {
+                $result.classification = 'HARNESS/PREPARATION FAILURE'
+                $result.errorType = 'UserHiveNotLoaded'
+                $result.errorMessage = "registry hive HKEY_USERS\$sid for '$name' is not loaded"
+                return $result
+            }
 
+            # Use Microsoft.Win32.Registry (deterministic; missing Run subkey is created naturally).
+            $key = $null
+            try {
+                $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($registrySubPath, $true)
+            } catch {
+                $result.classification = 'HARNESS/PREPARATION FAILURE'
+                $result.errorType = 'CreateSubKeyFailed'
+                $result.errorMessage = "CreateSubKey('$registrySubPath') failed: $($_.Exception.Message)"
+                return $result
+            }
+            if ($null -eq $key) {
+                $result.classification = 'HARNESS/PREPARATION FAILURE'
+                $result.errorType = 'CreateSubKeyReturnedNull'
+                $result.errorMessage = "CreateSubKey('$registrySubPath') returned null"
+                return $result
+            }
+            $result.createSubKeySucceeded = $true
+
+            $writeOk = $false
+            try {
+                $key.SetValue($runValueName, $result.expectedValue, [Microsoft.Win32.RegistryValueKind]::String)
+                $writeOk = $true
+            } catch {
+                $result.classification = 'HARNESS/PREPARATION FAILURE'
+                $result.errorType = 'RunValueWriteFailed'
+                $result.errorMessage = "SetValue('$runValueName') failed: $($_.Exception.Message)"
+                return $result
+            }
+            $result.writeSucceeded = $true
+
+            try {
+                $result.actualValue = [string]$key.GetValue(
+                    $runValueName, $null,
+                    [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                $result.readBackSucceeded = $true
+            } catch {
+                $result.classification = 'HARNESS/PREPARATION FAILURE'
+                $result.errorType = 'RunValueReadBackFailed'
+                $result.errorMessage = "GetValue('$runValueName') failed: $($_.Exception.Message)"
+                return $result
+            }
+
+            # Hard requirement: case-sensitive equality with the exact quoted manifest path.
+            if ($result.actualValue -ceq $result.expectedValue) {
+                $result.valueMatchesExpected = $true
+                $result.success = $true
+            } else {
+                $result.classification = 'HARNESS/PREPARATION FAILURE'
+                $result.errorType = 'RunValueMismatch'
+                $result.errorMessage = "Run value read-back ('$($result.actualValue)') != expected ('$($result.expectedValue)')"
+            }
+            return $result
+        } catch {
+            $result.classification = 'HARNESS/PREPARATION FAILURE'
+            $result.errorType = 'UnexpectedRegistryError'
+            $result.errorMessage = "unexpected error: $($_.Exception.Message)"
+            return $result
+        } finally {
+            if ($null -ne $key) { try { $key.Close() } catch {} }
+        }
+    } -ArgumentList $trayExePath, $runValueName, $registrySubPath, $expectedIdentity
+
+    # --- Desktop-side persistence only: never swallow evidence inside the VM. ---
     Save-Json '21-tray-run-entry.json' ([PSCustomObject]@{
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
-        registration = $reg; result = 'PASS'
-        note = 'Per-user Tray Run entry registered into PV-CERT\pvcert HKCU; executes on next genuine interactive logon.'
+        registration = $reg
+        result = $(if ($reg.success) { 'PASS' } else { 'FAIL' })
+        note = if ($reg.success) {
+            'Per-user Tray Run entry registered into PV-CERT\pvcert HKCU via Microsoft.Win32.Registry; executes on next genuine interactive logon.'
+        } else {
+            "HARNESS/PREPARATION FAILURE: $($reg.errorType) - $($reg.errorMessage)"
+        }
     })
+    if (-not $reg.success) {
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: Tray Run entry registration failed ($($reg.errorType)): $($reg.errorMessage)"),
+            'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
     return $reg
 }
 
@@ -354,6 +342,16 @@ function Run-GATE5PREP([System.Management.Automation.Runspaces.PSSession]$Sessio
     # interactive pvcert logon and then run GATE5VERIFY. PREP is NOT a product failure; it is a
     # HARNESS/PRECONDITION boundary. The caller (main) must NOT restore after PREP.
     Write-Stage "GATE-5 PREP (install + pvcert Tray Run entry; leaves VM prepared)"
+    # --- PREP evidence hygiene (provenance): establish ONE run id for this PREP execution and clear
+    #     the PREP-owned evidence artifacts BEFORE execution, so stale August-15/16 artifacts cannot
+    #     be mistaken for current-run evidence. Only artifacts owned by this PREP flow are cleared;
+    #     unrelated gate evidence (e.g. 02/03/06/08/09) is left untouched. ---
+    $gate5RunId = [System.Guid]::NewGuid().ToString('D')
+    $prepOwnedArtifacts = @('05-gate5-fresh-install.json', '21-tray-run-entry.json', '23-gate5-interactive-prepared.json')
+    foreach ($a in $prepOwnedArtifacts) {
+        $p = Join-Path $EvidenceDir $a
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+    }
     # SECURITY (Option A): the operator bootstrap is the ONLY trust transition. PV-CERT-HARNESS
     # already contains the protected, operator-approved installer + payload. The harness performs
     # NO runtime copy of executable bytes into the guest (the old Copy-ToGuest into the untrusted
@@ -504,14 +502,16 @@ function Run-GATE5PREP([System.Management.Automation.Runspaces.PSSession]$Sessio
             Select-Object -ExpandProperty SessionId -Unique | Where-Object { $_ -ne $null })
     })
     $prepared = [PSCustomObject]@{
+        gate5RunId = $gate5RunId
+        preparedUtc = (Get-Date).ToUniversalTime().ToString('o')
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
         prepared = $true
         candidateVersion = if ($installResult) { $installResult.productVersion } else { $null }
         installManifest = $manifest.result
         normalUserIdentity = if ($trayRunEntry) { $trayRunEntry.normalUserIdentity } else { $null }
         normalUserSid = if ($trayRunEntry) { $trayRunEntry.normalUserSid } else { $null }
-        trayRunEntryRegistered = if ($trayRunEntry) { $trayRunEntry.trayRunEntryRegistered } else { $false }
-        trayRunEntryValue = if ($trayRunEntry) { $trayRunEntry.trayRunEntryValue } else { $null }
+        trayRunEntryRegistered = if ($trayRunEntry) { $trayRunEntry.success } else { $false }
+        trayRunEntryValue = if ($trayRunEntry) { $trayRunEntry.actualValue } else { $null }
         powerShellDirectSessionId = if ($trayRunEntry) { $trayRunEntry.powerShellDirectSessionId } else { $null }
         interactiveExplorerSessionIds = $interactiveExplorerSessionIds
         # interactiveDesktopRequired stays true until a genuine interactive pvcert logon provides
@@ -526,6 +526,8 @@ function Run-GATE5PREP([System.Management.Automation.Runspaces.PSSession]$Sessio
     }
     Save-Json '23-gate5-interactive-prepared.json' $prepared
     Save-Json '05-gate5-fresh-install.json' ([PSCustomObject]@{
+        gate5RunId = $gate5RunId
+        preparedUtc = $prepared.preparedUtc
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
         preInstall = $pre
         elevationAvailable = $install.elevationAvailable
@@ -581,6 +583,24 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
             'GATE5VerifyPreconditionFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
     }
 
+    # --- Bind VERIFY to the CURRENT PREP run id. Stale 23/05/21 artifacts (e.g. an August-15 run)
+    #     must NOT satisfy a current run. The preserved evidence MUST carry a gate5RunId that was
+    #     minted by the PREP flow that left this VM intact. ---
+    $prepGate5RunId = $null
+    if ($prep.PSObject.Properties.Name -contains 'gate5RunId') { $prepGate5RunId = $prep.gate5RunId }
+    if ([string]::IsNullOrWhiteSpace($prepGate5RunId)) {
+        Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            result = 'HARNESS/PRECONDITION FAILURE'
+            failReasons = @('gate5-prep-runid-missing')
+            reason = '23-gate5-interactive-prepared.json has no gate5RunId; it is stale (pre-run-id) PREP evidence. Run -Stage GATE5PREP to produce current-run evidence.'
+            preparedEvidence = $prep
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('GATE5VERIFY precondition failed: preserved PREP evidence has no gate5RunId (stale). Run GATE5PREP first.'),
+            'GATE5VerifyPreconditionFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
+
     # Re-read authoritative live state; if it does not match the prepared evidence, refuse.
     $manifest = Get-GuestJeaInstallManifest -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
     $svc = Get-GuestJeaServiceState -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
@@ -620,6 +640,7 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     if ($reasons.Count) {
         Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
             capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            gate5RunId = $prepGate5RunId
             result = 'HARNESS/PRECONDITION FAILURE'
             failReasons = $reasons.ToArray()
             reason = 'Prepared state is absent or mismatched. Run -Stage GATE5PREP to re-establish a clean prepared VM.'
@@ -643,6 +664,7 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     if (-not $interactiveMatch -or -not $trayPathMatchesManifest) {
         $inc = [PSCustomObject]@{
             capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            gate5RunId = $prepGate5RunId
             result = 'INCOMPLETE (interactive precondition required)'
             interactiveDesktopRequired = $true
             interactiveDesktopTrayVerified = $false
