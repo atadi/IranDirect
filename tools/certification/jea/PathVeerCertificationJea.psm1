@@ -277,11 +277,19 @@ function Invoke-PathVeerCertificationInstall {
 function Invoke-PathVeerCli {
     [CmdletBinding()]
     param(
+        # AUTHORITATIVE SubVerb grammar for the certification JEA CLI bridge.
+        # SINGLE SOURCE OF TRUTH for the PowerShell parameter binder: every subverb the
+        # PathVeer custom-routes CLI actually supports MUST be listed here. The Desktop-side
+        # bridge (PathVeer.Certification.Jea.ps1 $validSub) is a defense-in-depth mirror of this
+        # exact set; Test-PathVeerCertGuestJeaBinder.ps1 enforces that the two NEVER drift.
+        # Do NOT shrink this set without also updating the bridge + re-running the binder test,
+        # or the next real VM run will fail at parameter binding (cf. 2949ed9: 'resolve' rejected
+        # by a stale ValidateSet('add-cidr','list') before reaching product).
+        [ValidateSet('list','add-domain','add-ip','add-cidr','enable','disable','remove','resolve','status','invalidate','invalidate-all')]
+        [string]$SubVerb = 'list',
+
         [ValidateSet('status','repair','doctor','enable','disable','custom-routes')]
         [string]$Verb = 'status',
-
-        [ValidateSet('add-cidr','list')]
-        [string]$SubVerb = 'list',
 
         [ValidatePattern('^[\d./\sA-Za-z0-9-]{0,120}$')]
         [string]$Argument = ''
