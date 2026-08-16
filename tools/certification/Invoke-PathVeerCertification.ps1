@@ -138,7 +138,7 @@ function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSessio
             $nonApi = @($allV4 | Where-Object { $_.IPAddress -notlike '169.254.*' })
             $hasNonApipa = $nonApi.Count -gt 0
             $defRoute = $null
-            try { $defRoute = @(Find-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue) } catch {}
+            try { $defRoute = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue) } catch {}
             $hasDefaultRoute = ($null -ne $defRoute) -and ($defRoute.Count -gt 0)
             $dhcpIfs = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
                 Where-Object { $_.ConnectionState -eq 'Connected' })
@@ -1561,9 +1561,11 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "GATE-9 UPDATE FLOW (network-ready -> HTTPS -> ES256 -> hash -> Authenticode decision)"
     # Network-dependent stage: do NOT start until the restored VM has usable networking.
     # (Checkpoint restore can leave the guest APIPA with no default route / unusable DNS.)
+    $netOk = $false
     $netReady = $null
     try {
         $netReady = Wait-GuestNetworkReady -Session $Session -TargetHost 'releases.pathveer.com' -MaxSeconds 120
+        if ($netReady -and $netReady.ready) { $netOk = $true }
     } catch {
         $netReady = [PSCustomObject]@{
             ready = $false
@@ -1572,8 +1574,47 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
             lastProbe = if ($_.TargetObject) { $_.TargetObject } else { $null }
         }
     }
+
+    if (-not $netOk) {
+        # FAIL-CLOSED: network readiness not established. Capture structured in-VM network
+        # diagnostics for evidence, persist, and raise a clear HARNESS/ENVIRONMENT readiness
+        # failure. Do NOT perform HTTPS / installer download / SHA-256.
+        $netState = $null
+        try {
+            $netState = Invoke-Command -Session $Session -ScriptBlock {
+                $api = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                    Where-Object { $_.IPAddress -like '169.254.*' } | ForEach-Object { $_.IPAddress })
+                $nonApi = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                    Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | ForEach-Object { $_.IPAddress })
+                $route = $null
+                try { $route = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue) } catch {}
+                $dnsOk = $false; $dnsErr = $null
+                try { $a = [System.Net.Dns]::GetHostAddresses('releases.pathveer.com'); if ($a -and $a.Count -gt 0) { $dnsOk = $true } } catch { $dnsErr = $_.Exception.Message }
+                [PSCustomObject]@{
+                    ipv4Api = $api
+                    ipv4NonApi = $nonApi
+                    hasDefaultRoute = ($null -ne $route) -and ($route.Count -gt 0)
+                    dnsResolved = $dnsOk
+                    dnsError = $dnsErr
+                }
+            }
+        } catch {}
+        $envelope = [PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            result = 'HARNESS/ENVIRONMENT READINESS FAILURE'
+            classification = 'HARNESS/ENVIRONMENT READINESS FAILURE'
+            networkReadiness = $netReady
+            networkState = $netState
+            evidence = $null
+        }
+        Save-Json '09-gate9-update-flow.json' $envelope
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new(
+                "GATE-9 aborted: network readiness not established after PV-CERT-HARNESS restore (network-ready -> HTTPS contract violated). Structured diagnostics written to 09-gate9-update-flow.json. Environment/network-readiness defect; not a product defect."),
+            'Gate9NetworkNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $envelope)
+    }
+
     $ev = Invoke-Command -Session $Session -ScriptBlock {
-        param($netReadyReady)
         $feedUrl = 'https://releases.pathveer.com/windows/beta/latest.json'
         # Capture network state for diagnostics even on failure (no secrets).
         $netState = [PSCustomObject]@{
@@ -1583,7 +1624,7 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
                 Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | ForEach-Object { $_.IPAddress })
             hasDefaultRoute = $false
         }
-        try { $r = @(Find-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue); $netState.hasDefaultRoute = ($r.Count -gt 0) } catch {}
+        try { $r = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue); $netState.hasDefaultRoute = ($r.Count -gt 0) } catch {}
         $httpExType = $null; $httpExMsg = $null; $feed = $null
         try {
             $feed = Invoke-RestMethod -Uri $feedUrl -TimeoutSec 30 -ErrorAction Stop
@@ -1653,7 +1694,7 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
             authenticodeDecision = $authenticode
             setupHandoffPastTrustGate = 'BLOCKED/PARTIAL (production Authenticode gate not satisfied)'
         }
-    } -ArgumentList ($netReady -and $netReady.ready)
+    }
     # Merge network-readiness result into the evidence envelope.
     $envelope = [PSCustomObject]@{
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
