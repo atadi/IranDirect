@@ -201,38 +201,48 @@ function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSessio
     }
 }
 
-function Install-PathVeerProtectedCandidate([System.Management.Automation.Runspaces.PSSession]$Session) {
+function Install-PathVeerProtectedCandidate([System.Management.Automation.Runspaces.PSSession]$Session, [string]$ExpectedVersion = '1.0.0-beta.1') {
     # Shared install precondition for install-dependent lifecycle gates (GATE-2/3/4/8/28).
     # Establishes the product lifecycle state each gate truthfully claims to test: installs the CURRENT
     # protected candidate (PathVeer-1.0.0-beta.1) via the EXISTING trusted JEA wrapper, then FAIL-CLOSED
-    # asserts the installation actually exists. No new privileged mechanism; JEA trust boundary and the
-    # protected payload are unchanged (the wrapper always installs the staged protected package).
+    # verifies the installation actually exists AND is the expected protected version. No new privileged
+    # mechanism; JEA trust boundary and the protected payload are unchanged.
     $jea = Get-GuestJeaSession $script:Cred
     $install = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $svcState = $null; $version = $null; $err = $null; $verified = $false
-    if ($install.result -and $install.result.exitCode -eq 0) {
+    $installExit = if ($install.result) { $install.result.exitCode } else { $null }
+    if ($installExit -eq 0) {
         try {
             $probe = Invoke-Command -Session $Session -ScriptBlock {
                 $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
-                $ver = $null
-                try { $ver = (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).productVersion } catch {}
-                [PSCustomObject]@{ serviceState = $svc.Status; version = $ver }
+                $ver = $null; $manifestErr = $null
+                try { $ver = (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw -ErrorAction Stop | ConvertFrom-Json).productVersion } catch { $manifestErr = $_.Exception.Message }
+                [PSCustomObject]@{ serviceState = $svc.Status; version = $ver; manifestError = $manifestErr }
             }
-            $svcState = $probe.serviceState; $version = $probe.version; $verified = $true
+            $svcState = $probe.serviceState; $version = $probe.version; $manifestErr = $probe.manifestError
+            # FAIL-CLOSED: require a present, non-empty version that EXACTLY matches the expected protected version.
+            if ($null -ne $version -and $version -ne '' -and $version -eq $ExpectedVersion) {
+                $verified = $true
+            } else {
+                $err = "protected version mismatch or missing (expected='$ExpectedVersion'; actual='$version'; manifestError='$manifestErr')"
+            }
         } catch { $err = $_.Exception.Message }
+    } else {
+        $err = "install exitCode was not 0 (exitCode=$installExit)"
     }
     $result = [PSCustomObject]@{
-        installExitCode = if ($install.result) { $install.result.exitCode } else { $null }
+        installExitCode = $installExit
         installElevated = if ($install.result) { $install.elevationAvailable } else { $null }
+        expectedVersion = $ExpectedVersion
+        actualVersion = $version
         serviceState = $svcState
-        productVersion = $version
         verified = $verified
         verifyError = $err
     }
     if (-not $verified) {
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new(
-                "Protected-candidate install precondition failed (installExitCode=$($result.installExitCode); serviceState=$svcState; verifyError='$err'). Downstream gate assertions must not run against an absent PathVeer product."),
+                "Protected-candidate install precondition failed (expectedVersion=$ExpectedVersion; actualVersion=$version; installExitCode=$installExit; serviceState=$svcState; verifyError='$err'). Downstream gate assertions must not run against an absent or version-mismatched PathVeer product."),
             'ProtectedCandidateInstallPreconditionFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $result)
     }
     return $result
@@ -1372,9 +1382,14 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
             serviceState = $svc.Status; serviceStartMode = $svc.StartType; startedBy = $svc.StartType; policy = $policy
         }
     }
-    Step "Restarting guest VM only..."
-    Restart-Computer -VMName $VmName -Force -Wait -For PowerShellDirect -Credential $script:Cred -Timeout 300 -ErrorAction Stop
-    Start-Sleep -Seconds 5
+    Step "Restarting guest VM (HARD Hyper-V restart; not a graceful OS Restart-Computer)..."
+    # CERTIFICATION SEMANTIC: this is a hard Hyper-V VM restart (Restart-VM), NOT a graceful
+    # Windows Restart-Computer reboot. The protected candidate was installed above so the guest
+    # carries a real PathVeer product; persistence is verified after the restart + PS Direct readiness.
+    # Restart-Computer has no -VMName and no -For PowerShellDirect, so the valid bounded Hyper-V
+    # primitive is Restart-VM -For Heartbeat -Wait -Timeout 300 (bounded). After the VM is back,
+    # a FRESH PowerShell Direct session is established via the existing bounded retry primitive.
+    Restart-VM -Name $VmName -Force -Wait -For Heartbeat -Timeout 300 -ErrorAction Stop
     $session2 = New-GuestSession $script:Cred
     $after = Invoke-Command -Session $session2 -ScriptBlock {
         $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
@@ -1389,7 +1404,7 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
         }
     }
     Save-Json '03-gate3-reboot-persistence.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; before=$before; after=$after; rebootedVmOnly=$true
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; rebootMechanism='Restart-VM (hard Hyper-V restart; not graceful OS reboot)'; before=$before; after=$after; rebootedVmOnly=$true
     })
     return @{ Session=$session2; after=$after }
 }
@@ -1404,16 +1419,19 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
         @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
     }
     # CLI route + service control verbs run through the trusted JEA CLI wrapper.
+    # Capture each route-state observation IMMEDIATELY after its corresponding transition so the
+    # evidence reflects three distinct lifecycle states (add -> disable -> enable), not a single
+    # final snapshot relabeled as historical.
     $addC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'add-cidr' -Argument $Prefix
+    $customAfterAdd = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
     Start-Sleep -Seconds 2
     $disC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'disable'
+    $afterDisable = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
     Start-Sleep -Seconds 2
     $enC  = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'enable'
+    $afterEnable = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
     Start-Sleep -Seconds 3
     $doc  = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'doctor'
-    $customAfterAdd = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
-    $afterDisable    = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
-    $afterEnable     = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
     # Recovery: controlled service stop/start (privileged), confirm reconcile.
     $stop = Stop-GuestJeaService -Session $Session -JeaSession $jea
     Start-Sleep -Seconds 2
@@ -1442,6 +1460,27 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
         prefixPresentAfterRecovery = ($afterRecovery.Count -gt 0)
         routesAfterCount = $routesAfter.Count
         defaultRouteIntact = ($null -ne ($routesAfter | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' }))
+    }
+    # FAIL-CLOSED: assert the gate's unambiguous lifecycle invariants. Save evidence first so a REAL
+    # PathVeer product failure is diagnosable, then throw (do not report a misleading PASS).
+    $gate2Fail = @()
+    if ($addC.result.exitCode -ne 0) { $gate2Fail += "add-cidr exitCode=$($addC.result.exitCode)" }
+    if ($customAfterAdd.Count -le 0) { $gate2Fail += 'managed prefix absent after add-cidr (expected present)' }
+    if ($disC.result.exitCode -ne 0) { $gate2Fail += "disable exitCode=$($disC.result.exitCode)" }
+    if ($afterDisable.Count -gt 0) { $gate2Fail += 'managed prefix still present after disable (expected absent)' }
+    if ($enC.result.exitCode -ne 0) { $gate2Fail += "enable exitCode=$($enC.result.exitCode)" }
+    if ($afterEnable.Count -le 0) { $gate2Fail += 'managed prefix absent after enable (expected present)' }
+    if ($stoppedState -ne 'Stopped') { $gate2Fail += "service not Stopped after stop (was: $stoppedState)" }
+    if ($recoveredState -ne 'Running') { $gate2Fail += "service not Running after start (was: $recoveredState)" }
+    if (-not $ev.defaultRouteIntact) { $gate2Fail += 'default route not intact after route mutations' }
+    if ($gate2Fail.Count -gt 0) {
+        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
+            capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); managedPrefix=$Prefix
+            elevationAvailable = ($jea -ne $null); evidence = $ev; failReasons = $gate2Fail
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("GATE-2 route/CLI/service invariants not satisfied: $($gate2Fail -join '; ')."),
+            'Gate2InvariantsFailed', [System.Management.Automation.ErrorCategory]::InvalidResult, $ev)
     }
     Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); managedPrefix=$Prefix
@@ -1477,13 +1516,40 @@ function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
             uninstallElevated = $u.elevationAvailable
         }
     } -ArgumentList $u
-    # Clean reinstall (elevated).
+    # FAIL-CLOSED: verify the purge actually succeeded BEFORE reinstalling. A failed purge must not be
+    # masked by a subsequent reinstall — persist structured evidence and throw.
+    $purgeFail = @()
+    if ($u.result.exitCode -ne 0) { $purgeFail += "purge-exitCode=$($u.result.exitCode) (expected 0)" }
+    if ($afterUninstall.serviceExists) { $purgeFail += 'PathVeer service still present after purge' }
+    if ($afterUninstall.programFiles) { $purgeFail += 'C:\Program Files\PathVeer still present after purge' }
+    if ($purgeFail.Count -gt 0) {
+        $pfEnv = [PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            preconditionInstall = $inst; installVerified = $afterInstall
+            uninstall = $afterUninstall; purgeFailReasons = $purgeFail
+            note = 'PURGE FAILED: did NOT reinstall over a failed purge state.'
+        }
+        Save-Json '04-gate4-purge-reinstall.json' $pfEnv
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("GATE-4 purge precondition failed: $($purgeFail -join '; '). Reinstall was skipped."),
+            'Gate4PurgeFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $pfEnv)
+    }
+    # Clean reinstall (elevated) — only reached after a verified successful purge.
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $svc = Invoke-Command -Session $Session -ScriptBlock {
         param($r)
         $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
         [PSCustomObject]@{ reinstallExitCode = $r.result.exitCode; reinstalledServiceState = $svc.Status; reinstallElevated = $r.elevationAvailable }
     } -ArgumentList $r
+    # Require reinstall success (do not let a leftover service make a failed reinstall look valid).
+    if ($r.result.exitCode -ne 0 -or $null -eq (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue)) {
+        Save-Json '04-gate4-purge-reinstall.json' ([PSCustomObject]@{
+            capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; uninstall = $afterUninstall; reinstall = $svc; reinstallFailed = $true
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("GATE-4 reinstall after purge failed (reinstallExitCode=$($r.result.exitCode))."),
+            'Gate4ReinstallFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $null)
+    }
     Save-Json '04-gate4-purge-reinstall.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; uninstall = $afterUninstall; reinstall = $svc
     })
@@ -1524,7 +1590,27 @@ function Run-GATE8([System.Management.Automation.Runspaces.PSSession]$Session) {
             uninstallElevated = $u.elevationAvailable
         }
     } -ArgumentList $u
-    # Reinstall and prove preserved state recognized (elevated).
+    # FAIL-CLOSED: verify the normal uninstall + state preservation succeeded BEFORE reinstalling.
+    # Do not destroy product-failure evidence by immediately reinstalling over a failed uninstall state.
+    $uninstFail = @()
+    if ($u.result.exitCode -ne 0) { $uninstFail += "uninstall-exitCode=$($u.result.exitCode) (expected 0)" }
+    if ($afterUninstall.serviceExists) { $uninstFail += 'PathVeer service still present after uninstall' }
+    if ($afterUninstall.programFiles) { $uninstFail += 'C:\Program Files\PathVeer still present after uninstall' }
+    if (-not $afterUninstall.programData) { $uninstFail += 'ProgramData\PathVeer missing (expected preserved)' }
+    if (-not $afterUninstall.sentinelPreserved) { $uninstFail += 'cert-sentinel.txt not preserved' }
+    if ($uninstFail.Count -gt 0) {
+        $ufEnv = [PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            preconditionInstall = $inst; installVerified = $afterInstall
+            uninstall = $afterUninstall; uninstallFailReasons = $uninstFail
+            note = 'NORMAL UNINSTALL FAILED: did NOT reinstall over a failed uninstall state.'
+        }
+        Save-Json '08-gate8-uninstall-reinstall.json' $ufEnv
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("GATE-8 normal uninstall/preservation precondition failed: $($uninstFail -join '; '). Reinstall was skipped."),
+            'Gate8UninstallFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $ufEnv)
+    }
+    # Reinstall and prove preserved state recognized (elevated) — only after verified successful uninstall.
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $reinstallSentinelPreserved = Invoke-Command -Session $Session -ScriptBlock {
         param($r)
@@ -1535,6 +1621,14 @@ function Run-GATE8([System.Management.Automation.Runspaces.PSSession]$Session) {
             preservedStateRecognized = (Test-Path (Join-Path $stateDir 'cert-sentinel.txt'))
         }
     } -ArgumentList $r
+    if ($r.result.exitCode -ne 0 -or -not $reinstallSentinelPreserved.preservedStateRecognized) {
+        Save-Json '08-gate8-uninstall-reinstall.json' ([PSCustomObject]@{
+            capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; uninstall = $afterUninstall; reinstall = $reinstallSentinelPreserved; reinstallFailed = $true
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("GATE-8 reinstall after uninstall failed (reinstallExitCode=$($r.result.exitCode); sentinelPreserved=$($reinstallSentinelPreserved.preservedStateRecognized))."),
+            'Gate8ReinstallFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $null)
+    }
     Save-Json '08-gate8-uninstall-reinstall.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; uninstall = $afterUninstall; reinstall = $reinstallSentinelPreserved
     })
@@ -1612,9 +1706,35 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
         $rep = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'repair'
         $cliRepairExit = $rep.result.exitCode
     }
+    # FAIL-CLOSED: require Repair success + same-version verification before claiming repaired state.
+    $repairFail = @()
+    if ($r.result.exitCode -ne 0) { $repairFail += "repair-exitCode=$($r.result.exitCode) (expected 0)" }
+    if ($null -eq $svcAfter) { $repairFail += 'PathVeer service absent after repair' }
+    if ($ver -ne $ExpectedVersion) { $repairFail += "repaired version mismatch (expected='$ExpectedVersion'; actual='$ver')" }
+    if ($repairFail.Count -gt 0) {
+        $rfEnv = [PSCustomObject]@{
+            capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
+            preconditionInstall = $inst
+            repairExitCode = $r.result.exitCode
+            repairElevated = $r.elevationAvailable
+            repairedVersion = $ver
+            serviceStateAfterRepair = $svcAfter
+            cliRepairExitCode = $cliRepairExit
+            repairFailReasons = $repairFail
+            note = 'REPAIR FAILED: did NOT claim repaired state.'
+        }
+        Save-Json '28-gate28-repair.json' $rfEnv
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("GATE-28 repair precondition failed: $($repairFail -join '; ')."),
+            'Gate28RepairFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $rfEnv)
+    }
     Save-Json '28-gate28-repair.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
         preconditionInstall = $inst
+        # Explicit repair-operation evidence:
+        repairExitCode = $r.result.exitCode
+        repairElevated = $r.elevationAvailable
+        # Legacy aliases retained for consumers expecting install* naming (populated from the Repair op):
         installExitCode = $r.result.exitCode
         installElevated = $r.elevationAvailable
         repairedVersion = $ver
