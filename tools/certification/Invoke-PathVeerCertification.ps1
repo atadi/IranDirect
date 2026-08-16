@@ -119,6 +119,60 @@ function New-GuestSession([System.Management.Automation.PSCredential]$Cred) {
     }
 }
 
+function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSession]$Session, [string]$TargetHost = 'releases.pathveer.com', [int]$MaxSeconds = 120) {
+    # Bounded network-readiness probe for network-dependent certification stages (GATE-9).
+    # After a PV-CERT-HARNESS checkpoint restore the guest may come back APIPA (169.254.x.x) with no
+    # default route / unusable DNS, because DHCP runtime state is NOT baked into the checkpoint.
+    # This helper waits (bounded) for usable networking, performing a bounded DHCP renewal on the
+    # VM's DHCP-enabled adapter(s) when needed. It operates ONLY through the established PowerShell
+    # Direct session and existing harness primitives. No product/JEA/checkpoint changes; no static IP;
+    # no arbitrary long sleep; no infinite loop.
+    $deadline = (Get-Date).AddSeconds($MaxSeconds)
+    $iter = 0
+    while ($true) {
+        $iter++
+        $probe = Invoke-Command -Session $Session -ScriptBlock {
+            param($target)
+            $allV4 = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' })
+            $apis = @($allV4 | Where-Object { $_.IPAddress -like '169.254.*' })
+            $nonApi = @($allV4 | Where-Object { $_.IPAddress -notlike '169.254.*' })
+            $hasNonApipa = $nonApi.Count -gt 0
+            $defRoute = $null
+            try { $defRoute = @(Find-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue) } catch {}
+            $hasDefaultRoute = ($null -ne $defRoute) -and ($defRoute.Count -gt 0)
+            $dhcpIfs = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
+                Where-Object { $_.ConnectionState -eq 'Connected' })
+            $dnsOk = $false; $dnsErr = $null
+            try { $a = [System.Net.Dns]::GetHostAddresses($target); if ($a -and $a.Count -gt 0) { $dnsOk = $true } }
+            catch { $dnsErr = $_.Exception.Message }
+            [PSCustomObject]@{
+                hasNonApipa = $hasNonApipa
+                nonApipaAddresses = @($nonApi | ForEach-Object { $_.IPAddress })
+                apipaAddresses = @($apis | ForEach-Object { $_.IPAddress })
+                hasDefaultRoute = $hasDefaultRoute
+                dhcpInterfaceIndexes = @($dhcpIfs | ForEach-Object { $_.ifIndex })
+                dnsResolved = $dnsOk
+                dnsError = $dnsErr
+            }
+        } -ArgumentList $TargetHost
+        if ($probe.hasNonApipa -and $probe.hasDefaultRoute -and $probe.dnsResolved) {
+            return [PSCustomObject]@{ ready = $true; iterations = $iter; lastProbe = $probe }
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw [System.Management.Automation.ErrorRecord]::new(
+                [System.InvalidOperationException]::new(
+                    "Network readiness not established within $MaxSeconds s after checkpoint restore (APIPA='$($probe.apipaAddresses -join ',')'; defaultRoute=$($probe.hasDefaultRoute); dnsResolved=$($probe.dnsResolved); dnsError='$($probe.dnsError)'). Environment/network-readiness defect; not a product defect."),
+                'GuestNetworkNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $probe)
+        }
+        # Bounded DHCP recovery: renew the VM's DHCP-enabled adapter(s). `ipconfig /renew` is wrapped in
+        # Start-Process -Wait -TimeoutSeconds so it can NEVER hang indefinitely (no DHCP server answer).
+        Invoke-Command -Session $Session -ScriptBlock {
+            try { Start-Process -FilePath 'ipconfig.exe' -ArgumentList '/renew' -WindowStyle Hidden -Wait -TimeoutSeconds 25 -ErrorAction SilentlyContinue } catch {}
+        } | Out-Null
+        Start-Sleep -Seconds 3
+    }
+}
+
 function Copy-ToGuest([System.Management.Automation.Runspaces.PSSession]$Session, [string[]]$Paths, [string]$Dest) {
     Step "Copying $($Paths.Count) item(s) into guest $Dest"
     Invoke-Command -Session $Session -ScriptBlock { param($d) if(-not(Test-Path $d)){ New-Item -ItemType Directory -Force -Path $d | Out-Null } } -ArgumentList $Dest
@@ -1476,21 +1530,52 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
 }
 
 function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
-    Write-Stage "GATE-9 UPDATE FLOW (HTTPS -> ES256 -> hash -> Authenticode decision)"
+    Write-Stage "GATE-9 UPDATE FLOW (network-ready -> HTTPS -> ES256 -> hash -> Authenticode decision)"
+    # Network-dependent stage: do NOT start until the restored VM has usable networking.
+    # (Checkpoint restore can leave the guest APIPA with no default route / unusable DNS.)
+    $netReady = $null
+    try {
+        $netReady = Wait-GuestNetworkReady -Session $Session -TargetHost 'releases.pathveer.com' -MaxSeconds 120
+    } catch {
+        $netReady = [PSCustomObject]@{
+            ready = $false
+            errorType = $_.Exception.GetType().Name
+            errorMessage = $_.Exception.Message
+            lastProbe = if ($_.TargetObject) { $_.TargetObject } else { $null }
+        }
+    }
     $ev = Invoke-Command -Session $Session -ScriptBlock {
+        param($netReadyReady)
         $feedUrl = 'https://releases.pathveer.com/windows/beta/latest.json'
+        # Capture network state for diagnostics even on failure (no secrets).
+        $netState = [PSCustomObject]@{
+            ipv4Api = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                Where-Object { $_.IPAddress -like '169.254.*' } | ForEach-Object { $_.IPAddress })
+            ipv4NonApi = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | ForEach-Object { $_.IPAddress })
+            hasDefaultRoute = $false
+        }
+        try { $r = @(Find-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue); $netState.hasDefaultRoute = ($r.Count -gt 0) } catch {}
+        $httpExType = $null; $httpExMsg = $null; $feed = $null
         try {
             $feed = Invoke-RestMethod -Uri $feedUrl -TimeoutSec 30 -ErrorAction Stop
             $httpsOk = $true
+        } catch {
+            $httpsOk = $false
+            $httpExType = $_.Exception.GetType().Name
+            $httpExMsg = $_.Exception.Message
+        }
+        $feedVersion = $null; $installerUrl = $null; $expectedSha = $null; $sigAlg = $null; $sigKeyId = $null
+        if ($feed) {
             $feedVersion = $feed.version
             $installerUrl = $feed.installer.url
             $expectedSha = $feed.installer.sha256
             $sigAlg = $feed.signature.algorithm
             $sigKeyId = $feed.signature.keyId
-        } catch { $httpsOk = $false; $feed = $null; $feedVersion=$null; $installerUrl=$null; $expectedSha=$null; $sigAlg=$null; $sigKeyId=$null }
+        }
 
         # ES256 verification of the manifest against PRODUCTION trust root.
-        $es256 = [PSCustomObject]@{ attempted=$true; prodKeyAccepted=$null; note=$null }
+        $es256 = [PSCustomObject]@{ attempted = $true; prodKeyAccepted = $null; note = $null }
         if ($feed) {
             # Production trust accepts ONLY pv-meta-prod-2026-01. The published feed
             # is signed by pv-meta-staging-2026 -> must be rejected by prod trust.
@@ -1503,7 +1588,7 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
         }
 
         # Download installer + verify SHA-256 (transport/hash portion).
-        $hashOk = $null; $downloadExit = $null; $actualSha = $null
+        $hashOk = $null; $downloadExit = $null; $actualSha = $null; $dlExType = $null; $dlExMsg = $null
         if ($installerUrl) {
             try {
                 $tmp = 'C:\pv-cert\PathVeerSetup-downloaded.exe'
@@ -1511,7 +1596,11 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
                 $downloadExit = 0
                 $actualSha = (Get-FileHash -Path $tmp -Algorithm SHA256).Hash.ToLowerInvariant()
                 $hashOk = ($actualSha -eq $expectedSha)
-            } catch { $downloadExit = 1; $hashOk = $false }
+            } catch {
+                $downloadExit = 1; $hashOk = $false
+                $dlExType = $_.Exception.GetType().Name
+                $dlExMsg = $_.Exception.Message
+            }
         }
 
         # Authenticode: production cert unavailable -> unsigned PE.
@@ -1519,21 +1608,32 @@ function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
 
         [PSCustomObject]@{
             httpsFetchOk = $httpsOk
+            httpExceptionType = $httpExType
+            httpExceptionMessage = $httpExMsg
+            networkState = $netState
             feedVersion = $feedVersion
             installerUrl = $installerUrl
             manifestSignatureAlgorithm = $sigAlg
             manifestKeyId = $sigKeyId
             es256ProductionVerification = $es256
             installerDownloadExit = $downloadExit
+            downloadExceptionType = $dlExType
+            downloadExceptionMessage = $dlExMsg
             sha256Expected = $expectedSha
             sha256Actual = $actualSha
             sha256Match = $hashOk
             authenticodeDecision = $authenticode
             setupHandoffPastTrustGate = 'BLOCKED/PARTIAL (production Authenticode gate not satisfied)'
         }
+    } -ArgumentList ($netReady -and $netReady.ready)
+    # Merge network-readiness result into the evidence envelope.
+    $envelope = [PSCustomObject]@{
+        capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        networkReadiness = $netReady
+        evidence = $ev
     }
-    Save-Json '09-gate9-update-flow.json' ([PSCustomObject]@{ capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); evidence=$ev })
-    return $ev
+    Save-Json '09-gate9-update-flow.json' $envelope
+    return $envelope
 }
 
 # -------- main --------
