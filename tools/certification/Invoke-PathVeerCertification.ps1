@@ -629,18 +629,23 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
             Select-Object -ExpandProperty SessionId -Unique | Where-Object { $_ -ne $null })
         $trayProc = @(Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue)
         # Read-only owner mapping for interactive-session attribution (no token manipulation).
+        # Use the shared Get-ProcessOwnerInfo helper (CIM GetOwner method, not the unsupported
+        # $cimInstance.GetOwner() that silently returned null in a prior real run).
         $explorerOwnerBySession = @{}
         foreach ($ep in (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
-            $o = $null
-            try { $o = $ep.GetOwner() } catch { $o = $null }
-            if ($o -and $o.Domain -and $o.User) {
-                $explorerOwnerBySession[([int]$ep.SessionId)] = ($o.Domain + '\' + $o.User)
+            $oi = Get-ProcessOwnerInfo ([int]$ep.Handle)
+            if ($oi.success) {
+                $explorerOwnerBySession[[int]$ep.SessionId] = [PSCustomObject]@{
+                    processId = $oi.processId; sessionId = $oi.sessionId
+                    domain = $oi.domain; user = $oi.user; identity = $oi.identity
+                }
             }
         }
         $trayOwner = $null
+        $trayOwnerInfo = $null
         if ($trayProc.Count) {
-            $tp = Get-CimInstance Win32_Process -Filter "Handle='$($trayProc[0].Id)'" -ErrorAction SilentlyContinue
-            if ($tp) { try { $to = $tp.GetOwner(); if ($to -and $to.Domain -and $to.User) { $trayOwner = ($to.Domain + '\' + $to.User) } } catch {} }
+            $trayOwnerInfo = Get-ProcessOwnerInfo ([int]$trayProc[0].Id)
+            if ($trayOwnerInfo.success) { $trayOwner = $trayOwnerInfo.identity }
         }
         [PSCustomObject]@{
             serviceExists = $svcExists
@@ -696,14 +701,31 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     #     as interactive evidence. The Tray must be running in a PV-CERT\pvcert Explorer session, AND that
     #     Explorer must belong to PV-CERT\pvcert (another interactive account may own a different Explorer
     #     session, which must NOT satisfy the proof). The Tray itself must be owned by PV-CERT\pvcert if
-    #     ownership is observable. All owner attribution is read-only (GetOwner on Win32_Process). ---
+    #     ownership is observable. Owner attribution uses the shared Get-ProcessOwnerInfo CIM-method helper.
+    #     If OWNER RESOLUTION ITSELF fails, that is a HARNESS/PROBE failure (not a user-action failure) and
+    #     must NOT be reported as 'interactive precondition required'. ---
     $interactiveExplorerSessionIds = $live.interactiveExplorerSessionIds
     $traySessionIds = $live.traySessionIds
     $expectedOwner = 'PV-CERT\pvcert'
     # pvcert-owned interactive Explorer sessions (owner attribution, not just SessionId).
     $pvcertExplorerSessionIds = @($interactiveExplorerSessionIds | Where-Object {
-        $live.explorerOwnerBySession.ContainsKey($_) -and $live.explorerOwnerBySession[$_] -eq $expectedOwner
+        $live.explorerOwnerBySession.ContainsKey($_) -and $live.explorerOwnerBySession[$_].identity -eq $expectedOwner
     })
+    # Probe-failure: owner resolution could not conclusively attribute the interactive processes.
+    # This is distinct from a genuine missing logon; diagnose it as a HARNESS/PROBE failure.
+    $ownerProbeFailed = $false
+    $ownerProbeDiag = @()
+    foreach ($sid in $interactiveExplorerSessionIds) {
+        if (-not $live.explorerOwnerBySession.ContainsKey($sid)) {
+            $ownerProbeFailed = $true
+            $ownerProbeDiag += "explorer owner unresolved for SessionId=$sid"
+        }
+    }
+    if ($traySessionIds.Count -gt 0 -and [string]::IsNullOrWhiteSpace($live.trayOwnerIdentity)) {
+        $ownerProbeFailed = $true
+        $ownerProbeDiag += "tray owner unresolved (ProcessId=$($live.traySessionIds -join ','))"
+    }
+
     # Tray runs in a pvcert-owned Explorer session.
     $trayInPvcertExplorer = ($traySessionIds.Count -gt 0 -and
         @($traySessionIds | Where-Object { $_ -in $pvcertExplorerSessionIds }).Count -gt 0)
@@ -712,6 +734,31 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     $interactiveMatch = ($traySessionIds.Count -gt 0 -and $trayInPvcertExplorer -and $trayOwnedByPvcert)
     $trayPathMatchesManifest = ($live.trayExePathLive -and $expectedTrayPath -and
         $live.trayExePathLive -eq $expectedTrayPath)
+
+    # Owner-resolution probe failure is a HARNESS/PROBE failure, NOT 'interactive precondition required'.
+    if ($ownerProbeFailed) {
+        $probe = [PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            gate5RunId = $prepGate5RunId
+            result = 'HARNESS/PROBE FAILURE'
+            classification = 'HARNESS/PROBE FAILURE'
+            failReasons = @('interactive-process-owner-resolution-failed')
+            reason = 'Interactive process owner resolution failed; this is a harness/probe defect, not evidence the operator failed to log in. Diagnostics: ' + ($ownerProbeDiag -join '; ')
+            powerShellDirectSessionId = $live.powerShellDirectSessionId
+            interactiveExplorerSessionIds = $interactiveExplorerSessionIds
+            pvcertExplorerSessionIds = $pvcertExplorerSessionIds
+            explorerOwnerBySession = $live.explorerOwnerBySession
+            traySessionIds = $traySessionIds
+            trayOwnerIdentity = $live.trayOwnerIdentity
+            trayExePathLive = $live.trayExePathLive
+            expectedTrayPath = $expectedTrayPath
+        }
+        Save-Json '22-servicetray-contract.json' $probe
+        # Preserve the VM for diagnostics; do NOT restore. Do NOT re-classify as user-action INCOMPLETE.
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('GATE5VERIFY HARNESS/PROBE FAILURE: interactive process owner resolution failed (' + ($ownerProbeDiag -join '; ') + ')'),
+            'GATE5VerifyOwnerProbeFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
 
     if (-not $interactiveMatch -or -not $trayPathMatchesManifest) {
         $inc = [PSCustomObject]@{
@@ -785,6 +832,43 @@ function Get-EnumString($obj) {
         }
     } catch {}
     return [string]$obj
+}
+
+function Get-ProcessOwnerInfo([int]$ProcessId) {
+    # Read-only process-owner resolution via the Win32_Process.GetOwner CIM METHOD.
+    # NOTE: Win32_Process.GetOwner is a CIM *method*, not a property. It MUST be invoked through
+    # Invoke-CimMethod on the CimInstance (Get-CimInstance). A CimInstance has NO .GetOwner() method;
+    # calling $cimInstance.GetOwner() throws MethodInvocationException, which must NOT be swallowed
+    # into a null owner (that produced a false INCOMPLETE in a prior real run). All failures are
+    # returned as structured diagnostics. No elevation, no JEA widening, no token APIs.
+    $out = [PSCustomObject]@{
+        success = $false; processId = $ProcessId; sessionId = $null
+        domain = $null; user = $null; identity = $null
+        errorType = $null; errorMessage = $null
+    }
+    try {
+        $proc = Get-CimInstance -ClassName Win32_Process -Filter "Handle='$ProcessId'" -ErrorAction Stop
+        if ($null -eq $proc) {
+            $out.errorType = 'ProcessNotFound'
+            $out.errorMessage = "no Win32_Process with Handle=$ProcessId"
+            return $out
+        }
+        $out.sessionId = $proc.SessionId
+        $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction Stop
+        if ($owner -and $owner.ReturnValue -eq 0 -and $owner.Domain -and $owner.User) {
+            $out.domain = $owner.Domain
+            $out.user = $owner.User
+            $out.identity = ($owner.Domain + '\' + $owner.User)
+            $out.success = $true
+        } else {
+            $out.errorType = 'GetOwnerReturned'
+            $out.errorMessage = "GetOwner ReturnValue=$($owner.ReturnValue) Domain='$($owner.Domain)' User='$($owner.User)'"
+        }
+    } catch {
+        $out.errorType = 'OwnerResolutionError'
+        $out.errorMessage = $_.Exception.Message
+    }
+    return $out
 }
 
 function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session, $PreparedEvidence = $null) {
