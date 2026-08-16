@@ -20,6 +20,22 @@
     #        (PV-CERT-HARNESS) first (except where noted), so a half-run VM never poisons
     #        later stages.
     #      * -SkipRestore skips the checkpoint-restore step for a single re-run.
+    #      * GATE-5 is split into two explicit, resumable stages:
+    #          - GATE5PREP:  restores PV-CERT-HARNESS, installs, registers the pvcert
+    #                       per-user Tray Run entry, validates Service/CLI/Run evidence,
+    #                       and INTENTIONALLY LEAVES the prepared VM intact (no restore).
+    #                       It prints operator instructions to log in interactively.
+    #          - GATE5VERIFY: must ONLY be run on a PREP-preserved VM. It refuses to restore
+    #                       at the start, validates the prepared state, requires genuine
+    #                       interactive-Tray evidence (Tray SessionId == pvcert Explorer
+    #                       SessionId; PowerShell Direct SessionId is never accepted as
+    #                       interactive evidence), then exercises the authority contract.
+    #                       On PASS it restores the baseline; on PRODUCT FAIL it preserves the
+    #                       failed VM for diagnostics.
+    #          - GATE5 (legacy alias): an orchestrator that runs GATE5PREP then stops with a
+    #                       clear message directing the operator to GATE5VERIFY. It never
+    #                       silently claims a full GATE-5 PASS without genuine interactive
+    #                       verification.
 
     USAGE (from a NATIVE Windows PowerShell/Terminal window so the credential
     dialog can appear):
@@ -32,7 +48,7 @@ param(
     # approved JEA instrumentation, NO PathVeer product). Restoring PV-CLEAN-WINDOWS would
     # wipe the JEA endpoint and break every privileged gate. Missing -> harness fails loudly.
     [string]$CertificationSnapshot = 'PV-CERT-HARNESS',
-    [ValidateSet('All','GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')]
+    [ValidateSet('All','GATE5','GATE5PREP','GATE5VERIFY','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')]
     [string]$Stage = 'All',
     [switch]$SkipRestore,
 
@@ -254,8 +270,20 @@ function Register-NormalUserTrayRunEntry([System.Management.Automation.Runspaces
     return $reg
 }
 
-function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
-    Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
+function Run-GATE5PREP([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
+    # GATE-5 PREPARATION stage (explicit two-stage design).
+    #
+    # Restores PV-CERT-HARNESS first (caller responsibility for restore-on-entry is handled in
+    # main), installs the product via the trusted JEA wrapper, reads the authoritative install
+    # manifest, registers the PV-CERT\pvcert per-user Tray Run entry through the EXISTING normal
+    # PowerShell Direct session, validates Service Running/Automatic + normal-user CLI + Run-entry
+    # readback/SID, and captures current interactive Explorer/Tray observations.
+    #
+    # CRITICAL RESTORE POLICY: on success this stage returns WITHOUT restoring the certification
+    # baseline. The prepared installed VM is left INTACT so the operator can perform a genuine
+    # interactive pvcert logon and then run GATE5VERIFY. PREP is NOT a product failure; it is a
+    # HARNESS/PRECONDITION boundary. The caller (main) must NOT restore after PREP.
+    Write-Stage "GATE-5 PREP (install + pvcert Tray Run entry; leaves VM prepared)"
     # SECURITY (Option A): the operator bootstrap is the ONLY trust transition. PV-CERT-HARNESS
     # already contains the protected, operator-approved installer + payload. The harness performs
     # NO runtime copy of executable bytes into the guest (the old Copy-ToGuest into the untrusted
@@ -400,11 +428,38 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         }
     } -ArgumentList $cliExe, $manifest.result
 
+    # --- Prepare-state evidence: the operator MUST run GATE5VERIFY on this exact prepared VM. ---
+    $interactiveExplorerSessionIds = @(Invoke-Command -Session $Session -ScriptBlock {
+        @(Get-Process -Name 'explorer' -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty SessionId -Unique | Where-Object { $_ -ne $null })
+    })
+    $prepared = [PSCustomObject]@{
+        capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        prepared = $true
+        candidateVersion = if ($installResult) { $installResult.productVersion } else { $null }
+        installManifest = $manifest.result
+        normalUserIdentity = if ($trayRunEntry) { $trayRunEntry.normalUserIdentity } else { $null }
+        normalUserSid = if ($trayRunEntry) { $trayRunEntry.normalUserSid } else { $null }
+        trayRunEntryRegistered = if ($trayRunEntry) { $trayRunEntry.trayRunEntryRegistered } else { $false }
+        trayRunEntryValue = if ($trayRunEntry) { $trayRunEntry.trayRunEntryValue } else { $null }
+        powerShellDirectSessionId = if ($trayRunEntry) { $trayRunEntry.powerShellDirectSessionId } else { $null }
+        interactiveExplorerSessionIds = $interactiveExplorerSessionIds
+        # interactiveDesktopRequired stays true until a genuine interactive pvcert logon provides
+        # a Tray whose SessionId matches an interactive Explorer session id (GATE5VERIFY gate).
+        interactiveDesktopRequired = $true
+        # Service/CLI/health observations captured during PREP (not the authority contract).
+        serviceState = $ev.serviceState
+        serviceStartMode = $ev.serviceStartMode
+        cliExists = $ev.cliExists
+        cliExitCode = $ev.cliStatus
+        ipcPipes = $ev.ipcPipes
+    }
+    Save-Json '23-gate5-interactive-prepared.json' $prepared
     Save-Json '05-gate5-fresh-install.json' ([PSCustomObject]@{
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
         preInstall = $pre
         elevationAvailable = $install.elevationAvailable
-        installExitCode = $installExit
+        installExitCode = $install.completed
         installCompleted = $install.completed
         installResult = $installResult
         installProgress = $installProgress
@@ -414,10 +469,152 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         # Fires only on pvcert's next genuine interactive logon; not an immediate launch.
         trayRunEntry = $trayRunEntry
     })
-    return $ev
+    Write-Host "`n  GATE-5 PREPARED." -ForegroundColor Green
+    Write-Host "  Log into PathVeer-Certification normally as PV-CERT\pvcert." -ForegroundColor Yellow
+    Write-Host "  After Explorer AND PathVeer Tray are running, execute: -Stage GATE5VERIFY" -ForegroundColor Yellow
+    Write-Host "  Do NOT restore/checkpoint the VM in the meantime." -ForegroundColor Yellow
+    # Leave the prepared VM intact (no restore). The caller (main) must not restore after PREP.
+    return $prepared
 }
 
-function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session) {
+function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Session) {
+    # GATE-5 VERIFICATION stage (explicit two-stage design).
+    #
+    # MUST operate only on a VM preserved by a prior GATE5PREP. It does NOT restore PV-CERT-HARNESS
+    # at the start (restoring would wipe the prepared product + pvcert Run entry). It validates a
+    # strong prepared-state precondition, requires genuine interactive-desktop evidence, then runs
+    # the existing Service/Tray authority contract.
+    #
+    # RESTORE POLICY:
+    #   * success        -> restore baseline (PV-CERT-HARNESS) and report GATE-5 PASS / CLOSED.
+    #   * product FAIL   -> PRESERVE the failed VM for diagnostics; do not auto-restore.
+    #   * precondition   -> HARNESS/PRECONDITION FAILURE; instruct operator to run GATE5PREP; do not
+    #                       classify as a product defect.
+    Write-Stage "GATE-5 VERIFY (authority contract on PREP-preserved VM)"
+
+    # --- Prepared-state precondition (no restore). Validate before any contract test. ---
+    $prepEvidencePath = Join-Path $EvidenceDir '23-gate5-interactive-prepared.json'
+    $prep = $null
+    if (Test-Path $prepEvidencePath) {
+        try { $prep = Get-Content $prepEvidencePath -Raw | ConvertFrom-Json } catch { $prep = $null }
+    }
+    $preparedOk = ($null -ne $prep -and $prep.prepared -eq $true)
+    if (-not $preparedOk) {
+        Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            result = 'HARNESS/PRECONDITION FAILURE'
+            failReasons = @('gate5-prep-state-missing')
+            reason = 'GATE5VERIFY ran without a preserved GATE5PREP state. Run -Stage GATE5PREP first (it installs the product and registers the pvcert Tray Run entry, then leaves the VM intact).'
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('GATE5VERIFY precondition failed: no preserved GATE5PREP state. Run GATE5PREP first.'),
+            'GATE5VerifyPreconditionFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
+
+    # Re-read authoritative live state; if it does not match the prepared evidence, refuse.
+    $manifest = Get-GuestJeaInstallManifest -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
+    $svc = Get-GuestJeaServiceState -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
+    $live = Invoke-Command -Session $Session -ScriptBlock {
+        param($trayValueName, $runKey)
+        $svcExists = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
+        $svc = if ($svcExists) { Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue } else { $null }
+        $runEntry = $null
+        try { $runEntry = (Get-ItemProperty -Path $runKey -Name $trayValueName -ErrorAction SilentlyContinue).$trayValueName } catch { $runEntry = $null }
+        $explorer = @(Get-Process -Name 'explorer' -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty SessionId -Unique | Where-Object { $_ -ne $null })
+        $trayProc = @(Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue)
+        [PSCustomObject]@{
+            serviceExists = $svcExists
+            serviceState = if ($svc) { $svc.Status } else { 'absent' }
+            serviceStartMode = if ($svc) { $svc.StartType } else { $null }
+            runEntryValue = $runEntry
+            interactiveExplorerSessionIds = $explorer
+            trayExePathLive = if ($trayProc.Count) { $trayProc[0].Path } else { $null }
+            traySessionIds = if ($trayProc.Count) { @($trayProc | Select-Object -ExpandProperty SessionId -Unique) } else { @() }
+            powerShellDirectSessionId = (Get-Process -Id $pid).SessionId
+            normalUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            normalUserIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        }
+    } -ArgumentList 'PathVeer Tray', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+    $expectedTrayPath = $prep.installManifest.trayExecutablePath
+    $reasons = [System.Collections.Generic.List[string]]::new()
+    if (-not $live.serviceExists) { $reasons.Add('prepared-state-mismatch: PathVeer service absent') }
+    if ($live.serviceState -ne 'Running') { $reasons.Add("prepared-state-mismatch: service not Running (was: $($live.serviceState))") }
+    if ($live.serviceStartMode -ne 'Automatic') { $reasons.Add("prepared-state-mismatch: service not Automatic (was: $($live.serviceStartMode))") }
+    if ($null -eq $manifest -or $null -eq $manifest.installRoot) { $reasons.Add('prepared-state-mismatch: install manifest unavailable') }
+    if ($prep.candidateVersion -and $manifest -and $manifest.productVersion -and $manifest.productVersion -ne $prep.candidateVersion) {
+        $reasons.Add("prepared-state-mismatch: installed version $($manifest.productVersion) != prepared $($prep.candidateVersion)")
+    }
+    if ($live.runEntryValue -ne "`"$expectedTrayPath`"") { $reasons.Add('prepared-state-mismatch: pvcert HKCU Tray Run entry missing or path mismatched') }
+    if ($reasons.Count) {
+        Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            result = 'HARNESS/PRECONDITION FAILURE'
+            failReasons = $reasons.ToArray()
+            reason = 'Prepared state is absent or mismatched. Run -Stage GATE5PREP to re-establish a clean prepared VM.'
+            preparedEvidence = $prep
+            liveState = $live
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('GATE5VERIFY precondition failed: ' + ($reasons -join '; ')),
+            'GATE5VerifyPreconditionFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
+
+    # --- Genuine interactive-desktop evidence (Defect #2). PowerShell Direct SessionId is NEVER
+    #     accepted as interactive evidence; the Tray must be running in a pvcert Explorer session. ---
+    $interactiveExplorerSessionIds = $live.interactiveExplorerSessionIds
+    $traySessionIds = $live.traySessionIds
+    $interactiveMatch = ($traySessionIds.Count -gt 0 -and
+        @($traySessionIds | Where-Object { $_ -in $interactiveExplorerSessionIds }).Count -gt 0)
+    $trayPathMatchesManifest = ($live.trayExePathLive -and $expectedTrayPath -and
+        $live.trayExePathLive -eq $expectedTrayPath)
+
+    if (-not $interactiveMatch -or -not $trayPathMatchesManifest) {
+        $inc = [PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            result = 'INCOMPLETE (interactive precondition required)'
+            interactiveDesktopRequired = $true
+            interactiveDesktopTrayVerified = $false
+            reason = 'A genuine PV-CERT\pvcert interactive logon is required so Windows executes the per-user Tray Run entry. The Tray must be running in a PV-CERT\pvcert Explorer session (matching SessionId); a Session-0 PowerShell Direct Tray is NOT the interactive-desktop Tray.'
+            powerShellDirectSessionId = $live.powerShellDirectSessionId
+            interactiveExplorerSessionIds = $interactiveExplorerSessionIds
+            traySessionIds = $traySessionIds
+            trayExePathLive = $live.trayExePathLive
+            expectedTrayPath = $expectedTrayPath
+            notes = @(
+                'Product service + CLI authority invariants are NOT asserted as FAIL here; they are unverified pending an interactive session.'
+                'powerShellDirectSessionId is never used as evidence that the Tray is interactive.'
+            )
+        }
+        Save-Json '22-servicetray-contract.json' $inc
+        Write-Host ('  GATE-5 VERIFY INCOMPLETE (interactive precondition required): ' +
+            'log in as PV-CERT\pvcert, confirm Explorer + PathVeer Tray are running, then re-run GATE5VERIFY.') -ForegroundColor Yellow
+        # Leave the VM intact; return incomplete (do NOT throw, do NOT restore).
+        return $inc
+    }
+
+    # --- Genuine interactive Tray present: exercise the existing authority contract. ---
+    # Run-ServiceTrayContract records interactiveDesktopTrayVerified=true when the Tray matches an
+    # interactive Explorer session. Pass the prepared evidence so it can set the flag truthfully.
+    try {
+        $contractOut = Run-ServiceTrayContract -Session $Session -PreparedEvidence $prep
+    } catch {
+        # Product contract failure (ServiceTrayContractFailed) or probe failure: preserve the
+        # failed VM for diagnostics; do NOT auto-restore. Re-throw so main records preservation.
+        Write-Host "  GATE-5 VERIFY product/probe failure: preserving failed VM for diagnostics (no restore)." -ForegroundColor Red
+        throw
+    }
+
+    # VERIFY success: restore the baseline and report PASS.
+    Write-Host "`n  GATE-5 PASS / CLOSED (interactive-desktop authority contract verified)." -ForegroundColor Green
+    Write-Host "  Restoring certification baseline '$CertificationSnapshot'..." -ForegroundColor Yellow
+    Restore-Clean
+    Write-Host "  Guest restored to certification baseline '$CertificationSnapshot'." -ForegroundColor Green
+    return $contractOut
+}
+
+function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session, $PreparedEvidence = $null) {
     Write-Stage "SERVICE/TRAY AUTHORITY CONTRACT"
     # Normalize a ServiceController enum value regardless of how it was obtained:
     #  - native [System.ServiceProcess.ServiceControllerStatus]/[ServiceStartMode] enum
@@ -524,7 +721,7 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
                 cliAttemptCount = 0; cliExitCode = $null; cliStdoutStderr = $null
                 cliHealthyDuringPoll = $false; serviceStateAtCliAttempt = 'absent'
                 ipcPipeNamePresentAfter = $false; note = 'Tray executable not found at authoritative manifest path'
-                installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+                installRootObserved = $installRoot; cliExePath = $cliExe
                 cliExeExistsAtExactPath = $cliExeExistsAtExactPath; trayExeExistsAtExactPath = $trayExeExistsAtExactPath
                 powerShellDirectSessionId = $psDirectSessionId; interactiveExplorerSessionIds = $interactiveExplorerSessionIds
                 traySessionIdBefore = @(); traySessionIdAfter = @()
@@ -551,7 +748,7 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
                 cliAttemptCount = 0; cliExitCode = $null; cliStdoutStderr = $null
                 cliHealthyDuringPoll = $false; serviceStateAtCliAttempt = 'absent'
                 ipcPipeNamePresentAfter = $false; note = 'Tray could not be established under normal user'
-                installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+                installRootObserved = $installRoot; cliExePath = $cliExe
                 cliExeExistsAtExactPath = $cliExeExistsAtExactPath; trayExeExistsAtExactPath = $trayExeExistsAtExactPath
                 powerShellDirectSessionId = $psDirectSessionId; interactiveExplorerSessionIds = $interactiveExplorerSessionIds
                 traySessionIdBefore = $traySessionIdBefore; traySessionIdAfter = @()
@@ -619,7 +816,7 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
             serviceStateAtCliAttempt = if ($svc) { $svc.Status } else { 'absent' }
             ipcPipeNamePresentAfter = ($null -ne $pipe)
             note = $null
-            installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+            installRootObserved = $installRoot; cliExePath = $cliExe
             cliExeExistsAtExactPath = $cliExeExistsAtExactPath; trayExeExistsAtExactPath = $trayExeExistsAtExactPath
             powerShellDirectSessionId = $psDirectSessionId; interactiveExplorerSessionIds = $interactiveExplorerSessionIds
             traySessionIdBefore = $traySessionIdBefore; traySessionIdAfter = $traySessionIdAfter
@@ -631,7 +828,7 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
                 remoteProbeSucceeded = $false
                 remoteProbeErrorType = 'RemoteBlockException'
                 remoteProbeErrorMessage = ($_.Exception.Message)
-                installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+                installRootObserved = $installRoot; cliExePath = $cliExe
                 cliExeExistsAtExactPath = $null; trayExeExistsAtExactPath = $null
                 powerShellDirectSessionId = $null; interactiveExplorerSessionIds = $null
                 traySessionIdBefore = @(); traySessionIdAfter = @()
@@ -708,10 +905,15 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
         interactiveExplorerSessionIds = $remote.interactiveExplorerSessionIds
         traySessionIdBefore          = $remote.traySessionIdBefore
         traySessionIdAfter           = $remote.traySessionIdAfter
-        # A 'true' interactive-Tray claim would require traySessionIdBefore to match an actual
-        # interactive Explorer session id. This run only exercises a Session-0 normal-user Tray,
-        # so interactiveDesktopTrayVerified = false by design (see design note in FINAL REPORT).
-        interactiveDesktopTrayVerified = $false
+        # A 'true' interactive-Tray claim requires traySessionIdBefore to match an actual
+        # interactive Explorer session id. The remote block captures traySessionIdBefore/After and
+        # interactiveExplorerSessionIds. We compute the flag here (not blindly false) so a genuine
+        # interactive Tray is honestly recorded; GATE5VERIFY always passes a prepared VM where the
+        # Tray is expected to be in the interactive session. PowerShell Direct SessionId is NEVER
+        # accepted as interactive evidence (see design note in FINAL REPORT).
+        interactiveDesktopTrayVerified = (($remote.traySessionIdBefore.Count -gt 0) -and
+            ($null -ne $remote.interactiveExplorerSessionIds) -and
+            (@($remote.traySessionIdBefore | Where-Object { $_ -in $remote.interactiveExplorerSessionIds }).Count -gt 0))
     }
 
     # --- Contract assertions: fail loudly, never silently continue ---
@@ -1105,23 +1307,76 @@ if ($Stage -ne 'All') {
     $stages = @($Stage)
 }
 
+# Explicit restore/preservation policy. We do NOT rely on a script-scope `return` to control
+# cleanup (that accidentally skipped the final restore for exceptions). Instead we set a flag.
+$script:PreserveVmState = $false   # when true, main must NOT run the final Restore-Clean.
+
 foreach ($st in $stages) {
     if (-not $SkipRestore) {
-        $sess = $null
-        Restore-Clean
-        $sess = New-GuestSession $script:Cred
+        # GATE5VERIFY operates ONLY on a PREP-preserved VM: never restore before it.
+        if ($st -ne 'GATE5VERIFY') {
+            $sess = $null
+            Restore-Clean
+            $sess = New-GuestSession $script:Cred
+        }
     }
     switch ($st) {
         'GATE5'  {
+            # Legacy alias / orchestrator: runs PREP, then stops with a clear message directing
+            # the operator to GATE5VERIFY. Never silently claims a full GATE-5 PASS without a
+            # genuine interactive verification. PREP deliberately leaves the VM intact.
             try {
-                Run-GATE5  $sess $CandidatePackage | Out-Null
-                Run-ServiceTrayContract $sess | Out-Null
+                Run-GATE5PREP $sess $CandidatePackage | Out-Null
             } catch {
-                Write-Host "  GATE-5 stage ended (install gate not satisfied): $($_.Exception.Message)" -ForegroundColor Red
-                # Stop the whole run cleanly; structured FAIL evidence already saved.
-                # The final block restores the certification checkpoint (PV-CERT-HARNESS).
+                Write-Host "  GATE-5 PREP ended (install gate not satisfied): $($_.Exception.Message)" -ForegroundColor Red
                 $sess | Remove-PSSession -ErrorAction SilentlyContinue
-                return
+                # PREP failure does not leave a meaningful prepared state; restore baseline.
+                $script:PreserveVmState = $false
+                break
+            }
+            # PREP succeeded: preserve the ready VM; tell the operator about GATE5VERIFY.
+            $script:PreserveVmState = $true
+            Write-Host "`n  GATE-5 (legacy alias) completed PREP only." -ForegroundColor Yellow
+            Write-Host "  Perform a genuine PV-CERT\pvcert interactive logon, then run: -Stage GATE5VERIFY" -ForegroundColor Yellow
+            # Stop processing further stages after a genuine PREP (the VM is left intact).
+            break
+        }
+        'GATE5PREP' {
+            try {
+                Run-GATE5PREP $sess $CandidatePackage | Out-Null
+            } catch {
+                Write-Host "  GATE-5 PREP ended (install gate not satisfied): $($_.Exception.Message)" -ForegroundColor Red
+                $sess | Remove-PSSession -ErrorAction SilentlyContinue
+                $script:PreserveVmState = $false
+                break
+            }
+            $script:PreserveVmState = $true
+            Write-Host "`n  GATE-5 PREP complete. Run -Stage GATE5VERIFY after a genuine interactive logon." -ForegroundColor Yellow
+            break
+        }
+        'GATE5VERIFY' {
+            # Do NOT restore before VERIFY (it must run on the PREP-preserved VM). The session is
+            # the still-open prepared session from PREP (when both run in the same process) or a
+            # freshly opened one. If the session is stale, open a new one without restoring.
+            if ($null -eq $sess) { $sess = New-GuestSession $script:Cred }
+            try {
+                Run-GATE5VERIFY $sess | Out-Null
+                # Success path inside Run-GATE5VERIFY already restored the baseline.
+                $script:PreserveVmState = $false
+            } catch {
+                $errName = $_.Exception.GetType().Name
+                if ($errName -eq 'GATE5VerifyPreconditionFailed' -or
+                    ($_.FullyQualifiedErrorId -eq 'GATE5VerifyPreconditionFailed')) {
+                    # Precondition failure: tell operator to run GATE5PREP; do not preserve.
+                    Write-Host "  GATE-5 VERIFY precondition failed (not a product defect): $($_.Exception.Message)" -ForegroundColor Red
+                    $script:PreserveVmState = $false
+                } else {
+                    # Product contract failure or probe failure: PRESERVE the failed VM for
+                    # diagnostics; do not auto-restore.
+                    Write-Host "  GATE-5 VERIFY product/probe failure: failed VM preserved for diagnostics." -ForegroundColor Red
+                    $script:PreserveVmState = $true
+                }
+                $sess | Remove-PSSession -ErrorAction SilentlyContinue
             }
         }
         'GATE6'  { Run-GATE6  $sess $OlderPackage $CandidatePackage | Out-Null }
@@ -1134,12 +1389,17 @@ foreach ($st in $stages) {
     }
 }
 
-# Final: leave the guest at the clean baseline for user review (do not leave a cert state polluted).
+# Final: leave the guest at the clean baseline for user review (do not leave a cert state polluted),
+# UNLESS a stage explicitly requested VM preservation (PREP-preserved VM, or a failed VERIFY VM held
+# for diagnostics). No top-level `return` controls this decision.
 if ($script:JeaSession) { $script:JeaSession | Remove-PSSession -ErrorAction SilentlyContinue; $script:JeaSession = $null }
-if (-not $SkipRestore) {
-    $sess | Remove-PSSession -ErrorAction SilentlyContinue
+if (-not $SkipRestore -and -not $script:PreserveVmState) {
+    if ($sess) { $sess | Remove-PSSession -ErrorAction SilentlyContinue }
     Restore-Clean
     Write-Host "Guest restored to certification baseline '$CertificationSnapshot'." -ForegroundColor Green
+} elseif ($script:PreserveVmState) {
+    if ($sess) { $sess | Remove-PSSession -ErrorAction SilentlyContinue }
+    Write-Host "Guest state PRESERVED (intentional; do not restore until the next stage consumes it)." -ForegroundColor Yellow
 }
 
 Write-Host "`nAll evidence written to: $EvidenceDir" -ForegroundColor Green
