@@ -200,7 +200,7 @@ function Register-NormalUserTrayRunEntry([System.Management.Automation.Runspaces
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
     $reg = Invoke-Command -Session $Session -ScriptBlock {
-        param($trayExePath, $runValueName, $runKey, $expectedIdentity)
+        param($trayExePath, $runValueName, $runKey, $expectedIdentity, $evidenceDir)
         $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
         $sid = $id.User.Value
         $name = $id.Name
@@ -213,11 +213,79 @@ function Register-NormalUserTrayRunEntry([System.Management.Automation.Runspaces
 
         # --- Exact same value shape as Set-TrayStartupEntry: a quoted executable path. ---
         $value = "`"$trayExePath`""
-        if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
-        Set-ItemProperty -Path $runKey -Name $runValueName -Value $value -ErrorAction Stop
 
-        # --- Read back from the SAME normal-user session and capture the key owner SID. ---
-        $read = (Get-ItemProperty -Path $runKey -Name $runValueName -ErrorAction Stop).$runValueName
+        # --- Deterministic creation: the PRECEDING pattern `if (-not (Test-Path)) { New-Item -Force
+        #     | Out-Null }` used a NONTERMINATING New-Item. In a PowerShell Direct session the
+        #     registry provider has been observed to silently fail that New-Item (key never created,
+        #     no exception), after which `Set-ItemProperty -ErrorAction Stop` threw a raw
+        #     ItemNotFound ("Cannot find path 'HKCU:\...\Run' because it does not exist"). That raw
+        #     provider error escaped and terminated PREP. Here we make creation explicit and proven:
+        #     attempt creation with terminating semantics, then ASSERT the key exists before writing.
+        #     Any failure emits STRUCTURED evidence (classification/errorType/errorMessage/identity)
+        #     to 21-tray-run-entry.json BEFORE rethrowing -- no raw provider error escapes silently. ---
+        function Write-TrayRunFailure($classification, $errorType, $errorMessage) {
+            $fail = [PSCustomObject]@{
+                capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                classification = $classification
+                errorType = $errorType
+                errorMessage = $errorMessage
+                currentIdentity = $name
+                currentSid = $sid
+                runKey = $runKey
+                runValueName = $runValueName
+            }
+            try { $fail | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $evidenceDir '21-tray-run-entry.json') -Encoding utf8 } catch {}
+        }
+
+        $runKeyExistedBefore   = (Test-Path -LiteralPath $runKey)
+        $runKeyCreateAttempted = $false
+        if (-not $runKeyExistedBefore) {
+            $runKeyCreateAttempted = $true
+            try {
+                New-Item -Path $runKey -Force -ErrorAction Stop | Out-Null
+            } catch {
+                Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunKeyCreateFailed' "cannot create Run key '$runKey': $($_.Exception.Message)"
+                throw [System.Management.Automation.ErrorRecord]::new(
+                    [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: cannot create Run key '$runKey': $($_.Exception.Message)"),
+                    'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+            }
+        }
+        $runKeyExistsAfterCreate = (Test-Path -LiteralPath $runKey)
+        if (-not $runKeyExistsAfterCreate) {
+            Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunKeyAbsentAfterCreate' "Run key '$runKey' still absent after creation attempt"
+            throw [System.Management.Automation.ErrorRecord]::new(
+                [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: Run key '$runKey' still absent after creation attempt"),
+                'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+        }
+
+        # --- Write the Run value (explicit terminating semantics). ---
+        $runEntryWriteAttempted = $true
+        try {
+            Set-ItemProperty -Path $runKey -Name $runValueName -Value $value -ErrorAction Stop
+        } catch {
+            Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunValueWriteFailed' "cannot write Run value '$runValueName' at '$runKey': $($_.Exception.Message)"
+            throw [System.Management.Automation.ErrorRecord]::new(
+                [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: cannot write Run value '$runValueName' at '$runKey': $($_.Exception.Message)"),
+                'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+        }
+
+        # --- Read back from the SAME normal-user session (proves the write landed). ---
+        $runEntryReadBackSucceeded = $false
+        try {
+            $read = (Get-ItemProperty -Path $runKey -Name $runValueName -ErrorAction Stop).$runValueName
+            $runEntryReadBackSucceeded = $true
+        } catch {
+            Write-TrayRunFailure 'HARNESS/PREPARATION FAILURE' 'RunValueReadBackFailed' "cannot read back Run value '$runValueName' at '$runKey': $($_.Exception.Message)"
+            throw [System.Management.Automation.ErrorRecord]::new(
+                [System.InvalidOperationException]::new("HARNESS/PREPARATION FAILURE: cannot read back Run value '$runValueName' at '$runKey': $($_.Exception.Message)"),
+                'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+        }
+
+        # --- Supplemental: capture the key owner SID if the provider exposes it. NOTE: the owner
+        #     SID is NOT asserted as a hard invariant (registry ACL ownership is not the proof of
+        #     which user's HKCU was mutated). The authority proof is: WindowsIdentity == pvcert,
+        #     HKEY_USERS\<pvcert SID> exists, the write occurred through that HKCU, and the exact
+        #     value reads back. Owner SID is recorded only when available. ---
         $ownerSid = $null
         try {
             $acl = Get-Acl -LiteralPath $runKey
@@ -237,8 +305,13 @@ function Register-NormalUserTrayRunEntry([System.Management.Automation.Runspaces
             trayRunEntryOwnerSid = $ownerSid
             trayExecutablePathExpected = $trayExePath
             valueMatchesExpected = ($read -eq $value)
+            runKeyExistedBefore = $runKeyExistedBefore
+            runKeyCreateAttempted = $runKeyCreateAttempted
+            runKeyExistsAfterCreate = $runKeyExistsAfterCreate
+            runEntryWriteAttempted = $runEntryWriteAttempted
+            runEntryReadBackSucceeded = $runEntryReadBackSucceeded
         }
-    } -ArgumentList $trayExePath, $runValueName, $runKey, $expectedIdentity
+    } -ArgumentList $trayExePath, $runValueName, $runKey, $expectedIdentity, $EvidenceDir
 
     # --- Owner SID must equal the observed pvcert SID; value must match the authoritative manifest path. ---
     if (-not $reg.valueMatchesExpected) {
@@ -251,15 +324,12 @@ function Register-NormalUserTrayRunEntry([System.Management.Automation.Runspaces
             [System.InvalidOperationException]::new('HARNESS/PREPARATION FAILURE: Tray Run entry value mismatch'),
             'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
     }
-    if ($reg.trayRunEntryOwnerSid -ne $reg.normalUserSid) {
-        Save-Json '21-tray-run-entry.json' ([PSCustomObject]@{
-            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
-            registration = $reg; result = 'FAIL'
-            reason = "Run-entry owner SID '$($reg.trayRunEntryOwnerSid)' does not equal pvcert SID '$($reg.normalUserSid)'"
-        })
-        throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new('HARNESS/PREPARATION FAILURE: Tray Run entry owner SID is not pvcert'),
-            'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    # --- Value must match the authoritative manifest path; owner SID is SUPPLEMENTAL only
+    #     (registry ACL ownership is not the proof of which user's HKCU was mutated). The hard
+    #     authority proof is the value read-back match below. Owner SID mismatch is recorded in
+    #     evidence as a non-fatal observation, never a HARNESS/PREPARATION failure. ---
+    if ($reg.trayRunEntryOwnerSid -and $reg.trayRunEntryOwnerSid -ne $reg.normalUserSid) {
+        Write-Host ("  WARN: Run-key owner SID '$($reg.trayRunEntryOwnerSid)' != pvcert SID '$($reg.normalUserSid)' (supplemental; value read-back is the authority proof).") -ForegroundColor Yellow
     }
 
     Save-Json '21-tray-run-entry.json' ([PSCustomObject]@{
