@@ -1486,8 +1486,23 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
     return @{ Session=$session2; after=$after; rebootProof=$rebootProof }
 }
 
+function Get-CustomRouteRow([string]$ListOut, [string]$Prefix) {
+    # Parse the custom-routes list row for $Prefix. Renderer columns: ID Type Enabled Value Description.
+    if ([string]::IsNullOrEmpty($ListOut)) { return $null }
+    foreach ($line in @($ListOut -split "`n")) {
+        $line = $line.Trim()
+        if ($line.Length -eq 0) { continue }
+        if ($line -notmatch [regex]::Escape($Prefix)) { continue }
+        $toks = @($line -split '\s+') | Where-Object { $_ }
+        if ($toks.Count -ge 4) {
+            return [PSCustomObject]@{ Id = $toks[0]; Type = $toks[1]; Enabled = $toks[2]; Value = $toks[3] }
+        }
+    }
+    return $null
+}
+
 function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Prefix) {
-    Write-Stage "GATE-2 ROUTE MUTATION / RECOVERY (bounded TEST-NET $Prefix)"
+    Write-Stage "GATE-2 CUSTOM ROUTE DNS-RESOLUTION LIFECYCLE (TEST-NET $Prefix)"
     # Lifecycle precondition: PV-CERT-HARNESS baseline has NO PathVeer product. Install the protected
     # candidate first (fail-closed) so the CLI/service/route assertions below are truthful.
     $inst = Install-PathVeerProtectedCandidate $Session
@@ -1499,12 +1514,12 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
     }
 
     # --- NETWORK / ROUTE BASELINE PREREQUISITE ------------------------------------------------
-    # GATE-2 mutates the Windows route table. Installing a managed route requires a usable adapter with a
-    # valid next-hop/interface, i.e. a non-APIPA IPv4 address AND an IPv4 default route. After a
+    # GATE-2 exercises the guest via JEA (custom-routes list/resolve/enable/disable). A usable guest network
+    # (non-APIPA IPv4 address AND an IPv4 default route) is required for the JEA session and DHCP. After a
     # PV-CERT-HARNESS checkpoint restore the guest may come back APIPA (169.254.x.x) with NO default route
     # because DHCP runtime state is NOT baked into the checkpoint. We establish route-readiness FIRST (bounded
     # DHCP renewal via the shared Repair-GuestDhcp primitive). DNS/HTTPS/GitHub/release servers are NOT required
-    # for route installation, so the readiness check intentionally omits them. If the baseline cannot be
+    # for custom-route resolution, so the readiness check intentionally omits them. If the baseline cannot be
     # established, this is an ENVIRONMENT/NETWORK-READINESS defect (NOT a product defect); we save evidence and
     # throw WITHOUT running add-cidr/disable/enable/doctor so we never blame the product for a stale network.
     $routesBefore = Invoke-Command -Session $Session -ScriptBlock {
@@ -1517,7 +1532,7 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
         $netReady = Wait-GuestRouteReady -Session $Session -MaxSeconds 120
     } catch {
         $probe = $_.TargetObject
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{
             capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix
             elevationAvailable = ($jea -ne $null)
             environmentNotReady = $true
@@ -1536,123 +1551,161 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
     }
     $envProbe = $netReady.lastProbe
 
-    # --- Add custom managed route (desired config only; route is installed on enable) ------------
+    # --- Add custom route (desired config persistence + runtime DNS-resolution contract) ----------
+    # PRODUCT CONTRACT (verified against PathVeer.Core source):
+    #   custom-routes add-cidr -> CustomRouteCommandHandler.AddAsync -> CustomRouteService.AddAsync:
+    #     persists a CustomRouteEntry (enabled:true). NO Windows route is installed.
+    #   Custom routes are a DNS-RESOLUTION subsystem (CustomRouteResolver.ResolveAsync -> Prefixes),
+    #     NOT Windows Get-NetRoute destination routes. The custom CIDR is realized as a split-DNS
+    #     resolution prefix, observable via `custom-routes resolve`, never as a Get-NetRoute entry.
+    #   So the TRUE contract is: (a) add-cidr persists desired config; (b) `custom-routes resolve`
+    #     includes the CIDR (runtime DNS-resolution effect); (c) enable/disable toggle the entry's
+    #     Enabled flag and change whether it appears in resolve. Asserting a Windows Get-NetRoute for
+    #     the custom CIDR is a HARNESS TEST-VALIDITY DEFECT (and was the root cause of the prior
+    #     real-run false failure).
     $addC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'add-cidr' -Argument $Prefix
     if ($addC.result.exitCode -ne 0) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; routesBeforeCount = $routesBeforeCount; networkReadiness = $envProbe; failReasons = @('cli-add-cidr-nonzero') })
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; routesBeforeCount = $routesBeforeCount; networkReadiness = $envProbe; failReasons = @('cli-add-cidr-nonzero') })
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("PathVeer CLI custom-routes add-cidr failed (exit $($addC.result.exitCode))."),
             'Gate2AddCustomRouteFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $addC.result)
     }
-    # Product semantics (verified against PathVeer.Core): custom-routes add-cidr only WRITES desired
-    # configuration; it does NOT install a Windows route. The runtime route is reconciled on a later
-    # enable/repair cycle. So we verify CONFIG PERSISTENCE here (exit 0 AND the prefix appears in the
-    # desired custom-routes list), NOT an immediate Windows-route presence. Requiring the Windows route
-    # immediately after add-cidr would be a false-positive harness defect (scenario A of add-cidr contract).
-    $listOut = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'list').result.output
-    $configPersisted = ($null -ne $listOut) -and ($listOut -match [regex]::Escape($Prefix))
+    $listAfterAdd = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'list').result.output
+    $rowAdd = Get-CustomRouteRow $listAfterAdd $Prefix
+    $id = if ($null -ne $rowAdd) { $rowAdd.Id } else { $null }
+    $configPersisted = ($null -ne $rowAdd) -and ($rowAdd.Value -eq $Prefix)
     if (-not $configPersisted) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; routesBeforeCount = $routesBeforeCount; networkReadiness = $envProbe; customRoutesList = $listOut; failReasons = @('custom-route-config-not-persisted-after-add-cidr') })
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; routesBeforeCount = $routesBeforeCount; networkReadiness = $envProbe; customRoutesList = $listAfterAdd; failReasons = @('custom-route-config-not-persisted-after-add-cidr') })
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("Custom route $Prefix not present in desired configuration after add-cidr (config persistence failed)."),
             'Gate2CustomRouteConfigNotPersisted', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
     }
-    $customAfterAdd = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
-    $routePresentAfterAdd = ($null -ne $customAfterAdd) -and ($customAfterAdd.Count -gt 0)
-    Start-Sleep -Seconds 2
-
-    # --- Disable managed routing (top-level policy) ---
-    $disC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'disable'
-    if ($disC.result.exitCode -ne 0) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('cli-disable-nonzero') })
+    $resAfterAdd = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'resolve').result.output
+    $resolvePresentAfterAdd = ($null -ne $resAfterAdd) -and ($resAfterAdd -match [regex]::Escape($Prefix))
+    if (-not $resolvePresentAfterAdd) {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; routesBeforeCount = $routesBeforeCount; networkReadiness = $envProbe; customRoutesList = $listAfterAdd; resolveOutput = $resAfterAdd; failReasons = @('custom-route-not-resolved-after-add') })
         throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new("PathVeer CLI disable failed (exit $($disC.result.exitCode))."),
+            [System.InvalidOperationException]::new("Custom route $Prefix not present in `custom-routes resolve` prefixes after add (DNS-resolution contract failed)."),
+            'Gate2CustomRouteResolveFailed', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+    }
+
+    # --- Disable the custom route (custom-routes disable <id> flips the entry Enabled flag) ------
+    $disC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'disable' -Argument $id
+    if ($disC.result.exitCode -ne 0) {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterAdd; failReasons = @('cli-custom-route-disable-nonzero') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer CLI custom-routes disable failed (exit $($disC.result.exitCode))."),
             'Gate2DisableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $disC.result)
     }
-    $afterDisable = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
-    if (($null -ne $afterDisable) -and ($afterDisable.Count -gt 0)) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; prefixPresentAfterDisable = $true; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('managed-prefix-present-after-disable') })
+    $listAfterDisable = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'list').result.output
+    $rowDisable = Get-CustomRouteRow $listAfterDisable $Prefix
+    $enabledAfterDisable = if ($null -ne $rowDisable) { $rowDisable.Enabled } else { $null }
+    $resAfterDisable = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'resolve').result.output
+    $resolvePresentAfterDisable = ($null -ne $resAfterDisable) -and ($resAfterDisable -match [regex]::Escape($Prefix))
+    if ($enabledAfterDisable -ne 'no') {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterDisable; customRouteEnabled = $enabledAfterDisable; failReasons = @('custom-route-not-disabled') })
         throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new("Managed prefix $Prefix still present after disable (expected removed)."),
-            'Gate2ManagedPrefixDisableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+            [System.InvalidOperationException]::new("Custom route $Prefix not disabled (Enabled='$enabledAfterDisable') after custom-routes disable."),
+            'Gate2CustomRouteDisableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
     }
-    Start-Sleep -Seconds 2
-
-    # --- Enable managed routing (top-level policy): reconciles desired config -> Windows routes ---
-    $enC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'enable'
-    if ($enC.result.exitCode -ne 0) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('cli-enable-nonzero') })
+    if ($resolvePresentAfterDisable) {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterDisable; resolveOutput = $resAfterDisable; failReasons = @('custom-route-resolved-while-disabled') })
         throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new("PathVeer CLI enable failed (exit $($enC.result.exitCode))."),
+            [System.InvalidOperationException]::new("Custom route $Prefix still present in `custom-routes resolve` after disable (expected excluded)."),
+            'Gate2CustomRouteResolvePresentAfterDisable', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+    }
+
+    # --- Enable the custom route (custom-routes enable <id> flips the entry Enabled flag) ---------
+    $enC = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'enable' -Argument $id
+    if ($enC.result.exitCode -ne 0) {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('cli-custom-route-enable-nonzero') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("PathVeer CLI custom-routes enable failed (exit $($enC.result.exitCode))."),
             'Gate2EnableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $enC.result)
     }
-    $afterEnable = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
-    if (($null -eq $afterEnable) -or ($afterEnable.Count -le 0)) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $false; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('managed-prefix-absent-after-enable') })
+    $listAfterEnable = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'list').result.output
+    $rowEnable = Get-CustomRouteRow $listAfterEnable $Prefix
+    $enabledAfterEnable = if ($null -ne $rowEnable) { $rowEnable.Enabled } else { $null }
+    $resAfterEnable = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'resolve').result.output
+    $resolvePresentAfterEnable = ($null -ne $resAfterEnable) -and ($resAfterEnable -match [regex]::Escape($Prefix))
+    if ($enabledAfterEnable -ne 'yes') {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterEnable; customRouteEnabled = $enabledAfterEnable; failReasons = @('custom-route-not-enabled') })
         throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new("Managed prefix $Prefix not present after enable (expected installed)."),
-            'Gate2ManagedPrefixEnableFailed', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+            [System.InvalidOperationException]::new("Custom route $Prefix not enabled (Enabled='$enabledAfterEnable') after custom-routes enable."),
+            'Gate2CustomRouteEnableFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
     }
-    Start-Sleep -Seconds 3
+    if (-not $resolvePresentAfterEnable) {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterEnable; resolveOutput = $resAfterEnable; failReasons = @('custom-route-not-resolved-after-enable') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Custom route $Prefix not present in `custom-routes resolve` after enable (DNS-resolution contract failed)."),
+            'Gate2CustomRouteResolveAbsentAfterEnable', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+    }
 
     # --- Doctor diagnostics (must be healthy: exit 0) ---
     $doc = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'doctor'
     $docExit = $doc.result.exitCode
     $docOut = $doc.result.output
     if ($docExit -ne 0) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('doctor-nonzero') })
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterEnable; resolveOutput = $resAfterEnable; failReasons = @('doctor-nonzero') })
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("PathVeer doctor reported failures (exit $docExit)."),
             'Gate2DoctorFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $doc.result)
     }
 
-    # --- Stop + start service, verify managed prefix recovered ---
+    # --- Stop + start service, verify desired config survives + still resolves -------------------
     $stop = Stop-GuestJeaService -Session $Session -JeaSession $jea
-    # Normalize remoted ServiceControllerStatus: native enum, numeric fallback (1->Stopped,4->Running),
-    # or remoted wrapper {value/Value}. Use the shared Get-EnumString normalizer so a remoted
-    # {value=1;Value='Stopped'} is recognized as Stopped (the prior GATE-2 real failure was a harness
-    # false negative caused by comparing the remoted wrapper object to the string 'Stopped').
     $stoppedState = Get-EnumString $stop.result.status
     if ($stoppedState -ne 'Stopped') {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = $stop.result.status; serviceStoppedStateNormalized = $stoppedState; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('service-not-stopped') })
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = $stop.result.status; serviceStoppedStateNormalized = $stoppedState; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterEnable; failReasons = @('service-not-stopped') })
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("PathVeer service did not reach Stopped after stop (state=$stoppedState)."),
             'Gate2ServiceStopFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $stop.result)
     }
-    Start-Sleep -Seconds 2
     $start = Start-GuestJeaService -Session $Session -JeaSession $jea
-    Start-Sleep -Seconds 4
     $recoveredState = Get-EnumString $start.result.status
     if ($recoveredState -ne 'Running') {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = $stoppedState; serviceRecoveredState = $start.result.status; serviceRecoveredStateNormalized = $recoveredState; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; failReasons = @('service-not-running') })
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = 'Stopped'; serviceRecoveredState = $start.result.status; serviceRecoveredStateNormalized = $recoveredState; networkReadiness = $envProbe; routesBeforeCount = $routesBeforeCount; customRoutesList = $listAfterEnable; failReasons = @('service-not-running') })
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("PathVeer service did not reach Running after start (state=$recoveredState)."),
             'Gate2ServiceStartFailed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $start.result)
     }
-    $afterRecovery = (Get-GuestJeaRouteState -Session $Session -JeaSession $jea -Prefix $Prefix).result
-    $prefixPresentAfterRecovery = ($null -ne $afterRecovery) -and ($afterRecovery.Count -gt 0)
+    $listAfterRecovery = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'list').result.output
+    $rowRecovery = Get-CustomRouteRow $listAfterRecovery $Prefix
+    $configPersistedAfterRecovery = ($null -ne $rowRecovery) -and ($rowRecovery.Value -eq $Prefix) -and ($rowRecovery.Enabled -eq 'yes')
+    if (-not $configPersistedAfterRecovery) {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = 'Stopped'; serviceRecoveredState = 'Running'; customRoutesList = $listAfterRecovery; failReasons = @('custom-route-config-lost-after-recovery') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Custom route $Prefix config not present/enabled after service recovery (desired config did not survive)."),
+            'Gate2CustomRouteConfigLostAfterRecovery', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+    }
+    $resAfterRecovery = (Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'custom-routes' -SubVerb 'resolve').result.output
+    $resolvePresentAfterRecovery = ($null -ne $resAfterRecovery) -and ($resAfterRecovery -match [regex]::Escape($Prefix))
+    if (-not $resolvePresentAfterRecovery) {
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{ capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null); addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n"); serviceStoppedState = 'Stopped'; serviceRecoveredState = 'Running'; customRoutesList = $listAfterRecovery; resolveOutput = $resAfterRecovery; failReasons = @('custom-route-not-resolved-after-recovery') })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Custom route $Prefix not present in `custom-routes resolve` after service recovery (DNS-resolution contract failed)."),
+            'Gate2CustomRouteResolveAbsentAfterRecovery', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+    }
+
+    # --- Windows route table snapshot (transparency only) ----------------------------------------
+    # Custom routes are DNS-resolution rules, NOT Windows Get-NetRoute destination routes. We capture
+    # the table for transparency but do NOT assert the custom CIDR is present (it must NOT be).
     $routesAfter = Invoke-Command -Session $Session -ScriptBlock {
         @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
     }
     $routesAfterCount = if ($routesAfter) { $routesAfter.Count } else { 0 }
     $defaultRouteAfter = @($routesAfter | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' })
-
-    # Distinguish "no baseline default route existed" (ENVIRONMENT — checkpoint networking not ready) from
-    # "PathVeer destroyed the baseline default route" (REAL PRODUCT ROUTE-INTEGRITY DEFECT). These are
-    # completely different classifications. A missing baseline is captured and reported; a baseline that
-    # existed but vanished after mutations is a genuine gate failure.
+    $winRouteHasCustomPrefix = @($routesAfter | Where-Object { $_.DestinationPrefix -eq $Prefix }).Count -gt 0
     $defaultRouteBeforePresent = $defaultRouteBefore.Count -gt 0
     $defaultRouteAfterPresent = $defaultRouteAfter.Count -gt 0
-    $noBaselineDefaultRoute = -not $defaultRouteBeforePresent
-    $defaultRouteIntact = $defaultRouteAfterPresent
     if ($defaultRouteBeforePresent -and -not $defaultRouteAfterPresent) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
+        Save-Json '02-gate2-custom-route.json' ([PSCustomObject]@{
             capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null)
             addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode
-            prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n")
+            doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n")
             serviceStoppedState = 'Stopped'; serviceRecoveredState = 'Running'
-            prefixPresentAfterRecovery = $true; routesBeforeCount = $routesBeforeCount; routesAfterCount = $routesAfterCount
-            noBaselineDefaultRoute = $noBaselineDefaultRoute
+            customRouteResolvedAfterRecovery = $resolvePresentAfterRecovery
+            routesBeforeCount = $routesBeforeCount; routesAfterCount = $routesAfterCount
             defaultRouteBefore = @($defaultRouteBefore | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
             defaultRouteAfter = @($defaultRouteAfter | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
             networkReadiness = $envProbe
@@ -1662,47 +1715,42 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
             [System.InvalidOperationException]::new("Baseline default route (0.0.0.0/0) present before GATE-2 but removed after route mutations (product route-integrity defect)."),
             'Gate2DefaultRouteDestroyed', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
     }
-    if (-not $prefixPresentAfterRecovery) {
-        Save-Json '02-gate2-route-mutation.json' ([PSCustomObject]@{
-            capturedUtc = (Get-Date -AsUTC).ToString('o'); managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null)
-            addCustomRouteExit = $addC.result.exitCode; disableExit = $disC.result.exitCode; enableExit = $enC.result.exitCode
-            prefixPresentAfterDisable = $false; prefixPresentAfterEnable = $true; doctorExitCode = $docExit; doctorSummary = ($docOut -join "`n")
-            serviceStoppedState = 'Stopped'; serviceRecoveredState = 'Running'
-            prefixPresentAfterRecovery = $false; routesBeforeCount = $routesBeforeCount; routesAfterCount = $routesAfterCount
-            noBaselineDefaultRoute = $noBaselineDefaultRoute
-            defaultRouteBefore = @($defaultRouteBefore | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
-            defaultRouteAfter = @($defaultRouteAfter | ForEach-Object { [PSCustomObject]@{ DestinationPrefix = $_.DestinationPrefix; NextHop = $_.NextHop; InterfaceIndex = $_.InterfaceIndex; RouteMetric = $_.RouteMetric } })
-            networkReadiness = $envProbe
-            failReasons = @('managed-prefix-absent-after-recovery')
-        })
-        throw [System.Management.Automation.ErrorRecord]::new(
-            [System.InvalidOperationException]::new("Managed prefix $Prefix not present after service recovery (expected installed)."),
-            'Gate2ManagedPrefixRecoveryFailed', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
-    }
+
     $out = [PSCustomObject]@{
         managedPrefix = $Prefix; elevationAvailable = ($jea -ne $null)
         addCustomRouteExit = $addC.result.exitCode
-        routePresentAfterAdd = $routePresentAfterAdd
-        customRouteConfigPersisted = $configPersisted
+        customRouteConfigPersisted = $true
+        customRouteResolvedAfterAdd = $resolvePresentAfterAdd
         disableExit = $disC.result.exitCode
-        prefixPresentAfterDisable = $false
+        customRouteEnabledAfterDisable = 'no'
+        customRouteResolvedAfterDisable = $false
         enableExit = $enC.result.exitCode
-        prefixPresentAfterEnable = $true
+        customRouteEnabledAfterEnable = 'yes'
+        customRouteResolvedAfterEnable = $resolvePresentAfterEnable
         doctorExitCode = $docExit
         doctorSummary = ($docOut -join "`n")
         serviceStoppedState = 'Stopped'
         serviceRecoveredState = 'Running'
-        prefixPresentAfterRecovery = $true
+        customRouteConfigPersistedAfterRecovery = $true
+        customRouteResolvedAfterRecovery = $resolvePresentAfterRecovery
+        winRouteHasCustomPrefix = $winRouteHasCustomPrefix
+        customRoutesAfterAdd = $listAfterAdd
+        customRoutesAfterDisable = $listAfterDisable
+        customRoutesAfterEnable = $listAfterEnable
+        customRoutesAfterRecovery = $listAfterRecovery
+        resolvedPrefixesAfterAdd = $resAfterAdd
+        resolvedPrefixesAfterDisable = $resAfterDisable
+        resolvedPrefixesAfterEnable = $resAfterEnable
+        resolvedPrefixesAfterRecovery = $resAfterRecovery
+        customRouteId = $id
         routesBeforeCount = $routesBeforeCount
         routesAfterCount = $routesAfterCount
-        noBaselineDefaultRoute = $noBaselineDefaultRoute
         defaultRouteBeforePresent = $defaultRouteBeforePresent
         defaultRouteAfterPresent = $defaultRouteAfterPresent
-        defaultRouteIntact = $defaultRouteIntact
         networkReadiness = $envProbe
     }
-    Save-Json '02-gate2-route-mutation.json' $out
-    Write-Host "  GATE-2 PASS (route mutation + recovery verified)." -ForegroundColor Green
+    Save-Json '02-gate2-custom-route.json' $out
+    Write-Host "  GATE-2 PASS (custom-route DNS-resolution lifecycle verified)." -ForegroundColor Green
     return $out
 }
 
