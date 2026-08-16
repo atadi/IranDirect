@@ -2260,13 +2260,26 @@ if ($Stage -ne 'All') {
 # cleanup (that accidentally skipped the final restore for exceptions). Instead we set a flag.
 $script:PreserveVmState = $false   # when true, main must NOT run the final Restore-Clean.
 
+# --- Restore-policy predicates (single source of truth; unit-tested in Test-PathVeerCertRestorePolicy.ps1) ---
+function Test-PathVeerCertificationPreRestore {
+    [CmdletBinding()]
+    param([string]$StageName, [bool]$SkipRestore)
+    # GATE5VERIFY and BASELINE are explicit exceptions: never restore BEFORE them. GATE5VERIFY runs on a
+    # PREP-preserved VM; BASELINE is an operator live-state preflight that must inspect the CURRENT VM.
+    return (-not $SkipRestore) -and ($StageName -ne 'GATE5VERIFY') -and ($StageName -ne 'BASELINE')
+}
+function Test-PathVeerCertificationFinalRestore {
+    [CmdletBinding()]
+    param([bool]$SkipRestore, [bool]$PreserveVmState)
+    # Top-level final restoration authority (ae3e3a9): restore the canonical checkpoint unless a stage
+    # explicitly preserved the VM. BASELINE sets PreserveVmState=$true on success AND failure so the
+    # verified/failed live state is never auto-restored.
+    return (-not $SkipRestore) -and (-not $PreserveVmState)
+}
+
 foreach ($st in $stages) {
     if (-not $SkipRestore) {
-        # GATE5VERIFY operates ONLY on a PREP-preserved VM: never restore before it.
-        # BASELINE is an OPERATOR LIVE-STATE PREFLIGHT: it must inspect the VM's CURRENT live state
-        # (e.g. a freshly repaired VM) and must NOT restore the canonical checkpoint first, or it
-        # would destroy the live repair it is supposed to validate. Exempt both from Restore-Clean.
-        if ($st -ne 'GATE5VERIFY' -and $st -ne 'BASELINE') {
+        if (Test-PathVeerCertificationPreRestore -StageName $st -SkipRestore $SkipRestore) {
             $sess = $null
             Restore-Clean
             $sess = New-GuestSession $script:Cred
@@ -2278,12 +2291,20 @@ foreach ($st in $stages) {
             # in the guest protected tree before any install-dependent GATE runs. Throws (and stops
             # the run) if the baseline is incomplete, so a missing candidate can never masquerade as a
             # downstream gate failure. Never installs product.
+            #
+            # CRITICAL: BASELINE is an OPERATOR LIVE-STATE PREFLIGHT. It must leave the VM EXACTLY as
+            # verified — no pre-stage restore AND no final-cleanup restore. The top-level final block
+            # (single restoration authority per ae3e3a9) restores the canonical checkpoint unless
+            # PreserveVmState is set; set it here on BOTH success and failure so the verified (or
+            # failed) live state is preserved for the operator to checkpoint (or diagnose). This is the
+            # explicit exception, distinct from GATE5VERIFY which intentionally restores once.
             try {
                 Test-PathVeerCertificationHarnessBaseline $sess | Out-Null
+                $script:PreserveVmState = $true
             } catch {
                 Write-Host "  HARNESS BASELINE NOT READY: $($_.Exception.Message)" -ForegroundColor Red
                 $sess | Remove-PSSession -ErrorAction SilentlyContinue
-                $script:PreserveVmState = $false
+                $script:PreserveVmState = $true
                 # A bad baseline is a HARNESS/PRECONDITION failure, not a product defect. Stop the run.
                 throw
             }
@@ -2362,7 +2383,7 @@ foreach ($st in $stages) {
 # UNLESS a stage explicitly requested VM preservation (PREP-preserved VM, or a failed VERIFY VM held
 # for diagnostics). No top-level `return` controls this decision.
 if ($script:JeaSession) { $script:JeaSession | Remove-PSSession -ErrorAction SilentlyContinue; $script:JeaSession = $null }
-if (-not $SkipRestore -and -not $script:PreserveVmState) {
+if (Test-PathVeerCertificationFinalRestore -SkipRestore $SkipRestore -PreserveVmState $script:PreserveVmState) {
     if ($sess) { $sess | Remove-PSSession -ErrorAction SilentlyContinue }
     Restore-Clean
     Write-Host "Guest restored to certification baseline '$CertificationSnapshot'." -ForegroundColor Green

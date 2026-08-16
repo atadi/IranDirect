@@ -170,9 +170,20 @@ pwsh -NoProfile -File tools\certification\Test-PathVeerCertGuestJea.ps1
 pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stage BASELINE
 ```
 
+> **CRITICAL — the harness leaves the VM EXACTLY as verified.** `-Stage BASELINE` is a read-only
+> operator live-state preflight. It performs NO restore before the check and NO restore after it
+> (neither a pre-stage `Restore-Clean` nor the top-level final cleanup restore). On both success and
+> failure the live VM is preserved untouched, so the operator can transactionally replace
+> PV-CERT-HARNESS with the verified state (Step 4) — or diagnose a failed baseline without losing it.
+> Do NOT run any other stage between Step 3 and Step 4, or the live state may be disturbed.
+
+
 **Step 4 — RUN ON DESKTOP: transactional checkpoint replacement (Hyper-V).**
 
-```powershell
+```
+# NOTE: even after restoring the new checkpoint, BASELINE performs NO automatic restore
+# afterward — the VM is left exactly as verified. Only GATE stages restore PV-CERT-HARNESS.
+powershell
 # Current canonical PV-CERT-HARNESS stays intact until a verified replacement exists.
 $vm = 'PathVeer-Certification'
 $snap = Get-VMSnapshot -VMName $vm -Name 'PV-CERT-HARNESS'
