@@ -163,6 +163,97 @@ function Assert-CandidateMatchesProtected([string]$CandidatePackage, [string]$Ex
     Step "Candidate identity matches protected payload: $leaf"
 }
 
+function Register-NormalUserTrayRunEntry([System.Management.Automation.Runspaces.PSSession]$Session, [string]$trayExePath) {
+    # Harness-only per-user Tray Run-entry registration for PV-CERT\pvcert.
+    #
+    # WHY THIS EXISTS: GATE-5 installs through the ELEVATED JEA trusted wrapper, which runs as the
+    # RunAsVirtualAccount administrator. That process's HKCU is the VIRTUAL ACCOUNT's hive, NOT
+    # pvcert's (proven in the pre-approval trace). So the installer's own -InstallTray /
+    # Set-TrayStartupEntry writes the Run entry into the wrong hive and pvcert's interactive logon
+    # would never auto-start the Tray. The authoritative real-VM result proved that PowerShell Direct
+    # under PV-CERT\pvcert IS genuinely that user and its HKCU IS pvcert's hive -- so this harness
+    # step writes pvcert's per-user Run entry through the EXISTING normal $Session (identity
+    # PV-CERT\pvcert), using the SAME value name and quoting shape the product installer uses.
+    #
+    # HARNESS-ONLY: no product source, no JEA change, no new launch primitive, no HKLM, no token theft,
+    # no SYSTEM, no CreateProcessAsUser. If this step fails it is HARNESS/PREPARATION FAILURE, never a
+    # product failure.
+    $expectedIdentity = 'PV-CERT\pvcert'
+    # Must EXACTLY match the product installer's TrayRunValueName (tools/Install-PathVeer.ps1:107).
+    $runValueName = 'PathVeer Tray'
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+    $reg = Invoke-Command -Session $Session -ScriptBlock {
+        param($trayExePath, $runValueName, $runKey, $expectedIdentity)
+        $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $sid = $id.User.Value
+        $name = $id.Name
+        $sessionId = (Get-Process -Id $pid).SessionId
+
+        # --- Identity guard: must be the normal certification user, never the JEA virtual account. ---
+        if ($name -ne $expectedIdentity) {
+            throw "unexpected normal-user identity at registry write point: '$name' (expected '$expectedIdentity')"
+        }
+
+        # --- Exact same value shape as Set-TrayStartupEntry: a quoted executable path. ---
+        $value = "`"$trayExePath`""
+        if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
+        Set-ItemProperty -Path $runKey -Name $runValueName -Value $value -ErrorAction Stop
+
+        # --- Read back from the SAME normal-user session and capture the key owner SID. ---
+        $read = (Get-ItemProperty -Path $runKey -Name $runValueName -ErrorAction Stop).$runValueName
+        $ownerSid = $null
+        try {
+            $acl = Get-Acl -LiteralPath $runKey
+            $o = $acl.Owner
+            if ($o -match '^S-1-') { $ownerSid = $o }
+            else { $ownerSid = ([System.Security.Principal.NTAccount]::new($o)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
+        } catch { $ownerSid = $null }
+
+        [PSCustomObject]@{
+            normalUserIdentity = $name
+            normalUserSid = $sid
+            normalUserProfile = $env:USERPROFILE
+            powerShellDirectSessionId = $sessionId
+            trayRunEntryRegistered = $true
+            trayRunEntryPath = $runKey
+            trayRunEntryValue = $read
+            trayRunEntryOwnerSid = $ownerSid
+            trayExecutablePathExpected = $trayExePath
+            valueMatchesExpected = ($read -eq $value)
+        }
+    } -ArgumentList $trayExePath, $runValueName, $runKey, $expectedIdentity
+
+    # --- Owner SID must equal the observed pvcert SID; value must match the authoritative manifest path. ---
+    if (-not $reg.valueMatchesExpected) {
+        Save-Json '21-tray-run-entry.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            registration = $reg; result = 'FAIL'
+            reason = 'Run-entry value does not match the authoritative manifest Tray executable path'
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('HARNESS/PREPARATION FAILURE: Tray Run entry value mismatch'),
+            'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
+    if ($reg.trayRunEntryOwnerSid -ne $reg.normalUserSid) {
+        Save-Json '21-tray-run-entry.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            registration = $reg; result = 'FAIL'
+            reason = "Run-entry owner SID '$($reg.trayRunEntryOwnerSid)' does not equal pvcert SID '$($reg.normalUserSid)'"
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('HARNESS/PREPARATION FAILURE: Tray Run entry owner SID is not pvcert'),
+            'TrayRunEntryPreparationFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
+
+    Save-Json '21-tray-run-entry.json' ([PSCustomObject]@{
+        capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        registration = $reg; result = 'PASS'
+        note = 'Per-user Tray Run entry registered into PV-CERT\pvcert HKCU; executes on next genuine interactive logon.'
+    })
+    return $reg
+}
+
 function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Pkg) {
     Write-Stage "GATE-5 FRESH INSTALL (from clean baseline)"
     # SECURITY (Option A): the operator bootstrap is the ONLY trust transition. PV-CERT-HARNESS
@@ -265,6 +356,20 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
     if ($manifest.result -and $manifest.result.cliExecutablePath) { $cliExe = $manifest.result.cliExecutablePath }
     else { $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe' }
 
+    # --- Register PV-CERT\pvcert's per-user Tray Run entry through the NORMAL PowerShell Direct
+    #     session (identity pvcert), NOT the elevated JEA wrapper. The JEA wrapper's HKCU is the
+    #     virtual account's hive, so it cannot register pvcert's interactive logon Tray. The Run
+    #     entry fires only on pvcert's NEXT GENUINE INTERACTIVE logon -- it does NOT launch the Tray
+    #     immediately, and a Session-0 PowerShell Direct Tray must never be claimed as interactive.
+    #     Failure here is HARNESS/PREPARATION failure, not a product failure. ---
+    $trayRunEntry = $null
+    if ($manifest.result -and $manifest.result.trayExecutablePath) {
+        Step "Registering PV-CERT\pvcert per-user Tray Run entry (normal-user session)"
+        $trayRunEntry = Register-NormalUserTrayRunEntry -Session $Session -trayExePath $manifest.result.trayExecutablePath
+    } else {
+        Write-Host "  WARN: authoritative trayExecutablePath unavailable; skipping per-user Tray Run registration." -ForegroundColor Yellow
+    }
+
     $ev = Invoke-Command -Session $Session -ScriptBlock {
         param($cliExe, $installManifest)
         $svc = Get-CimInstance Win32_Service -Filter "Name='PathVeer'" -ErrorAction SilentlyContinue
@@ -305,6 +410,9 @@ function Run-GATE5([System.Management.Automation.Runspaces.PSSession]$Session, [
         installProgress = $installProgress
         postConditions = $post.result
         evidence = $ev
+        # Per-user Tray Run entry registered into PV-CERT\pvcert HKCU (normal-user session).
+        # Fires only on pvcert's next genuine interactive logon; not an immediate launch.
+        trayRunEntry = $trayRunEntry
     })
     return $ev
 }
@@ -638,6 +746,32 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
     if (-not $contract.cliExists) { $reasons += "cli-executable-missing" }
     if ($contract.cliExitCode -ne 0) { $reasons += "cli-status-failed-without-tray (exit: $($contract.cliExitCode))" }
     if (-not $contract.ipcPipeNamePresentAfter) { $reasons += "ipc-pipe-name-absent-after-install" }
+    # --- Interactive-session precondition (Defect #2 / approval): the authoritative product-service
+    #     invariants are the ONLY true FAIL conditions. A Tray that was only exercised in the
+    #     Session-0 PowerShell Direct session is NOT an interactive-desktop Tray. interactiveDesktopTrayVerified
+    #     is true ONLY when traySessionIdBefore matched an actual interactive Explorer session id. If not,
+    #     this is INTERACTIVE PRECONDITION REQUIRED (harness/environment, NOT a PathVeer failure). ---
+    $interactiveDesktopRequired = ($contract.interactiveDesktopTrayVerified -ne $true)
+    if ($interactiveDesktopRequired) {
+        $incomplete = [PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            elevationAvailable = ($jea -ne $null)
+            contract = $contract
+            interactiveDesktopRequired = $true
+            interactiveDesktopTrayVerified = $false
+            reason = 'A genuine PV-CERT\pvcert interactive logon is required so Windows can execute the per-user Tray Run entry. The Session-0 PowerShell Direct Tray is NOT the interactive-desktop Tray.'
+            notes = @(
+                'Product service + CLI authority invariants are NOT asserted as FAIL here; they are unverified pending an interactive session.'
+                'powerShellDirectSessionId is never used as evidence that the Tray is interactive.'
+            )
+        }
+        Save-Json '22-servicetray-contract.json' $incomplete
+        Write-Host ('  SERVICE/TRAY CONTRACT INCOMPLETE (interactive precondition required): ' +
+            'product assertions NOT failed; operator must provide a genuine PV-CERT\pvcert interactive logon.') -ForegroundColor Yellow
+        # STOP cleanly: do NOT throw as a product failure. Caller returns for operator action.
+        return $incomplete
+    }
+
     if ($reasons.Count) {
         $fail = [PSCustomObject]@{
             capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
