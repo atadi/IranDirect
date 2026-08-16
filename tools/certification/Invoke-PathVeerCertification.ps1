@@ -142,6 +142,7 @@ function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSessio
             $hasDefaultRoute = ($null -ne $defRoute) -and ($defRoute.Count -gt 0)
             $dhcpIfs = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
                 Where-Object { $_.ConnectionState -eq 'Connected' })
+            $dhcpAliases = @($dhcpIfs | ForEach-Object { (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Name } | Where-Object { $_ })
             $dnsOk = $false; $dnsErr = $null
             try { $a = [System.Net.Dns]::GetHostAddresses($target); if ($a -and $a.Count -gt 0) { $dnsOk = $true } }
             catch { $dnsErr = $_.Exception.Message }
@@ -151,6 +152,7 @@ function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSessio
                 apipaAddresses = @($apis | ForEach-Object { $_.IPAddress })
                 hasDefaultRoute = $hasDefaultRoute
                 dhcpInterfaceIndexes = @($dhcpIfs | ForEach-Object { $_.ifIndex })
+                dhcpAdapterAliases = @($dhcpAliases)
                 dnsResolved = $dnsOk
                 dnsError = $dnsErr
             }
@@ -164,11 +166,37 @@ function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSessio
                     "Network readiness not established within $MaxSeconds s after checkpoint restore (APIPA='$($probe.apipaAddresses -join ',')'; defaultRoute=$($probe.hasDefaultRoute); dnsResolved=$($probe.dnsResolved); dnsError='$($probe.dnsError)'). Environment/network-readiness defect; not a product defect."),
                 'GuestNetworkNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $probe)
         }
-        # Bounded DHCP recovery: renew the VM's DHCP-enabled adapter(s). `ipconfig /renew` is wrapped in
-        # Start-Process -Wait -TimeoutSeconds so it can NEVER hang indefinitely (no DHCP server answer).
-        Invoke-Command -Session $Session -ScriptBlock {
-            try { Start-Process -FilePath 'ipconfig.exe' -ArgumentList '/renew' -WindowStyle Hidden -Wait -TimeoutSeconds 25 -ErrorAction SilentlyContinue } catch {}
-        } | Out-Null
+        # Bounded DHCP recovery: renew the VM's DHCP-enabled adapter(s). The renewal process is started
+        # detached (PassThru) and waited on with a HARD 25000 ms bound via Process.WaitForExit(int) so it
+        # can NEVER hang indefinitely (no DHCP server answer). On timeout the spawned process is killed.
+        # NOTE: Start-Process has NO -TimeoutSeconds / -Wait-with-timeout parameter; the bounded wait is the
+        # Process.WaitForExit(int) call below. No -Wait (that would block before the bounded wait).
+        $renewResult = Invoke-Command -Session $Session -ScriptBlock {
+            $aliases = @(Get-NetIPInterface -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue |
+                Where-Object { $_.ConnectionState -eq 'Connected' } |
+                ForEach-Object { (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Name } |
+                Where-Object { $_ })
+            $summary = [PSCustomObject]@{ renewedAliases = @(); timedOut = $false; error = $null }
+            try {
+                $targets = if ($aliases.Count -gt 0) { $aliases } else { @('*') }
+                foreach ($alias in $targets) {
+                    $p = Start-Process `
+                        -FilePath "$env:SystemRoot\System32\ipconfig.exe" `
+                        -ArgumentList '/renew', $alias `
+                        -PassThru `
+                        -WindowStyle Hidden `
+                        -ErrorAction Stop
+                    $completed = $p.WaitForExit(25000)
+                    if (-not $completed) {
+                        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                        $p.WaitForExit()
+                        $summary.timedOut = $true
+                    }
+                    $summary.renewedAliases += [PSCustomObject]@{ alias = $alias; exitCode = $p.ExitCode }
+                }
+            } catch { $summary.error = $_.Exception.Message }
+            return $summary
+        }
         Start-Sleep -Seconds 3
     }
 }
