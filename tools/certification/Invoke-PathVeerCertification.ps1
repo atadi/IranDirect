@@ -328,37 +328,45 @@ function Install-PathVeerProtectedCandidate([System.Management.Automation.Runspa
 function Test-PathVeerCertificationHarnessBaseline([System.Management.Automation.Runspaces.PSSession]$Session) {
     <#
     .SYNOPSIS
-        Desktop-side orchestrator entry point for the read-only harness-baseline preflight.
-        Proves the protected candidate is present in the guest BEFORE any install-dependent GATE
-        runs, WITHOUT performing an install. Relies on the EXISTING trusted function
-        Test-PathVeerCertificationHarnessBaseline (no new privileged mechanism).
+        Desktop-side orchestrator entry point for the read-only harness-baseline LIVE-STATE
+        preflight. Proves the protected candidate is present in the guest's CURRENT live state
+        WITHOUT performing an install.
+
+        IMPORTANT SEMANTICS: this is an OPERATOR LIVE-STATE PREFLIGHT, NOT a normal certification
+        gate. It does NOT restore the canonical checkpoint first (see the dispatcher: BASELINE is
+        excluded from -Stage All and is exempt from Restore-Clean). The operator runs it against a
+        freshly repaired VM BEFORE that state becomes PV-CERT-HARNESS, to prove the live state is
+        complete. It consumes the EXISTING trusted function Get-PathVeerCertificationBoundary
+        (VisibleFunctions stays at exactly 12 — no new privileged surface), which now also returns
+        the baseline-readiness fields.
     #>
-    Write-Stage "HARNESS BASELINE PREFLIGHT (read-only; no product install)"
+    Write-Stage "HARNESS BASELINE PREFLIGHT (LIVE STATE; read-only; no restore; no product install)"
     $jea = Get-GuestJeaSession $script:Cred
     if ($null -eq $jea) {
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("JEA session could not be established; cannot verify harness baseline."),
             'HarnessBaselineJeaUnavailable', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $null)
     }
-    $base = Get-GuestJeaHarnessBaseline -Session $Session -JeaSession $jea
-    $obj = if ($base.result) { $base.result } else { $null }
+    $boundary = Get-GuestJeaCertificationBoundary -Session $Session -JeaSession $jea
+    $obj = if ($boundary.result) { $boundary.result } else { $null }
     Save-Json '00-harness-baseline.json' ([PSCustomObject]@{
         capturedUtc = (Get-Date -AsUTC).ToString('o')
         baselineReady = if ($obj) { $obj.baselineReady } else { $false }
+        expectedPackageId = if ($obj) { $obj.expectedPackageId } else { $null }
         installerPresent = if ($obj) { $obj.installerPresent } else { $null }
         payloadPresent   = if ($obj) { $obj.payloadPresent }   else { $null }
         installerBasenameOk = if ($obj) { $obj.installerBasenameOk } else { $null }
         payloadBasenameOk   = if ($obj) { $obj.payloadBasenameOk }   else { $null }
-        note = if ($obj) { $obj.note } else { "baseline probe returned no result (JEA invocation error='$($base.error)')." }
-        jeaError = $base.error
+        note = if ($obj) { "boundary probe ok" } else { "baseline probe returned no result (JEA invocation error='$($boundary.error)')." }
+        jeaError = $boundary.error
     })
     if (-not $obj -or -not $obj.baselineReady) {
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new(
-                "HARNESS BASELINE NOT READY: protected candidate is missing/mismatched in the guest protected tree. Re-run Enable-PathVeerCertificationJea.ps1 WITH a payload source (e.g. copy artifacts/packages/PathVeer-1.0.0-beta.1 into the staged jea folder) before taking PV-CERT-HARNESS. Real JEA install error: '$($base.error)'."),
-            'HarnessBaselineNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $base)
+                "HARNESS BASELINE NOT READY: protected candidate is missing/mismatched in the guest protected tree. Re-run Enable-PathVeerCertificationJea.ps1 WITH a payload source (the Install-PathVeer.ps1 + PathVeer-1.0.0-beta.1 package) before taking PV-CERT-HARNESS. Real JEA error: '$($boundary.error)'."),
+            'HarnessBaselineNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $boundary)
     }
-    Write-Host "Harness baseline ready: protected installer + payload present." -ForegroundColor Green
+    Write-Host "Harness baseline ready: protected installer + payload present (live state verified)." -ForegroundColor Green
     return $obj
 }
 
@@ -2243,7 +2251,7 @@ if (-not $script:Cred) { Write-Error 'No credential supplied. Aborting.'; exit 1
 
 $sess = New-GuestSession $script:Cred
 
-$stages = @('BASELINE','GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')
+$stages = @('GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')
 if ($Stage -ne 'All') {
     $stages = @($Stage)
 }
@@ -2255,7 +2263,10 @@ $script:PreserveVmState = $false   # when true, main must NOT run the final Rest
 foreach ($st in $stages) {
     if (-not $SkipRestore) {
         # GATE5VERIFY operates ONLY on a PREP-preserved VM: never restore before it.
-        if ($st -ne 'GATE5VERIFY') {
+        # BASELINE is an OPERATOR LIVE-STATE PREFLIGHT: it must inspect the VM's CURRENT live state
+        # (e.g. a freshly repaired VM) and must NOT restore the canonical checkpoint first, or it
+        # would destroy the live repair it is supposed to validate. Exempt both from Restore-Clean.
+        if ($st -ne 'GATE5VERIFY' -and $st -ne 'BASELINE') {
             $sess = $null
             Restore-Clean
             $sess = New-GuestSession $script:Cred

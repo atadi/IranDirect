@@ -109,32 +109,107 @@ credentials or a password.
 - Teardown: `jea/Disable-PathVeerCertificationJea.ps1` removes ONLY the certification
   instrumentation (endpoint, module path, transcripts) — never unrelated Windows or PathVeer state.
 
-### Bootstrap (operator, once, genuinely elevated in the guest)
+### Bootstrap (operator, once, genuinely elevated in the VM)
+
+The certification control plane is staged from the **Desktop** (PowerShell Direct) into the VM,
+then promoted by the operator-elevated bootstrap inside the VM. No network share (no
+`\\host\share`) is used.
+
+**Step 1 — RUN ON DESKTOP: stage all required content into the VM via PowerShell Direct.**
 
 ```powershell
-# Inside PV-CERT-WINDOWS (elevated PowerShell):
-# Stage the JEA control-plane sources AND the protected candidate payload. The bootstrap promotes
-# BOTH the trusted installer (Install-PathVeer.ps1) and the package payload
-# (PathVeer-1.0.0-beta.1) into the protected tree C:\ProgramData\PathVeerCertificationJea\{Trusted,Payloads}.
-# Staging only jea/* (no payload) leaves Payloads\PathVeer-1.0.0-beta.1 ABSENT and the bootstrap
-# silently warns — the resulting PV-CERT-HARNESS would then fail every install-dependent GATE with
-# "install exitCode was not 0 (exitCode=)". The payload source MUST ride along.
-Copy-Item '\\host\share\tools\certification\jea\*'        -Destination 'C:\pv-cert\jea'     -Recurse
-Copy-Item '\\host\share\artifacts\packages\PathVeer-1.0.0-beta.1' -Destination 'C:\pv-cert\jea\PathVeer-1.0.0-beta.1' -Recurse
-# Install-PathVeer.ps1 is NOT in jea/* — also stage it so the bootstrap can promote the trusted installer.
-Copy-Item '\\host\share\tools\Install-PathVeer.ps1'       -Destination 'C:\pv-cert\jea\Install-PathVeer.ps1'
-& 'C:\pv-cert\jea\Enable-PathVeerCertificationJea.ps1'
-# Then from the HOST:
-pwsh -NoProfile -File tools\certification\Test-PathVeerCertGuestJea.ps1
-# Read-only harness-baseline preflight: proves the protected installer + payload are present in the
-# guest protected tree WITHOUT installing product. Run BEFORE taking the checkpoint. If it reports
-# baselineReady=false, DO NOT checkpoint — re-stage the payload and re-run the bootstrap first.
-pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stage BASELINE
-# Only AFTER "JEA CONTROL PLANE PASS" (privileged context + restricted boundary) AND baselineReady=true,
-# take checkpoint PV-CERT-HARNESS. Do NOT touch PV-CLEAN-WINDOWS.
+# Resolve the operator credential (local prompt; password is never printed/logged).
+$cred = Get-Credential -UserName 'PV-CERT\pvcert' -Message 'PathVeer-Certification (PV-CERT) local admin password'
+
+# Open a PowerShell Direct session to the certification VM.
+$vmSession = New-PSSession -VMName 'PathVeer-Certification' -Credential $cred
+
+# Exact Desktop source paths (at this commit):
+#   JEA control-plane:    tools\certification\jea
+#   Trusted installer:    tools\Install-PathVeer.ps1
+#   Protected package:    artifacts/releases/1.0.0-beta.1/win-x64/PathVeer-1.0.0-beta.1
+# The bootstrap's -SourceDir defaults to the jea folder, so stage the installer + package as
+# siblings of the jea sources so $SourceDir\Install-PathVeer.ps1 and
+# $SourceDir\PathVeer-1.0.0-beta.1 resolve.
+$jeaSrc = Resolve-Path 'tools\certification\jea'
+$installerSrc = Resolve-Path 'tools\Install-PathVeer.ps1'
+$pkgSrc = Resolve-Path 'artifacts/releases/1.0.0-beta.1/win-x64/PathVeer-1.0.0-beta.1'
+
+# Stage into C:\pv-cert\jea on the VM (the bootstrap's official -SourceDir).
+Invoke-Command -Session $vmSession -ScriptBlock { New-Item -ItemType Directory -Force -Path 'C:\pv-cert\jea' | Out-Null }
+Copy-Item -Path "$jeaSrc\*"                       -Destination 'C:\pv-cert\jea'     -ToSession $vmSession -Recurse -Force
+Copy-Item -Path $installerSrc                     -Destination 'C:\pv-cert\jea\Install-PathVeer.ps1' -ToSession $vmSession -Force
+Copy-Item -Path "$pkgSrc\*"                       -Destination 'C:\pv-cert\jea\PathVeer-1.0.0-beta.1' -ToSession $vmSession -Recurse -Force
+
+Remove-PSSession $vmSession
 ```
 
-> The bootstrap performs the one-way, operator-authorized promotion (copy + ACL) from the staged
-> source (or `C:\pv-cert\incoming`) into the protected tree and FAILS LOUDLY on validation. It only
-> warns (does not fail) when the payload/installer source is absent — so the baseline preflight above
-> is the authoritative gate that prevents an incomplete checkpoint.
+**Step 2 — RUN ON VM — ELEVATED POWERSHELL: operator bootstrap (the only trust transition).**
+
+```powershell
+# Inside the VM, Run As Administrator (not from the filtered PowerShell Direct session).
+& 'C:\pv-cert\jea\Enable-PathVeerCertificationJea.ps1'
+```
+
+The bootstrap validates BOTH the installer and package payload sources exist BEFORE any mutation;
+if either is missing it THROWS and preserves any previously valid protected candidate (it never
+silently destroys a good baseline). It promotes the installer + payload into the protected tree
+`C:\ProgramData\PathVeerCertificationJea\{Trusted,Payloads}` and registers the
+`PathVeer.Certification` endpoint. Do NOT copy anything directly into `C:\ProgramData\...` or
+`C:\Program Files\WindowsPowerShell\Modules\...` — the bootstrap performs that trust transition.
+
+**Step 3 — RUN ON DESKTOP: prove the control plane + LIVE baseline (NO restore).**
+
+```powershell
+# JEA probe: privileged context + restricted boundary must PASS.
+pwsh -NoProfile -File tools\certification\Test-PathVeerCertGuestJea.ps1
+
+# LIVE-STATE baseline preflight: inspects the VM's CURRENT state (does NOT restore the
+# canonical checkpoint first). Proves the protected installer + payload are present without
+# installing product. If baselineReady=false, DO NOT checkpoint — re-stage and re-run Step 1–2.
+pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stage BASELINE
+```
+
+**Step 4 — RUN ON DESKTOP: transactional checkpoint replacement (Hyper-V).**
+
+```powershell
+# Current canonical PV-CERT-HARNESS stays intact until a verified replacement exists.
+$vm = 'PathVeer-Certification'
+$snap = Get-VMSnapshot -VMName $vm -Name 'PV-CERT-HARNESS'
+# 1. create NEW temporary checkpoint
+$tmpName = 'PV-CERT-HARNESS-NEW'
+Checkpoint-VM -VMName $vm -SnapshotName $tmpName
+# 2. verify NEW exists
+if (-not (Get-VMSnapshot -VMName $vm -Name $tmpName)) { throw 'New checkpoint failed to materialize.' }
+# 3. rename old canonical -> OLD
+Rename-VMSnapshot -VMName $vm -Name 'PV-CERT-HARNESS' -NewName 'PV-CERT-HARNESS-OLD'
+# 4. rename NEW -> PV-CERT-HARNESS
+Rename-VMSnapshot -VMName $vm -Name $tmpName -NewName 'PV-CERT-HARNESS'
+# 5. verify new canonical exists
+if (-not (Get-VMSnapshot -VMName $vm -Name 'PV-CERT-HARNESS')) { throw 'Replacement checkpoint missing.' }
+# 6. delete OLD
+Remove-VMSnapshot -VMName $vm -Name 'PV-CERT-HARNESS-OLD' -Confirm:$false
+# 7. verify exactly one of each
+Get-VMSnapshot -VMName $vm | Select-Object Name | Sort-Object Name
+#    -> exactly: PV-CERT-HARNESS, PV-CLEAN-WINDOWS
+```
+
+**Step 5 — RUN ON DESKTOP: post-checkpoint verification (optional but recommended).**
+
+```powershell
+# Restore the NEW checkpoint and re-validate it contains the validated state.
+Restore-VMSnapshot -VMName 'PathVeer-Certification' -Name 'PV-CERT-HARNESS' -Confirm:$false
+pwsh -NoProfile -File tools\certification\Test-PathVeerCertGuestJea.ps1
+pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stage BASELINE
+```
+
+**Step 6 — RUN ON DESKTOP: run GATE-2 against the refreshed checkpoint.**
+
+```powershell
+pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stage GATE2
+# (-Stage All runs the full gate sequence against the canonical PV-CERT-HARNESS; BASELINE is NOT
+#  part of All — it is the pre-checkpoint live-state preflight only.)
+```
+
+> Never use Host/Guest wording in operator steps: use **Desktop** / **VM**. Never use a network
+> share. PV-CLEAN-WINDOWS must remain untouched.

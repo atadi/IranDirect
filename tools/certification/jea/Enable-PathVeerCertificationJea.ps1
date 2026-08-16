@@ -119,101 +119,18 @@ foreach ($d in @($baseDir,$trustedDir,$payloadDir,$transcriptDir,$resultsDir)) {
 Write-Host "Protected certification tree created: $baseDir (SYSTEM + Administrators only; pvcert denied write)." -ForegroundColor Cyan
 
 # --- Operator-authorized trust promotion (one-way, elevated) ---
-# The bootstrap is the genuine elevated trust transition. Source material originates from the
-# operator-provided $SourceDir (host share) OR the untrusted C:\pv-cert\incoming area. The
-# protected copies below are the ONLY paths the privileged JEA installer will ever execute/consume.
-# No JEA function performs promotion, so the filtered pvcert caller cannot turn incoming content
-# into executed privileged content.
-$promotedInstaller = Join-Path $trustedDir 'Install-PathVeer.ps1'
-$promotedPayload   = Join-Path $payloadDir 'PathVeer-1.0.0-beta.1'
-$incomingInstaller = Join-Path 'C:\pv-cert\incoming' 'Install-PathVeer.ps1'
-$incomingPayload   = Join-Path 'C:\pv-cert\incoming' 'PathVeer-1.0.0-beta.1'
+# The bootstrap is the genuine elevated trust transition. The promotion logic (fail-closed,
+# transaction-like) lives in Invoke-PathVeerCertificationPromotion.ps1 (also imported by the
+# harness regression test, so the contract is genuinely exercised on isolated temp dirs).
+. (Join-Path $PSScriptRoot 'Invoke-PathVeerCertificationPromotion.ps1')
+Invoke-PathVeerCertificationPromotion -SourceDir $SourceDir -TrustedDir $trustedDir -PayloadDir $payloadDir
 
-# Prefer operator-provided trusted sources from $SourceDir.
-$srcInstaller = Join-Path $SourceDir 'Install-PathVeer.ps1'
-$srcPayload   = Join-Path $SourceDir 'PathVeer-1.0.0-beta.1'
-# Deterministic, replace-based promotion. The protected destination may already exist from a
-# previous PV-CERT-HARNESS / bootstrap run. A bare `Copy-Item -Recurse` against an existing
-# destination NESTS the source inside the stale destination (e.g. Payloads\1.0.0-beta.1\
-# 1.0.0-beta.1\...), leaving the canonical root stale and the new candidate orphaned underneath.
-# Remove the existing protected version path FIRST so the copy below produces exactly one fresh,
-# flat candidate directory. We remove only the specific promoted item (not the whole Trusted/
-# Payloads tree) so container ACLs and any other versions are preserved, and pvcert still cannot
-# write/delete these protected paths (no caller-visible promotion API is added).
-if (Test-Path -LiteralPath $promotedInstaller) { Remove-Item -LiteralPath $promotedInstaller -Force }
-if (Test-Path -LiteralPath $promotedPayload)   { Remove-Item -LiteralPath $promotedPayload -Recurse -Force }
-
-if (Test-Path $srcInstaller) { Copy-Item -Path $srcInstaller -Destination $promotedInstaller -Force }
-elseif (Test-Path $incomingInstaller) { Copy-Item -Path $incomingInstaller -Destination $promotedInstaller -Force }
-else { Write-Host "WARNING: no installer source found at $srcInstaller or $incomingInstaller; JEA install will fail until promoted." -ForegroundColor Yellow }
-
-if (Test-Path $srcPayload) { Copy-Item -Path $srcPayload -Destination $promotedPayload -Recurse -Force }
-elseif (Test-Path $incomingPayload) { Copy-Item -Path $incomingPayload -Destination $promotedPayload -Recurse -Force }
-else { Write-Host "WARNING: no payload source found at $srcPayload or $incomingPayload; JEA install will fail until promoted." -ForegroundColor Yellow }
-
-# --- Type-aware ACL normalization ---------------------------------------------
-# A FILE is protected by FileSecurity: explicit ACEs only, InheritanceFlags.None (a file cannot
-# carry container-inheritance flags). A DIRECTORY uses DirectorySecurity with
-# ContainerInherit|ObjectInherit so the rule propagates to every descendant. Mixing the two throws
-# exactly "No flags can be set. Parameter name: inheritanceFlags" -- the 90288ff bootstrap failure,
-# where the trusted installer FILE (Trusted\Install-PathVeer.ps1) was normalized with directory
-# inheritance flags and the whole payload ACL pass aborted before it ever ran.
-#
-# Copy-Item preserves the SOURCE file's explicit ACEs and does NOT inherit the destination parent's
-# inheritable ACEs, so promoted payload files (package.json, package-hashes.sha256, binaries) can
-# keep their untrusted source ACL -> the JEA virtual-account child fails reading the operator-approved
-# package with 'Access denied'. Normalize recursively so every file/subdirectory in the promoted tree
-# carries the protected (pvcert-denied) rules. Treat each item by its REAL type so directory
-# inheritance flags are never applied to a file.
-function Set-PathVeerCertificationFileAcl {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$LiteralPath
-    )
-    $acl = Get-Acl -LiteralPath $LiteralPath
-    $acl.SetAccessRuleProtection($true, $false)   # drop inherited ACEs
-    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
-    if ($pvcertSid) {
-        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Deny')))
-    }
-    Set-Acl -LiteralPath $LiteralPath -AclObject $acl
-}
-
-function Set-PathVeerCertificationDirectoryAcl {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$LiteralPath
-    )
-    $acl = Get-Acl -LiteralPath $LiteralPath
-    $acl.SetAccessRuleProtection($true, $false)   # drop inherited ACEs
-    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sysSid, $full, $inherit, $propagate, 'Allow')))
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, $full, $inherit, $propagate, 'Allow')))
-    if ($pvcertSid) {
-        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($pvcertSid, $noWrite, $inherit, $propagate, 'Deny')))
-    }
-    Set-Acl -LiteralPath $LiteralPath -AclObject $acl
-}
-
-# Trusted installer is a FILE.
-if (Test-Path -LiteralPath $promotedInstaller) { Set-PathVeerCertificationFileAcl -LiteralPath $promotedInstaller }
-
-# Trusted payload is a DIRECTORY; normalize it and every descendant by real type.
-if (Test-Path -LiteralPath $promotedPayload) {
-    Set-PathVeerCertificationDirectoryAcl -LiteralPath $promotedPayload
-    foreach ($sub in @(Get-ChildItem -LiteralPath $promotedPayload -Recurse -Directory -ErrorAction SilentlyContinue)) {
-        Set-PathVeerCertificationDirectoryAcl -LiteralPath $sub.FullName
-    }
-    foreach ($file in @(Get-ChildItem -LiteralPath $promotedPayload -Recurse -File -ErrorAction SilentlyContinue)) {
-        Set-PathVeerCertificationFileAcl -LiteralPath $file.FullName
-    }
-}
-Write-Host "Trusted installer promoted to: $promotedInstaller" -ForegroundColor Cyan
-Write-Host "Trusted payload promoted to:    $promotedPayload" -ForegroundColor Cyan
+# --- Type-aware ACL normalization is performed inside Invoke-PathVeerCertificationPromotion ---
+# (on the temp copies before swap), so no separate post-swap normalization is needed here. The
+# promotion function already covers file vs directory inheritance flags (the 90288ff fix) and
+# leaves the canonical protected candidate ACL-normalized.
+Write-Host "Trusted installer promoted to: $(Join-Path $trustedDir 'Install-PathVeer.ps1')" -ForegroundColor Cyan
+Write-Host "Trusted payload promoted to:    $(Join-Path $payloadDir 'PathVeer-1.0.0-beta.1')" -ForegroundColor Cyan
 
 # Register the endpoint (genuine admin action, performed by the operator here).
 $configName = 'PathVeer.Certification'

@@ -31,8 +31,7 @@
         'Invoke-PathVeerCertificationInstall',
         'Invoke-PathVeerCli',
         'Get-PathVeerProgramDataState',
-        'Get-PathVeerCertificationBoundary',
-        'Test-PathVeerCertificationHarnessBaseline'
+        'Get-PathVeerCertificationBoundary'
     )
     VisibleExternalCommands = @()
     VisibleAliases         = @()

@@ -307,21 +307,29 @@ function Get-PathVeerCertificationBoundary {
     <#
     .SYNOPSIS
         Trusted declaration of the canonical forbidden-command set for the certification JEA
-        boundary. Runs as trusted module code (FullLanguage virtual account).
+        boundary, PLUS a read-only view of the current protected certification baseline readiness.
 
-        IMPORTANT: this function does NOT measure caller-visible command availability itself.
-        Measuring forbidden availability from inside the trusted module context is INVALID: the
-        trusted context resolves the full system PATH and FullLanguage, so Get-Command finds host
-        executables (powershell.exe, cmd.exe, wscript.exe, ...) that are NOT exposed to the
-        restricted NoLanguage caller -> false positives.
+        The forbidden-command definition (fact A) is a trusted fact. The caller-visible measurement
+        (fact B) is taken by the DESKTOP probe in the restricted JEA session, never from here.
 
-        The authoritative caller-visible surface is measured by the DESKTOP probe via a bare
-        Get-Command executed in the restricted JEA session ($jeaSession), then filtered Desktop-side
-        against this canonical forbidden set. This function supplies only the trusted definition
-        (fact A). The caller-visible measurement (fact B) is never taken from the trusted context.
+        The baseline-readiness fields (expectedPackageId / protected path presence + basename
+        checks) are ALSO trusted facts computed here, because they read the module's own resolved
+        protected paths (C:\ProgramData\PathVeerCertificationJea\{Trusted,Payloads}). This is the
+        read-only harness-baseline precondition: if the protected installer/payload are absent or
+        misnamed, no install-dependent GATE (2/3/4/8/28) may run. Reusing this existing privileged
+        function keeps VisibleFunctions at exactly 12 (no new privileged surface).
     #>
     [CmdletBinding()]
-    param()
+    param(
+        [string]$ExpectedInstallerBasename = 'Install-PathVeer.ps1',
+        [string]$ExpectedPayloadBasename   = 'PathVeer-1.0.0-beta.1'
+    )
+    # Identity is the basename only (the protected tree holds one promoted candidate). We do NOT
+    # read package internals; presence at the fixed protected path IS the trusted identity.
+    $installerPresent = Test-Path -LiteralPath $script:InstallScript
+    $payloadPresent   = Test-Path -LiteralPath $script:InstallPackage
+    $installerBasenameOk = ($installerPresent -and ([System.IO.Path]::GetFileName($script:InstallScript) -eq $ExpectedInstallerBasename))
+    $payloadBasenameOk   = ($payloadPresent   -and ([System.IO.Path]::GetFileName($script:InstallPackage)  -eq $ExpectedPayloadBasename))
     [PSCustomObject]@{
         # Canonical dangerous-command definition (trusted fact). The probe compares the restricted
         # session's OWN Get-Command output against this list Desktop-side.
@@ -331,48 +339,15 @@ function Get-PathVeerCertificationBoundary {
             'New-ScheduledTask', 'Register-ScheduledTask', 'Set-Content', 'Set-Item',
             'New-Item', 'Invoke-Item', 'Get-CimInstance'
         )
-    }
-}
-
-function Test-PathVeerCertificationHarnessBaseline {
-    <#
-    .SYNOPSIS
-        Read-only harness-baseline precondition check. Reports whether the protected certification
-        candidate (installer + package payload) is actually present and identity-correct in the
-        protected tree, WITHOUT running any install/product code.
-
-        This is the authoritative read-only preflight for the certification baseline: if it reports
-        the protected candidate absent/mismatched, NO install-dependent GATE (2/3/4/8/28) may run
-        against this VM state, because the trusted wrapper would fail (or, worse, install nothing)
-        and the gate assertions would be meaningless.
-
-        Runs as trusted module code (FullLanguage virtual account). No product invocation, no
-        filesystem write, no trust transition. Reuses the already-resolved protected paths.
-    #>
-    [CmdletBinding()]
-    param(
-        [string]$ExpectedInstallerBasename = 'Install-PathVeer.ps1',
-        [string]$ExpectedPayloadBasename   = 'PathVeer-1.0.0-beta.1'
-    )
-    $installerPresent = Test-Path -LiteralPath $script:InstallScript
-    $payloadPresent   = Test-Path -LiteralPath $script:InstallPackage
-    # Identity is the basename only (the protected tree holds one promoted candidate). We do NOT
-    # read the package internals; presence at the fixed protected path IS the trusted identity.
-    $installerMatches = ($installerPresent -and ([System.IO.Path]::GetFileName($script:InstallScript) -eq $ExpectedInstallerBasename))
-    $payloadMatches   = ($payloadPresent   -and ([System.IO.Path]::GetFileName($script:InstallPackage)  -eq $ExpectedPayloadBasename))
-    [PSCustomObject]@{
-        protectedInstallerPath = $script:InstallScript
-        protectedPayloadPath   = $script:InstallPackage
-        installerPresent       = $installerPresent
-        payloadPresent         = $payloadPresent
-        installerBasenameOk    = $installerMatches
-        payloadBasenameOk      = $payloadMatches
-        baselineReady          = ($installerMatches -and $payloadMatches)
-        note                   = if ($installerMatches -and $payloadMatches) {
-            'Protected candidate present; harness install-dependent gates may run.'
-        } else {
-            'Protected candidate MISSING or misnamed in protected tree; re-run Enable-PathVeerCertificationJea.ps1 with a payload source before taking PV-CERT-HARNESS.'
-        }
+        # Read-only certification-baseline readiness (trusted facts, computed from protected paths).
+        expectedPackageId       = $ExpectedPayloadBasename
+        trustedInstallerPath    = $script:InstallScript
+        protectedPayloadPath    = $script:InstallPackage
+        installerPresent        = $installerPresent
+        payloadPresent          = $payloadPresent
+        installerBasenameOk     = $installerBasenameOk
+        payloadBasenameOk       = $payloadBasenameOk
+        baselineReady           = ($installerBasenameOk -and $payloadBasenameOk)
     }
 }
 
@@ -398,6 +373,5 @@ Export-ModuleMember -Function @(
     'Invoke-PathVeerCertificationInstall',
     'Invoke-PathVeerCli',
     'Get-PathVeerProgramDataState',
-    'Get-PathVeerCertificationBoundary',
-    'Test-PathVeerCertificationHarnessBaseline'
+    'Get-PathVeerCertificationBoundary'
 )
