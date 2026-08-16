@@ -334,6 +334,48 @@ function Get-PathVeerCertificationBoundary {
     }
 }
 
+function Test-PathVeerCertificationHarnessBaseline {
+    <#
+    .SYNOPSIS
+        Read-only harness-baseline precondition check. Reports whether the protected certification
+        candidate (installer + package payload) is actually present and identity-correct in the
+        protected tree, WITHOUT running any install/product code.
+
+        This is the authoritative read-only preflight for the certification baseline: if it reports
+        the protected candidate absent/mismatched, NO install-dependent GATE (2/3/4/8/28) may run
+        against this VM state, because the trusted wrapper would fail (or, worse, install nothing)
+        and the gate assertions would be meaningless.
+
+        Runs as trusted module code (FullLanguage virtual account). No product invocation, no
+        filesystem write, no trust transition. Reuses the already-resolved protected paths.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$ExpectedInstallerBasename = 'Install-PathVeer.ps1',
+        [string]$ExpectedPayloadBasename   = 'PathVeer-1.0.0-beta.1'
+    )
+    $installerPresent = Test-Path -LiteralPath $script:InstallScript
+    $payloadPresent   = Test-Path -LiteralPath $script:InstallPackage
+    # Identity is the basename only (the protected tree holds one promoted candidate). We do NOT
+    # read the package internals; presence at the fixed protected path IS the trusted identity.
+    $installerMatches = ($installerPresent -and ([System.IO.Path]::GetFileName($script:InstallScript) -eq $ExpectedInstallerBasename))
+    $payloadMatches   = ($payloadPresent   -and ([System.IO.Path]::GetFileName($script:InstallPackage)  -eq $ExpectedPayloadBasename))
+    [PSCustomObject]@{
+        protectedInstallerPath = $script:InstallScript
+        protectedPayloadPath   = $script:InstallPackage
+        installerPresent       = $installerPresent
+        payloadPresent         = $payloadPresent
+        installerBasenameOk    = $installerMatches
+        payloadBasenameOk      = $payloadMatches
+        baselineReady          = ($installerMatches -and $payloadMatches)
+        note                   = if ($installerMatches -and $payloadMatches) {
+            'Protected candidate present; harness install-dependent gates may run.'
+        } else {
+            'Protected candidate MISSING or misnamed in protected tree; re-run Enable-PathVeerCertificationJea.ps1 with a payload source before taking PV-CERT-HARNESS.'
+        }
+    }
+}
+
 function Get-PathVeerProgramDataState {
     [CmdletBinding()]
     param()
@@ -356,5 +398,6 @@ Export-ModuleMember -Function @(
     'Invoke-PathVeerCertificationInstall',
     'Invoke-PathVeerCli',
     'Get-PathVeerProgramDataState',
-    'Get-PathVeerCertificationBoundary'
+    'Get-PathVeerCertificationBoundary',
+    'Test-PathVeerCertificationHarnessBaseline'
 )

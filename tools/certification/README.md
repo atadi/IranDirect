@@ -113,10 +113,28 @@ credentials or a password.
 
 ```powershell
 # Inside PV-CERT-WINDOWS (elevated PowerShell):
-Copy-Item '\\host\share\tools\certification\jea\*' -Destination 'C:\pv-cert\jea' -Recurse
+# Stage the JEA control-plane sources AND the protected candidate payload. The bootstrap promotes
+# BOTH the trusted installer (Install-PathVeer.ps1) and the package payload
+# (PathVeer-1.0.0-beta.1) into the protected tree C:\ProgramData\PathVeerCertificationJea\{Trusted,Payloads}.
+# Staging only jea/* (no payload) leaves Payloads\PathVeer-1.0.0-beta.1 ABSENT and the bootstrap
+# silently warns — the resulting PV-CERT-HARNESS would then fail every install-dependent GATE with
+# "install exitCode was not 0 (exitCode=)". The payload source MUST ride along.
+Copy-Item '\\host\share\tools\certification\jea\*'        -Destination 'C:\pv-cert\jea'     -Recurse
+Copy-Item '\\host\share\artifacts\packages\PathVeer-1.0.0-beta.1' -Destination 'C:\pv-cert\jea\PathVeer-1.0.0-beta.1' -Recurse
+# Install-PathVeer.ps1 is NOT in jea/* — also stage it so the bootstrap can promote the trusted installer.
+Copy-Item '\\host\share\tools\Install-PathVeer.ps1'       -Destination 'C:\pv-cert\jea\Install-PathVeer.ps1'
 & 'C:\pv-cert\jea\Enable-PathVeerCertificationJea.ps1'
 # Then from the HOST:
 pwsh -NoProfile -File tools\certification\Test-PathVeerCertGuestJea.ps1
-# Only AFTER "JEA CONTROL PLANE PASS" (privileged context + restricted boundary), take
-# checkpoint PV-CERT-HARNESS. Do NOT touch PV-CLEAN-WINDOWS.
+# Read-only harness-baseline preflight: proves the protected installer + payload are present in the
+# guest protected tree WITHOUT installing product. Run BEFORE taking the checkpoint. If it reports
+# baselineReady=false, DO NOT checkpoint — re-stage the payload and re-run the bootstrap first.
+pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stage BASELINE
+# Only AFTER "JEA CONTROL PLANE PASS" (privileged context + restricted boundary) AND baselineReady=true,
+# take checkpoint PV-CERT-HARNESS. Do NOT touch PV-CLEAN-WINDOWS.
 ```
+
+> The bootstrap performs the one-way, operator-authorized promotion (copy + ACL) from the staged
+> source (or `C:\pv-cert\incoming`) into the protected tree and FAILS LOUDLY on validation. It only
+> warns (does not fail) when the payload/installer source is absent — so the baseline preflight above
+> is the authoritative gate that prevents an incomplete checkpoint.

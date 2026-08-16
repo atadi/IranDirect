@@ -48,7 +48,7 @@ param(
     # approved JEA instrumentation, NO PathVeer product). Restoring PV-CLEAN-WINDOWS would
     # wipe the JEA endpoint and break every privileged gate. Missing -> harness fails loudly.
     [string]$CertificationSnapshot = 'PV-CERT-HARNESS',
-    [ValidateSet('All','GATE5','GATE5PREP','GATE5VERIFY','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')]
+    [ValidateSet('All','BASELINE','GATE5','GATE5PREP','GATE5VERIFY','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')]
     [string]$Stage = 'All',
     [switch]$SkipRestore,
 
@@ -258,6 +258,27 @@ function Install-PathVeerProtectedCandidate([System.Management.Automation.Runspa
     $install = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
     $svcState = $null; $version = $null; $err = $null; $verified = $false
     $installExit = if ($install.result) { $install.result.exitCode } else { $null }
+
+    # --- Diagnostics hardening (HARNESS DIAGNOSTICS DEFECT fix) -----------------
+    # When the trusted wrapper returns NO result object ($null), the installer never started — most
+    # commonly because the protected candidate (installer/payload) is absent and the JEA module threw
+    # before launching (cf. psm1:158/162 "Certification installer/payload not staged"). The old code
+    # only reported "install exitCode was not 0 (exitCode=)", hiding the real cause. We now surface the
+    # wrapper's own error + lifecycle fields so the operator sees e.g. "payload not staged" instead of
+    # an empty exitCode. We also classify the failure into two distinct cases:
+    #   (a) null result  -> "missing protected candidate / JEA invocation error" (baseline defect)
+    #   (b) nonzero exit -> "installer returned exit code N" (real product/installer failure)
+    # so a missing-candidate baseline is NEVER misread as a product defect.
+    $installError   = if ($install.error) { $install.error } else { $null }
+    $installerError = if ($install.result) { $install.result.installerError } else { $null }
+    $completed      = if ($install.PSObject.Properties.Match('completed').Count) { $install.completed } else { $null }
+    $detail = $null
+    if ($null -eq $install.result) {
+        $detail = "JEA install returned no result object — protected candidate is almost certainly missing or the invocation was rejected before launch."
+        if ($installError) { $detail += " wrapperError='$installError'" }
+        if ($null -ne $completed) { $detail += " completed=$completed" }
+    }
+
     if ($installExit -eq 0) {
         try {
             $probe = Invoke-Command -Session $Session -ScriptBlock {
@@ -275,11 +296,20 @@ function Install-PathVeerProtectedCandidate([System.Management.Automation.Runspa
             }
         } catch { $err = $_.Exception.Message }
     } else {
-        $err = "install exitCode was not 0 (exitCode=$installExit)"
+        if ($detail) {
+            $err = "$detail"
+        } else {
+            $err = "install exitCode was not 0 (exitCode=$installExit)"
+            if ($installerError) { $err += "; installerError='$installerError'" }
+            if ($installError)   { $err += "; wrapperError='$installError'" }
+        }
     }
     $result = [PSCustomObject]@{
         installExitCode = $installExit
         installElevated = if ($install.result) { $install.elevationAvailable } else { $null }
+        installCompleted = $completed
+        installError = $installError
+        installerError = $installerError
         expectedVersion = $ExpectedVersion
         actualVersion = $version
         serviceState = $svcState
@@ -289,10 +319,47 @@ function Install-PathVeerProtectedCandidate([System.Management.Automation.Runspa
     if (-not $verified) {
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new(
-                "Protected-candidate install precondition failed (expectedVersion=$ExpectedVersion; actualVersion=$version; installExitCode=$installExit; serviceState=$svcState; verifyError='$err'). Downstream gate assertions must not run against an absent or version-mismatched PathVeer product."),
+                "Protected-candidate install precondition failed (expectedVersion=$ExpectedVersion; actualVersion=$version; installExitCode=$installExit; installCompleted=$completed; installError='$installError'; installerError='$installerError'; serviceState=$svcState; verifyError='$err'). Downstream gate assertions must not run against an absent or version-mismatched PathVeer product."),
             'ProtectedCandidateInstallPreconditionFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $result)
     }
     return $result
+}
+
+function Test-PathVeerCertificationHarnessBaseline([System.Management.Automation.Runspaces.PSSession]$Session) {
+    <#
+    .SYNOPSIS
+        Desktop-side orchestrator entry point for the read-only harness-baseline preflight.
+        Proves the protected candidate is present in the guest BEFORE any install-dependent GATE
+        runs, WITHOUT performing an install. Relies on the EXISTING trusted function
+        Test-PathVeerCertificationHarnessBaseline (no new privileged mechanism).
+    #>
+    Write-Stage "HARNESS BASELINE PREFLIGHT (read-only; no product install)"
+    $jea = Get-GuestJeaSession $script:Cred
+    if ($null -eq $jea) {
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("JEA session could not be established; cannot verify harness baseline."),
+            'HarnessBaselineJeaUnavailable', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $null)
+    }
+    $base = Get-GuestJeaHarnessBaseline -Session $Session -JeaSession $jea
+    $obj = if ($base.result) { $base.result } else { $null }
+    Save-Json '00-harness-baseline.json' ([PSCustomObject]@{
+        capturedUtc = (Get-Date -AsUTC).ToString('o')
+        baselineReady = if ($obj) { $obj.baselineReady } else { $false }
+        installerPresent = if ($obj) { $obj.installerPresent } else { $null }
+        payloadPresent   = if ($obj) { $obj.payloadPresent }   else { $null }
+        installerBasenameOk = if ($obj) { $obj.installerBasenameOk } else { $null }
+        payloadBasenameOk   = if ($obj) { $obj.payloadBasenameOk }   else { $null }
+        note = if ($obj) { $obj.note } else { "baseline probe returned no result (JEA invocation error='$($base.error)')." }
+        jeaError = $base.error
+    })
+    if (-not $obj -or -not $obj.baselineReady) {
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new(
+                "HARNESS BASELINE NOT READY: protected candidate is missing/mismatched in the guest protected tree. Re-run Enable-PathVeerCertificationJea.ps1 WITH a payload source (e.g. copy artifacts/packages/PathVeer-1.0.0-beta.1 into the staged jea folder) before taking PV-CERT-HARNESS. Real JEA install error: '$($base.error)'."),
+            'HarnessBaselineNotReady', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $base)
+    }
+    Write-Host "Harness baseline ready: protected installer + payload present." -ForegroundColor Green
+    return $obj
 }
 
 function Copy-ToGuest([System.Management.Automation.Runspaces.PSSession]$Session, [string[]]$Paths, [string]$Dest) {
@@ -2176,7 +2243,7 @@ if (-not $script:Cred) { Write-Error 'No credential supplied. Aborting.'; exit 1
 
 $sess = New-GuestSession $script:Cred
 
-$stages = @('GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')
+$stages = @('BASELINE','GATE5','GATE6','GATE8','GATE3','GATE2','GATE4','GATE28','GATE9')
 if ($Stage -ne 'All') {
     $stages = @($Stage)
 }
@@ -2195,6 +2262,21 @@ foreach ($st in $stages) {
         }
     }
     switch ($st) {
+        'BASELINE' {
+            # Read-only preflight. Proves the protected candidate (installer + payload) is present
+            # in the guest protected tree before any install-dependent GATE runs. Throws (and stops
+            # the run) if the baseline is incomplete, so a missing candidate can never masquerade as a
+            # downstream gate failure. Never installs product.
+            try {
+                Test-PathVeerCertificationHarnessBaseline $sess | Out-Null
+            } catch {
+                Write-Host "  HARNESS BASELINE NOT READY: $($_.Exception.Message)" -ForegroundColor Red
+                $sess | Remove-PSSession -ErrorAction SilentlyContinue
+                $script:PreserveVmState = $false
+                # A bad baseline is a HARNESS/PRECONDITION failure, not a product defect. Stop the run.
+                throw
+            }
+        }
         'GATE5'  {
             # Legacy alias / orchestrator: runs PREP, then stops with a clear message directing
             # the operator to GATE5VERIFY. Never silently claims a full GATE-5 PASS without a

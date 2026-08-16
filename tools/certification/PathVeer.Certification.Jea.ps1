@@ -78,6 +78,7 @@ function Invoke-GuestJeaFunction {
             'Get-PathVeerInstalledFiles'        { 'Get-PathVeerInstalledFiles' }
             'Get-PathVeerProgramDataState'      { 'Get-PathVeerProgramDataState' }
             'Get-PathVeerCertificationBoundary' { 'Get-PathVeerCertificationBoundary' }
+            'Test-PathVeerCertificationHarnessBaseline' { 'Test-PathVeerCertificationHarnessBaseline' }
             'Get-PathVeerRouteState'            {
                 $p = [string]($ArgumentList['Prefix'] ?? '')
                 if ($p -notmatch '^[0-9./a-fA-F:]{0,45}$') { throw 'Invalid Prefix argument.' }
@@ -183,4 +184,9 @@ function Get-GuestJeaProgramDataState([System.Management.Automation.Runspaces.PS
 function Stop-GuestJeaServiceForRecovery([System.Management.Automation.Runspaces.PSSession]$Session,
                                          [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
     return Stop-GuestJeaService -Session $Session -JeaSession $JeaSession
+}
+
+function Get-GuestJeaHarnessBaseline([System.Management.Automation.Runspaces.PSSession]$Session,
+                                     [System.Management.Automation.Runspaces.PSSession]$JeaSession) {
+    return Invoke-GuestJeaFunction -Session $Session -JeaSession $JeaSession -Function 'Test-PathVeerCertificationHarnessBaseline'
 }
