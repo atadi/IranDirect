@@ -506,8 +506,14 @@ function Run-GATE5PREP([System.Management.Automation.Runspaces.PSSession]$Sessio
         preparedUtc = (Get-Date).ToUniversalTime().ToString('o')
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
         prepared = $true
-        candidateVersion = if ($installResult) { $installResult.productVersion } else { $null }
+        candidateVersion = if ($manifest.result) { $manifest.result.productVersion } else { $null }
         installManifest = $manifest.result
+        explorerPresentAtPrep = ($interactiveExplorerSessionIds -and $interactiveExplorerSessionIds.Count -gt 0)
+        explorerSessionIdsAtPrep = $interactiveExplorerSessionIds
+        # A newly-written HKCU Run entry executes ONLY at a NEW interactive logon. If an interactive
+        # Explorer session already existed when the Run entry was registered, merely unlocking/reconnecting
+        # is insufficient: PV-CERT\pvcert must SIGN OUT and SIGN BACK IN.
+        freshInteractiveLogonRequired = $true
         normalUserIdentity = if ($trayRunEntry) { $trayRunEntry.normalUserIdentity } else { $null }
         normalUserSid = if ($trayRunEntry) { $trayRunEntry.normalUserSid } else { $null }
         trayRunEntryRegistered = if ($trayRunEntry) { $trayRunEntry.success } else { $false }
@@ -542,7 +548,14 @@ function Run-GATE5PREP([System.Management.Automation.Runspaces.PSSession]$Sessio
         trayRunEntry = $trayRunEntry
     })
     Write-Host "`n  GATE-5 PREPARED." -ForegroundColor Green
-    Write-Host "  Log into PathVeer-Certification normally as PV-CERT\pvcert." -ForegroundColor Yellow
+    Write-Host "  A genuine PV-CERT\pvcert interactive logon is required for Windows to execute the per-user Tray Run entry." -ForegroundColor Yellow
+    if ($prepared.explorerPresentAtPrep -eq $true) {
+        Write-Host "  IMPORTANT: an interactive Explorer session for PV-CERT\pvcert ALREADY existed when the Run entry was registered." -ForegroundColor Yellow
+        Write-Host "  Merely unlocking/reconnecting is INSUFFICIENT. You must SIGN OUT of that Windows session completely, then SIGN BACK IN." -ForegroundColor Yellow
+        Write-Host "  The Run entry executes only at a NEW interactive logon." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Log into PathVeer-Certification normally as PV-CERT\pvcert." -ForegroundColor Yellow
+    }
     Write-Host "  After Explorer AND PathVeer Tray are running, execute: -Stage GATE5VERIFY" -ForegroundColor Yellow
     Write-Host "  Do NOT restore/checkpoint the VM in the meantime." -ForegroundColor Yellow
     # Leave the prepared VM intact (no restore). The caller (main) must not restore after PREP.
@@ -602,8 +615,10 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     }
 
     # Re-read authoritative live state; if it does not match the prepared evidence, refuse.
-    $manifest = Get-GuestJeaInstallManifest -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
-    $svc = Get-GuestJeaServiceState -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
+    $manifestResponse = Get-GuestJeaInstallManifest -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
+    # Get-GuestJeaInstallManifest returns a wrapper; the authoritative manifest is under .result.
+    $manifest = $manifestResponse.result
+    $svcResponse = Get-GuestJeaServiceState -Session $Session -JeaSession (Get-GuestJeaSession $script:Cred)
     $live = Invoke-Command -Session $Session -ScriptBlock {
         param($trayValueName, $runKey)
         $svcExists = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
@@ -613,13 +628,29 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
         $explorer = @(Get-Process -Name 'explorer' -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty SessionId -Unique | Where-Object { $_ -ne $null })
         $trayProc = @(Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue)
+        # Read-only owner mapping for interactive-session attribution (no token manipulation).
+        $explorerOwnerBySession = @{}
+        foreach ($ep in (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
+            $o = $null
+            try { $o = $ep.GetOwner() } catch { $o = $null }
+            if ($o -and $o.Domain -and $o.User) {
+                $explorerOwnerBySession[([int]$ep.SessionId)] = ($o.Domain + '\' + $o.User)
+            }
+        }
+        $trayOwner = $null
+        if ($trayProc.Count) {
+            $tp = Get-CimInstance Win32_Process -Filter "Handle='$($trayProc[0].Id)'" -ErrorAction SilentlyContinue
+            if ($tp) { try { $to = $tp.GetOwner(); if ($to -and $to.Domain -and $to.User) { $trayOwner = ($to.Domain + '\' + $to.User) } } catch {} }
+        }
         [PSCustomObject]@{
             serviceExists = $svcExists
             serviceState = if ($svc) { $svc.Status } else { 'absent' }
             serviceStartMode = if ($svc) { $svc.StartType } else { $null }
             runEntryValue = $runEntry
             interactiveExplorerSessionIds = $explorer
+            explorerOwnerBySession = $explorerOwnerBySession
             trayExePathLive = if ($trayProc.Count) { $trayProc[0].Path } else { $null }
+            trayOwnerIdentity = $trayOwner
             traySessionIds = if ($trayProc.Count) { @($trayProc | Select-Object -ExpandProperty SessionId -Unique) } else { @() }
             powerShellDirectSessionId = (Get-Process -Id $pid).SessionId
             normalUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -628,12 +659,21 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     } -ArgumentList 'PathVeer Tray', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
     $expectedTrayPath = $prep.installManifest.trayExecutablePath
+    $liveStateNorm = (Get-EnumString $live.serviceState)
+    $liveStartModeNorm = (Get-EnumString $live.serviceStartMode)
     $reasons = [System.Collections.Generic.List[string]]::new()
     if (-not $live.serviceExists) { $reasons.Add('prepared-state-mismatch: PathVeer service absent') }
-    if ($live.serviceState -ne 'Running') { $reasons.Add("prepared-state-mismatch: service not Running (was: $($live.serviceState))") }
-    if ($live.serviceStartMode -ne 'Automatic') { $reasons.Add("prepared-state-mismatch: service not Automatic (was: $($live.serviceStartMode))") }
-    if ($null -eq $manifest -or $null -eq $manifest.installRoot) { $reasons.Add('prepared-state-mismatch: install manifest unavailable') }
-    if ($prep.candidateVersion -and $manifest -and $manifest.productVersion -and $manifest.productVersion -ne $prep.candidateVersion) {
+    if ($liveStateNorm -ne 'Running') { $reasons.Add("prepared-state-mismatch: service not Running (was: $($live.serviceState))") }
+    if ($liveStartModeNorm -ne 'Automatic') { $reasons.Add("prepared-state-mismatch: service not Automatic (was: $($live.serviceStartMode))") }
+    if ($null -eq $manifest -or $null -eq $manifest.installRoot -or $null -eq $manifest.productVersion) { $reasons.Add('prepared-state-mismatch: install manifest unavailable') }
+    # Version comparison: require the prepared candidateVersion to be authoritative (non-null) and to match the
+    # live manifest productVersion. A null candidateVersion is a HARNESS defect (PREP must set it from the
+    # manifest productVersion) and must NOT be silently skipped.
+    if ([string]::IsNullOrWhiteSpace($prep.candidateVersion)) {
+        $reasons.Add('prepared-state-mismatch: prepared candidateVersion is null (PREP evidence defect)')
+    } elseif ($null -eq $manifest -or [string]::IsNullOrWhiteSpace($manifest.productVersion)) {
+        $reasons.Add('prepared-state-mismatch: live manifest productVersion unavailable')
+    } elseif ($manifest.productVersion -ne $prep.candidateVersion) {
         $reasons.Add("prepared-state-mismatch: installed version $($manifest.productVersion) != prepared $($prep.candidateVersion)")
     }
     if ($live.runEntryValue -ne "`"$expectedTrayPath`"") { $reasons.Add('prepared-state-mismatch: pvcert HKCU Tray Run entry missing or path mismatched') }
@@ -652,12 +692,24 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
             'GATE5VerifyPreconditionFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
     }
 
-    # --- Genuine interactive-desktop evidence (Defect #2). PowerShell Direct SessionId is NEVER
-    #     accepted as interactive evidence; the Tray must be running in a pvcert Explorer session. ---
+    # --- Genuine interactive-desktop evidence. PowerShell Direct SessionId (Session 0) is NEVER accepted
+    #     as interactive evidence. The Tray must be running in a PV-CERT\pvcert Explorer session, AND that
+    #     Explorer must belong to PV-CERT\pvcert (another interactive account may own a different Explorer
+    #     session, which must NOT satisfy the proof). The Tray itself must be owned by PV-CERT\pvcert if
+    #     ownership is observable. All owner attribution is read-only (GetOwner on Win32_Process). ---
     $interactiveExplorerSessionIds = $live.interactiveExplorerSessionIds
     $traySessionIds = $live.traySessionIds
-    $interactiveMatch = ($traySessionIds.Count -gt 0 -and
-        @($traySessionIds | Where-Object { $_ -in $interactiveExplorerSessionIds }).Count -gt 0)
+    $expectedOwner = 'PV-CERT\pvcert'
+    # pvcert-owned interactive Explorer sessions (owner attribution, not just SessionId).
+    $pvcertExplorerSessionIds = @($interactiveExplorerSessionIds | Where-Object {
+        $live.explorerOwnerBySession.ContainsKey($_) -and $live.explorerOwnerBySession[$_] -eq $expectedOwner
+    })
+    # Tray runs in a pvcert-owned Explorer session.
+    $trayInPvcertExplorer = ($traySessionIds.Count -gt 0 -and
+        @($traySessionIds | Where-Object { $_ -in $pvcertExplorerSessionIds }).Count -gt 0)
+    # Tray owner is pvcert (if observable).
+    $trayOwnedByPvcert = ($null -eq $live.trayOwnerIdentity) -or ($live.trayOwnerIdentity -eq $expectedOwner)
+    $interactiveMatch = ($traySessionIds.Count -gt 0 -and $trayInPvcertExplorer -and $trayOwnedByPvcert)
     $trayPathMatchesManifest = ($live.trayExePathLive -and $expectedTrayPath -and
         $live.trayExePathLive -eq $expectedTrayPath)
 
@@ -671,7 +723,10 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
             reason = 'A genuine PV-CERT\pvcert interactive logon is required so Windows executes the per-user Tray Run entry. The Tray must be running in a PV-CERT\pvcert Explorer session (matching SessionId); a Session-0 PowerShell Direct Tray is NOT the interactive-desktop Tray.'
             powerShellDirectSessionId = $live.powerShellDirectSessionId
             interactiveExplorerSessionIds = $interactiveExplorerSessionIds
+            pvcertExplorerSessionIds = $pvcertExplorerSessionIds
+            explorerOwnerBySession = $live.explorerOwnerBySession
             traySessionIds = $traySessionIds
+            trayOwnerIdentity = $live.trayOwnerIdentity
             trayExePathLive = $live.trayExePathLive
             expectedTrayPath = $expectedTrayPath
             notes = @(
@@ -706,42 +761,36 @@ function Run-GATE5VERIFY([System.Management.Automation.Runspaces.PSSession]$Sess
     return $contractOut
 }
 
-function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session, $PreparedEvidence = $null) {
-    Write-Stage "SERVICE/TRAY AUTHORITY CONTRACT"
-    # Normalize a ServiceController enum value regardless of how it was obtained:
-    #  - native [System.ServiceProcess.ServiceControllerStatus]/[ServiceStartMode] enum
-    #  - deserialized remoting wrapper: @{ value = 4; Value = "Running" }  (Invoke-Command over a
-    #    session serializes enums as this PSObject with int 'value' + string 'Value')
-    #  - plain string
-    #  - bare int (numeric fallback mapped for the two fields this contract asserts)
-    function Get-EnumString($obj) {
-        if ($null -eq $obj) { return $null }
-        if ($obj -is [string]) { return [string]$obj }
-        # native enum (not remoted) -> string name
-        if ($obj -is [System.Enum]) { return $obj.ToString() }
-        # bare int numeric fallback (ServiceControllerStatus: 4 = Running; ServiceStartMode: 2 = Automatic)
-        if ($obj -is [int]) {
-            if ($obj -eq 4) { return 'Running' }
-            if ($obj -eq 2) { return 'Automatic' }
-            return [string]$obj
-        }
-        # remoting wrapper: { Value = "Running" } (string) wins; { value = 4 } (int) fallback
-        try {
-            if ($obj.PSObject.Properties['Value'] -and $obj.Value -is [string] -and $obj.Value) { return [string]$obj.Value }
-        } catch {}
-        try {
-            if ($obj.PSObject.Properties['value']) {
-                $v = $obj.value
-                if ($v -is [string] -and $v) { return [string]$v }
-                if ($v -is [int]) {
-                    if ($v -eq 4) { return 'Running' }
-                    if ($v -eq 2) { return 'Automatic' }
-                    return [string]$v
-                }
-            }
-        } catch {}
+function Get-EnumString($obj) {
+    if ($null -eq $obj) { return $null }
+    if ($obj -is [string]) { return [string]$obj }
+    if ($obj -is [System.Enum]) { return $obj.ToString() }
+    if ($obj -is [int]) {
+        if ($obj -eq 4) { return 'Running' }
+        if ($obj -eq 2) { return 'Automatic' }
         return [string]$obj
     }
+    try {
+        if ($obj.PSObject.Properties['Value'] -and $obj.Value -is [string] -and $obj.Value) { return [string]$obj.Value }
+    } catch {}
+    try {
+        if ($obj.PSObject.Properties['value']) {
+            $v = $obj.value
+            if ($v -is [string] -and $v) { return [string]$v }
+            if ($v -is [int]) {
+                if ($v -eq 4) { return 'Running' }
+                if ($v -eq 2) { return 'Automatic' }
+                return [string]$v
+            }
+        }
+    } catch {}
+    return [string]$obj
+}
+
+function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSession]$Session, $PreparedEvidence = $null) {
+    Write-Stage "SERVICE/TRAY AUTHORITY CONTRACT"
+    # Shared Get-EnumString (script scope) normalizes ServiceController enums: native enum, numeric
+    # fallback (4->Running, 2->Automatic), remoted wrapper {value/Value}, or plain string.
     $jea = Get-GuestJeaSession $script:Cred
     # --- Service state BEFORE Tray stop, read INDEPENDENTLY through the JEA virtual account ---
     $svcBefore = Get-GuestJeaServiceState -Session $Session -JeaSession $jea
@@ -763,7 +812,9 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
     #     (cliExists=false, serviceStateAtCliAttempt='absent', ipcPipeNamePresentAfter=false)
     #     into the fallback object. GATE-5 (05-gate5-fresh-install.json) already obtained the
     #     manifest with installRoot/cliExecutablePath/trayExecutablePath, so we reuse it. ---
-    $manifest = Get-GuestJeaInstallManifest -Session $Session -JeaSession $jea
+    $manifestResponse = Get-GuestJeaInstallManifest -Session $Session -JeaSession $jea
+    # Get-GuestJeaInstallManifest returns a wrapper whose authoritative manifest is under .result.
+    $manifest = $manifestResponse.result
     $manifestOk = ($null -ne $manifest -and $null -ne $manifest.installRoot -and
                    $null -ne $manifest.cliExecutablePath -and $null -ne $manifest.trayExecutablePath)
     if (-not $manifestOk) {
