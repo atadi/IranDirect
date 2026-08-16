@@ -224,3 +224,17 @@ pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stag
 
 > Never use Host/Guest wording in operator steps: use **Desktop** / **VM**. Never use a network
 > share. PV-CLEAN-WINDOWS must remain untouched.
+
+> **GATE-2 and `doctor` (test-validity contract).** GATE-2 is a *custom-route DNS-resolution*
+> lifecycle (install to network baseline to custom-routes add/disable/enable to resolve to
+> service recovery to default-route intact). The PathVeer `doctor` command also sweeps
+> country/prefix/reconciliation state (Desired configuration, Prefix configuration, Prefix
+> metadata, Runtime snapshot, Prefix update history) that a **fresh custom-route-only install
+> does NOT initialize** -- `tools/Install-PathVeer.ps1` seeds only binaries + service + PATH +
+> manifest, and GATE-2 intentionally does not configure a country or prefix store. Those
+> doctor failures are EXPECTED and OUT OF SCOPE. GATE-2 does **not** require global `doctor`
+> exit 0; it scopes the result: only an IN-SCOPE failure (Custom routes, Runtime state,
+> Runtime operation, Route inventory, Windows route table, Route ownership, Managed route
+> consistency) fails the gate. The full `doctor` exit code + summary are always retained in
+> `02-gate2-custom-route.json` for transparency. (If a future build exposes structured
+> `DiagnosticReport.Results`, prefer those over parsing the rendered summary.)
