@@ -357,27 +357,79 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
     #     Stop-PathVeerTray is intentionally NOT used for termination (its nullable stop-result field must
     #     never be the precondition authority). Service state is read separately via JEA below. No
     #     arbitrary long sleeps: observation is bounded. ---
+    # --- Authoritative install manifest: source the product's OWN install paths instead of
+    #     reconstructing them from $env:ProgramFiles. The old code did
+    #       $pf = $env:ProgramFiles; Join-Path (Join-Path $pf 'Tray') 'PathVeer.Tray.exe'
+    #     which yields 'C:\Program Files\Tray\PathVeer.Tray.exe' and silently drops the
+    #     'PathVeer' segment of the install root. A path that does not exist then trips the
+    #     "Tray executable not found" early return and bakes FALSE product facts
+    #     (cliExists=false, serviceStateAtCliAttempt='absent', ipcPipeNamePresentAfter=false)
+    #     into the fallback object. GATE-5 (05-gate5-fresh-install.json) already obtained the
+    #     manifest with installRoot/cliExecutablePath/trayExecutablePath, so we reuse it. ---
+    $manifest = Get-GuestJeaInstallManifest -Session $Session -JeaSession $jea
+    $manifestOk = ($null -ne $manifest -and $null -ne $manifest.installRoot -and
+                   $null -ne $manifest.cliExecutablePath -and $null -ne $manifest.trayExecutablePath)
+    if (-not $manifestOk) {
+        $probe = [PSCustomObject]@{
+            remoteProbeSucceeded = $false
+            remoteProbeErrorType = 'ManifestResolution'
+            remoteProbeErrorMessage = ('Authoritative install manifest unavailable or missing ' +
+                'installRoot/cliExecutablePath/trayExecutablePath; product paths cannot be resolved safely.')
+            installRootObserved = if ($manifest) { $manifest.installRoot } else { $null }
+            cliExePath = $null; trayExePath = $null
+        }
+        Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            elevationAvailable = ($jea -ne $null)
+            contract = $null
+            failReasons = @('harness-probe-manifest-resolution-failed')
+            probe = $probe
+        })
+        # Path-resolution failure must be explicit; it must NOT masquerade as a product/CLI/IPC failure.
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('Service/Tray contract HARNESS/PROBE FAILURE: install manifest resolution failed'),
+            'ServiceTrayContractProbeFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
+
     $remote = Invoke-Command -Session $Session -ScriptBlock {
-        $pf      = $env:ProgramFiles
-        $cliExe  = Join-Path (Join-Path $pf 'Cli')  'PathVeer.Cli.exe'
-        $trayExe = Join-Path (Join-Path $pf 'Tray') 'PathVeer.Tray.exe'
+        param($cliExe, $trayExe, $installRoot)
+        $probeFailed = $false; $probeErrorType = $null; $probeErrorMessage = $null
+        try {
+        # --- Session instrumentation: NORMAL-USER IDENTITY (PV-CERT\pvcert) is proven by the
+        #     PowerShell Direct session, but that session runs in Session 0, NOT the interactive
+        #     desktop (Explorer lives in Session 1). A normal-user Tray launched here runs in
+        #     Session 0, so it must NOT be claimed as the interactive-desktop Tray. We capture the
+        #     session ids explicitly so the report can distinguish the two concepts (Defect #2). ---
+        $psDirectSessionId = (Get-Process -Id $pid).SessionId
+        $interactiveExplorerSessionIds = @(Get-Process -Name 'explorer' -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty SessionId -Unique | Where-Object { $_ -ne $null })
+
+        $cliExeExistsAtExactPath = (Test-Path -LiteralPath $cliExe -PathType Leaf)
+        $trayExeExistsAtExactPath = (Test-Path -LiteralPath $trayExe -PathType Leaf)
 
         # --- Establish Tray under the NORMAL user (launch if absent) and capture EXACT PIDs ---
-        if (-not (Test-Path -LiteralPath $trayExe -PathType Leaf)) {
+        if (-not $trayExeExistsAtExactPath) {
             return [PSCustomObject]@{
                 preconditionEstablished = $false; pidsBefore = @(); stopAttempted = $false
                 stoppedPids = @(); pidsImmediatelyAfterStop = @(); pidsAfterObservation = @()
                 presentAfterWait = $false; trayExePath = $trayExe; cliExists = $false
                 cliAttemptCount = 0; cliExitCode = $null; cliStdoutStderr = $null
                 cliHealthyDuringPoll = $false; serviceStateAtCliAttempt = 'absent'
-                ipcPipeNamePresentAfter = $false; note = 'Tray executable not found'
+                ipcPipeNamePresentAfter = $false; note = 'Tray executable not found at authoritative manifest path'
+                installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+                cliExeExistsAtExactPath = $cliExeExistsAtExactPath; trayExeExistsAtExactPath = $trayExeExistsAtExactPath
+                powerShellDirectSessionId = $psDirectSessionId; interactiveExplorerSessionIds = $interactiveExplorerSessionIds
+                traySessionIdBefore = @(); traySessionIdAfter = @()
+                remoteProbeSucceeded = $true; remoteProbeErrorType = $null; remoteProbeErrorMessage = $null
             }
         }
         $p = @(Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue)
+        $traySessionIdBefore = if ($p.Count) { @($p | Select-Object -ExpandProperty SessionId -Unique) } else { @() }
         if ($p.Count -eq 0) {
             Start-Process -FilePath $trayExe -ErrorAction Stop
             Start-Sleep -Seconds 2
             $p = @(Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue)
+            $traySessionIdBefore = if ($p.Count) { @($p | Select-Object -ExpandProperty SessionId -Unique) } else { @() }
         }
         $preconditionEstablished = ($p.Count -ge 1)
         $pidsBefore = @($p | ForEach-Object { $_.Id })
@@ -387,10 +439,15 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
                 preconditionEstablished = $false; pidsBefore = $pidsBefore; stopAttempted = $false
                 stoppedPids = @(); pidsImmediatelyAfterStop = @(); pidsAfterObservation = @()
                 presentAfterWait = $false; trayExePath = $trayExe
-                cliExists = (Test-Path -LiteralPath $cliExe -PathType Leaf)
+                cliExists = $cliExeExistsAtExactPath
                 cliAttemptCount = 0; cliExitCode = $null; cliStdoutStderr = $null
                 cliHealthyDuringPoll = $false; serviceStateAtCliAttempt = 'absent'
                 ipcPipeNamePresentAfter = $false; note = 'Tray could not be established under normal user'
+                installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+                cliExeExistsAtExactPath = $cliExeExistsAtExactPath; trayExeExistsAtExactPath = $trayExeExistsAtExactPath
+                powerShellDirectSessionId = $psDirectSessionId; interactiveExplorerSessionIds = $interactiveExplorerSessionIds
+                traySessionIdBefore = $traySessionIdBefore; traySessionIdAfter = @()
+                remoteProbeSucceeded = $true; remoteProbeErrorType = $null; remoteProbeErrorMessage = $null
             }
         }
 
@@ -420,7 +477,7 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
         $presentAfterWait = ($pidsAfterObservation.Count -gt 0)
 
         # --- Normal-user CLI readiness probe (bounded poll) + named-pipe-name presence ---
-        $cliExists = (Test-Path -LiteralPath $cliExe -PathType Leaf)
+        $cliExists = $cliExeExistsAtExactPath
         $cliProbeTimeoutSeconds = 20
         $cliAttemptIntervalSeconds = 1
         $cliAttempts = @()
@@ -439,6 +496,8 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
         $finalAttempt = if ($cliAttempts.Count) { $cliAttempts[-1] } else { $null }
         $svc = Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue
         $pipe = [System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*PathVeer.Control.v1*' }
+        $pAfter = @(Get-Process -Name 'PathVeer.Tray' -ErrorAction SilentlyContinue)
+        $traySessionIdAfter = if ($pAfter.Count) { @($pAfter | Select-Object -ExpandProperty SessionId -Unique) } else { @() }
         [PSCustomObject]@{
             preconditionEstablished = $preconditionEstablished
             pidsBefore = $pidsBefore; stopAttempted = $stopAttempted; stoppedPids = $stoppedPids
@@ -452,7 +511,44 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
             serviceStateAtCliAttempt = if ($svc) { $svc.Status } else { 'absent' }
             ipcPipeNamePresentAfter = ($null -ne $pipe)
             note = $null
+            installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+            cliExeExistsAtExactPath = $cliExeExistsAtExactPath; trayExeExistsAtExactPath = $trayExeExistsAtExactPath
+            powerShellDirectSessionId = $psDirectSessionId; interactiveExplorerSessionIds = $interactiveExplorerSessionIds
+            traySessionIdBefore = $traySessionIdBefore; traySessionIdAfter = $traySessionIdAfter
+            remoteProbeSucceeded = $true; remoteProbeErrorType = $null; remoteProbeErrorMessage = $null
         }
+        } catch {
+            return [PSCustomObject]@{
+                probeFailed = $true
+                remoteProbeSucceeded = $false
+                remoteProbeErrorType = 'RemoteBlockException'
+                remoteProbeErrorMessage = ($_.Exception.Message)
+                installRootObserved = $installRoot; cliExePath = $cliExe; trayExePath = $trayExe
+                cliExeExistsAtExactPath = $null; trayExeExistsAtExactPath = $null
+                powerShellDirectSessionId = $null; interactiveExplorerSessionIds = $null
+                traySessionIdBefore = @(); traySessionIdAfter = @()
+            }
+        }
+    } -ArgumentList $manifest.cliExecutablePath, $manifest.trayExecutablePath, $manifest.installRoot
+
+    # --- A probe exception must FAIL as HARNESS/PROBE FAILURE, never pretend product facts were measured. ---
+    if ($remote.probeFailed) {
+        Save-Json '22-servicetray-contract.json' ([PSCustomObject]@{
+            capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            elevationAvailable = ($jea -ne $null)
+            contract = $null
+            failReasons = @('harness-probe-remote-failure')
+            probe = [PSCustomObject]@{
+                remoteProbeSucceeded = $remote.remoteProbeSucceeded
+                remoteProbeErrorType = $remote.remoteProbeErrorType
+                remoteProbeErrorMessage = $remote.remoteProbeErrorMessage
+                installRootObserved = $remote.installRootObserved
+                cliExePath = $remote.cliExePath; trayExePath = $remote.trayExePath
+            }
+        })
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('Service/Tray contract HARNESS/PROBE FAILURE: ' + $remote.remoteProbeErrorType + ' - ' + $remote.remoteProbeErrorMessage),
+            'ServiceTrayContractProbeFailed', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
     }
 
     # --- Service state AFTER Tray stop, read INDEPENDENTLY through the JEA virtual account ---
@@ -486,6 +582,28 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
         serviceStateAtCliAttempt     = $remote.serviceStateAtCliAttempt
         ipcPipeNamePresentAfter      = $remote.ipcPipeNamePresentAfter
         trayExePath                  = $remote.trayExePath
+        # --- Authoritative path evidence: record EXACTLY the paths the probe tested (Defect #1) ---
+        installRootObserved          = $remote.installRootObserved
+        cliExePath                   = $remote.cliExePath
+        cliExeExistsAtExactPath      = $remote.cliExeExistsAtExactPath
+        trayExistsAtExactPath        = $remote.trayExeExistsAtExactPath
+        # --- Probe diagnostic: a probe exception must never masquerade as measured product facts (Defect #4) ---
+        remoteProbeSucceeded         = $remote.remoteProbeSucceeded
+        remoteProbeErrorType         = $remote.remoteProbeErrorType
+        remoteProbeErrorMessage      = $remote.remoteProbeErrorMessage
+        # --- Session instrumentation: distinguish NORMAL-USER IDENTITY from INTERACTIVE USER SESSION
+        #     (Defect #2). PowerShell Direct == PV-CERT\pvcert (identity) but runs in Session 0,
+        #     NOT the interactive desktop (Explorer Session 1). A Tray launched here is a Session-0
+        #     Tray, not the interactive-desktop Tray. traySessionIdBefore/After are recorded so an
+        #     interactive-Tray claim can require a matching interactive Explorer session id. ---
+        powerShellDirectSessionId    = $remote.powerShellDirectSessionId
+        interactiveExplorerSessionIds = $remote.interactiveExplorerSessionIds
+        traySessionIdBefore          = $remote.traySessionIdBefore
+        traySessionIdAfter           = $remote.traySessionIdAfter
+        # A 'true' interactive-Tray claim would require traySessionIdBefore to match an actual
+        # interactive Explorer session id. This run only exercises a Session-0 normal-user Tray,
+        # so interactiveDesktopTrayVerified = false by design (see design note in FINAL REPORT).
+        interactiveDesktopTrayVerified = $false
     }
 
     # --- Contract assertions: fail loudly, never silently continue ---
