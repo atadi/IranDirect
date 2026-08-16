@@ -100,7 +100,7 @@ function Invoke-GuestJeaFunction {
                 $sv = [string]($ArgumentList['SubVerb'] ?? 'list')
                 $arg = [string]($ArgumentList['Argument'] ?? '')
                 $validVerbs = @('status','repair','doctor','enable','disable','custom-routes')
-                $validSub = @('add-cidr','list')
+                $validSub = @('list','add-domain','add-ip','add-cidr','enable','disable','remove','resolve','status','invalidate','invalidate-all')
                 if ($validVerbs -notcontains $v) { throw 'Invalid Verb argument.' }
                 if ($validSub -notcontains $sv) { throw 'Invalid SubVerb argument.' }
                 if ($arg -notmatch '^[\d./\sA-Za-z0-9-]{0,120}$') { throw 'Invalid Argument.' }
