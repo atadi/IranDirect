@@ -201,6 +201,43 @@ function Wait-GuestNetworkReady([System.Management.Automation.Runspaces.PSSessio
     }
 }
 
+function Install-PathVeerProtectedCandidate([System.Management.Automation.Runspaces.PSSession]$Session) {
+    # Shared install precondition for install-dependent lifecycle gates (GATE-2/3/4/8/28).
+    # Establishes the product lifecycle state each gate truthfully claims to test: installs the CURRENT
+    # protected candidate (PathVeer-1.0.0-beta.1) via the EXISTING trusted JEA wrapper, then FAIL-CLOSED
+    # asserts the installation actually exists. No new privileged mechanism; JEA trust boundary and the
+    # protected payload are unchanged (the wrapper always installs the staged protected package).
+    $jea = Get-GuestJeaSession $script:Cred
+    $install = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Install -Feature @('RegisterShell','InstallTray')
+    $svcState = $null; $version = $null; $err = $null; $verified = $false
+    if ($install.result -and $install.result.exitCode -eq 0) {
+        try {
+            $probe = Invoke-Command -Session $Session -ScriptBlock {
+                $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
+                $ver = $null
+                try { $ver = (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).productVersion } catch {}
+                [PSCustomObject]@{ serviceState = $svc.Status; version = $ver }
+            }
+            $svcState = $probe.serviceState; $version = $probe.version; $verified = $true
+        } catch { $err = $_.Exception.Message }
+    }
+    $result = [PSCustomObject]@{
+        installExitCode = if ($install.result) { $install.result.exitCode } else { $null }
+        installElevated = if ($install.result) { $install.elevationAvailable } else { $null }
+        serviceState = $svcState
+        productVersion = $version
+        verified = $verified
+        verifyError = $err
+    }
+    if (-not $verified) {
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new(
+                "Protected-candidate install precondition failed (installExitCode=$($result.installExitCode); serviceState=$svcState; verifyError='$err'). Downstream gate assertions must not run against an absent PathVeer product."),
+            'ProtectedCandidateInstallPreconditionFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $result)
+    }
+    return $result
+}
+
 function Copy-ToGuest([System.Management.Automation.Runspaces.PSSession]$Session, [string[]]$Paths, [string]$Dest) {
     Step "Copying $($Paths.Count) item(s) into guest $Dest"
     Invoke-Command -Session $Session -ScriptBlock { param($d) if(-not(Test-Path $d)){ New-Item -ItemType Directory -Force -Path $d | Out-Null } } -ArgumentList $Dest
@@ -1323,6 +1360,10 @@ function Run-ServiceTrayContract([System.Management.Automation.Runspaces.PSSessi
 
 function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "GATE-3 REBOOT PERSISTENCE (VM only)"
+    # Lifecycle precondition: PV-CERT-HARNESS baseline has NO PathVeer service. Install the protected
+    # candidate first (fail-closed) so the pre-reboot service snapshot and persistence assertions are
+    # truthful. Then reboot via the existing certification-safe mechanism and re-verify after readiness.
+    $inst = Install-PathVeerProtectedCandidate $Session
     $before = Invoke-Command -Session $Session -ScriptBlock {
         $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
         $policy = 'absent'
@@ -1348,13 +1389,16 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
         }
     }
     Save-Json '03-gate3-reboot-persistence.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); before=$before; after=$after; rebootedVmOnly=$true
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; before=$before; after=$after; rebootedVmOnly=$true
     })
     return @{ Session=$session2; after=$after }
 }
 
 function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [string]$Prefix) {
     Write-Stage "GATE-2 ROUTE MUTATION / RECOVERY (bounded TEST-NET $Prefix)"
+    # Lifecycle precondition: PV-CERT-HARNESS baseline has NO PathVeer product. Install the protected
+    # candidate first (fail-closed) so the CLI/service/route assertions below are truthful.
+    $inst = Install-PathVeerProtectedCandidate $Session
     $jea = Get-GuestJeaSession $script:Cred
     $routesBefore = Invoke-Command -Session $Session -ScriptBlock {
         @(Get-NetRoute -ErrorAction SilentlyContinue | Select-Object DestinationPrefix, NextHop, InterfaceIndex, RouteMetric)
@@ -1383,6 +1427,7 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
     }
     $ev = [PSCustomObject]@{
         routesBeforeCount = $routesBefore.Count
+        preconditionInstall = $inst
         cliExists = $true
         cliPath = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
         addCustomRouteExit = $addC.result.exitCode
@@ -1409,6 +1454,17 @@ function Run-GATE2([System.Management.Automation.Runspaces.PSSession]$Session, [
 function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "GATE-4 PURGE -> REINSTALL"
     $jea = Get-GuestJeaSession $script:Cred
+    # Lifecycle precondition: prove an ACTUAL installed product can be purged and cleanly reinstalled.
+    # Do NOT start with PurgeUninstall against an empty baseline. Install the protected candidate first
+    # (fail-closed), verify it exists, then purge.
+    $inst = Install-PathVeerProtectedCandidate $Session
+    $afterInstall = Invoke-Command -Session $Session -ScriptBlock {
+        [PSCustomObject]@{
+            serviceExists = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
+            programFiles = (Test-Path 'C:\Program Files\PathVeer')
+            programData = (Test-Path "$env:ProgramData\PathVeer")
+        }
+    }
     # Hard purge via trusted wrapper.
     $u = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action PurgeUninstall
     $afterUninstall = Invoke-Command -Session $Session -ScriptBlock {
@@ -1429,7 +1485,7 @@ function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
         [PSCustomObject]@{ reinstallExitCode = $r.result.exitCode; reinstalledServiceState = $svc.Status; reinstallElevated = $r.elevationAvailable }
     } -ArgumentList $r
     Save-Json '04-gate4-purge-reinstall.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); uninstall = $afterUninstall; reinstall = $svc
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; uninstall = $afterUninstall; reinstall = $svc
     })
     return $svc
 }
@@ -1437,6 +1493,16 @@ function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
 function Run-GATE8([System.Management.Automation.Runspaces.PSSession]$Session) {
     Write-Stage "GATE-8 UNINSTALL / STATE-PRESERVED REINSTALL"
     $jea = Get-GuestJeaSession $script:Cred
+    # Lifecycle precondition: prove NORMAL uninstall preservation against an ACTUALLY INSTALLED product.
+    # Do NOT write the sentinel and uninstall when no product has first been installed. Install the
+    # protected candidate first (fail-closed), verify it exists, then create the sentinel.
+    $inst = Install-PathVeerProtectedCandidate $Session
+    $afterInstall = Invoke-Command -Session $Session -ScriptBlock {
+        [PSCustomObject]@{
+            serviceExists = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
+            programFiles = (Test-Path 'C:\Program Files\PathVeer')
+        }
+    }
     # Write a sentinel into persistent state to prove preservation across reinstall.
     Invoke-Command -Session $Session -ScriptBlock {
         $stateDir = Join-Path $env:ProgramData 'PathVeer'
@@ -1470,7 +1536,7 @@ function Run-GATE8([System.Management.Automation.Runspaces.PSSession]$Session) {
         }
     } -ArgumentList $r
     Save-Json '08-gate8-uninstall-reinstall.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); uninstall = $afterUninstall; reinstall = $reinstallSentinelPreserved
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; uninstall = $afterUninstall; reinstall = $reinstallSentinelPreserved
     })
     return $reinstallSentinelPreserved
 }
@@ -1533,10 +1599,10 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     # validates candidate identity and asserts the protected payload exists, then installs it.
     $expectedPackageId = 'PathVeer-1.0.0-beta.1'
     Assert-CandidateMatchesProtected -CandidatePackage $Pkg -ExpectedPackageId $expectedPackageId
-    # SECURITY (Option A): the harness never promotes untrusted incoming into the protected tree.
-    # The trusted wrapper enforces the protected installer + payload preconditions inside the
-    # privileged virtual-account context; the harness does not inspect protected paths from pvcert.
-    # Same-version repair/install over existing (elevated).
+    # Lifecycle precondition: Repair against an EMPTY baseline does not prove repair. Install the SAME
+    # protected candidate first (fail-closed) so Repair runs over an actually installed product.
+    $inst = Install-PathVeerProtectedCandidate $Session
+    # Same-version repair/install over existing (elevated) — same protected candidate.
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null
     if ($r.result -and $r.result.exitCode -eq 0) {
@@ -1548,6 +1614,7 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     }
     Save-Json '28-gate28-repair.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
+        preconditionInstall = $inst
         installExitCode = $r.result.exitCode
         installElevated = $r.elevationAvailable
         repairedVersion = $ver
