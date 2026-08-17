@@ -181,20 +181,36 @@ function Invoke-PathVeerCertificationInstall {
         # Build a fixed, validated argument list. No caller-supplied paths/strings reach the process.
         # Translate the CERTIFICATION harness action vocabulary to the PRODUCT installer contract.
         # The product installer (tools/Install-PathVeer.ps1) supports install / uninstall (-PurgeState) /
-        # status / statejson. It has NO 'PurgeUninstall' action and rejects it at parameter binding before
-        # the body runs, so Invoke-Uninstall never executes. The harness may keep using 'PurgeUninstall' as a
-        # convenient semantic; we translate it to the product 'uninstall -PurgeState' so the product purge
-        # body actually runs. The install path registered Apps&Features + Start Menu entries via -RegisterShell,
-        # so the symmetric uninstall must request the same cleanup (-RegisterShell) or the Apps&Features
-        # registration survives — breaking the GATE-4/GATE-8 postconditions. Pass -RegisterShell for both
-        # Uninstall and PurgeUninstall; the harness 'Uninstall' maps to product 'uninstall' WITHOUT -PurgeState
-        # (GATE-8 state-preservation contract).
+        # status / statejson. It has NO 'PurgeUninstall', 'Repair', or 'Upgrade' action and rejects any of
+        # those at parameter binding before the body runs, so the product body never executes. The harness
+        # may keep using 'PurgeUninstall' / 'Repair' / 'Upgrade' as convenient semantics; we translate them
+        # to the product 'install' contract so the product repair/upgrade body actually runs.
+        #
+        # AUTHORITATIVE SAME-VERSION REPAIR / UPGRADE PRIMITIVE: Invoke-Install (product) branches on
+        # $previousVersion. It only blocks when installed is NEWER (downgrade, Phase 37.2). A SAME version
+        # is NOT blocked, and runs the full repair sequence: stop service -> replace binaries -> re-point
+        # SCM -> re-add CLI/tray -> restart -> wait Running -> readiness check -> re-register Apps&Features
+        # (if -RegisterShell) -> rewrite manifest -> emit success. Persistent state ($env:ProgramData\PathVeer)
+        # is untouched. So both GATE-28 Repair (same version) and GATE-6 Upgrade (newer version) map to
+        # product 'install' with the same protected package + features. This is the SAME vocabulary-mismatch
+        # class previously fixed for PurgeUninstall (GATE-4): the harness exposed a higher-level semantic
+        # that the product contract does not name directly; the adapter translates intent to the product
+        # primitive rather than inventing an unsupported -Action. (GATE-28 root cause: 'Repair' reached the
+        # product as -Action Repair and was rejected at binding -> exit 1, no result record.)
+        #
+        # The install path registered Apps&Features + Start Menu entries via -RegisterShell, so the symmetric
+        # uninstall must request the same cleanup (-RegisterShell) or the Apps&Features registration survives
+        # — breaking the GATE-4/GATE-8 postconditions. Pass -RegisterShell for both Uninstall and
+        # PurgeUninstall; the harness 'Uninstall' maps to product 'uninstall' WITHOUT -PurgeState (GATE-8
+        # state-preservation contract). Install/Upgrade/Repair map to product 'install' (+ their features).
         $productAction = $Action
         $addPurgeState = $false
         $addRegisterShell = $false
         switch ($Action) {
             'PurgeUninstall' { $productAction = 'uninstall'; $addPurgeState = $true;  $addRegisterShell = $true }
             'Uninstall'      { $productAction = 'uninstall';                         $addRegisterShell = $true }
+            'Upgrade'        { $productAction = 'install' }
+            'Repair'         { $productAction = 'install' }
         }
         $psiArgs = @('-NoProfile', '-File', $script:InstallScript)
         $psiArgs += '-Action';  $psiArgs += $productAction

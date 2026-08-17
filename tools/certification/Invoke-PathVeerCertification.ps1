@@ -2212,34 +2212,77 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     # Lifecycle precondition: Repair against an EMPTY baseline does not prove repair. Install the SAME
     # protected candidate first (fail-closed) so Repair runs over an actually installed product.
     $inst = Install-PathVeerProtectedCandidate $Session -Stage GATE28
-    # Same-version repair/install over existing (elevated) — same protected candidate.
+    # Same-version repair/install over existing (elevated) — same protected candidate. The JEA adapter
+    # translates the certification 'Repair' semantic to the product 'install' contract (Invoke-Install is
+    # the authoritative same-version repair primitive: it is NOT blocked when the installed version equals
+    # the candidate, and re-runs the full repair sequence). Passing -Action Repair directly would be
+    # rejected by the product ValidateSet at parameter binding -> exit 1, no result record.
     $r = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action Repair -Feature @('RegisterShell','InstallTray')
     $svcAfter = $null; $ver = $null; $cliRepairExit = $null
-    if ($r.result -and $r.result.exitCode -eq 0) {
+    # FAIL-CLOSED FIRST: require a concrete, successful product repair operation BEFORE any downstream
+    # product-state checks can establish PASS. elevationAvailable only proves the JEA privileged channel
+    # was available; it does NOT prove the product ran or succeeded. If the repair op fails (wrapper null,
+    # installer not attempted/started, exit code missing/non-zero, product result missing, result
+    # success=false, or child error), FAIL immediately for the causal repair problem and capture the
+    # hardened diagnostics — do NOT treat null/missing data as success.
+    $repairFail = [System.Collections.Generic.List[string]]::new()
+    $rr = $r.result
+    if ($null -eq $rr) {
+        $repairFail.Add('repair wrapper/bridge returned no result object')
+    } else {
+        if ($rr.installerInvocationAttempted -ne $true) { $repairFail.Add('repair installer invocation was not attempted by the trusted wrapper') }
+        if ($rr.installerStarted -ne $true) { $repairFail.Add('repair installer process did not start') }
+        if ($null -eq $rr.installerExitCode) { $repairFail.Add('repair installerExitCode missing (expected 0)') }
+        elseif ($rr.installerExitCode -ne 0) { $repairFail.Add("repair-exitCode=$($rr.installerExitCode) (expected 0)") }
+        if ($rr.productResultMissing -eq $true) { $repairFail.Add('repair product result record missing (product body never ran or crashed before Write-ResultRecord)') }
+        if ($rr.installerResult -and $rr.installerResult.success -eq $false) { $repairFail.Add("repair product reported failure: [$($rr.installerResult.category)] $($rr.installerResult.message)") }
+        if ($rr.wrapperError) { $repairFail.Add("repair wrapper error: $($rr.wrapperError)") }
+        if ($rr.childError) { $repairFail.Add("repair child error: $($rr.childError)") }
+    }
+    # Only when the repair OPERATION succeeded do we inspect downstream product state.
+    if ($repairFail.Count -eq 0) {
         $svcAfter = (Invoke-Command -Session $Session -ScriptBlock { (Get-Service -Name 'PathVeer' -ErrorAction Stop).Status })
         $ver = (Invoke-Command -Session $Session -ScriptBlock { (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw | ConvertFrom-Json).productVersion })
-        # CLI repair verb (privileged, guarded, via trusted wrapper).
+        # CLI repair verb (privileged, guarded, via trusted wrapper). Verifies post-repair CLI operation.
         $rep = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'repair'
         $cliRepairExit = $rep.result.exitCode
     }
     # FAIL-CLOSED: require Repair success + same-version verification + CLI repair success before
     # claiming repaired state. The expected protected version is the canonical 1.0.0-beta.1 candidate.
     $expectedRepairVersion = '1.0.0-beta.1'
-    $repairFail = @()
-    if ($r.result.exitCode -ne 0) { $repairFail += "repair-exitCode=$($r.result.exitCode) (expected 0)" }
-    if ($null -eq $svcAfter) { $repairFail += 'PathVeer service absent after repair' }
-    if ($ver -ne $expectedRepairVersion) { $repairFail += "repaired version mismatch (expected='$expectedRepairVersion'; actual='$ver')" }
-    if ($cliRepairExit -ne 0) { $repairFail += "cliRepair exitCode=$cliRepairExit (expected 0)" }
+    if ($null -ne $svcAfter -and $svcAfter -ne 'Running') { $repairFail.Add("PathVeer service not Running after repair (state='$svcAfter')") }
+    if ($ver -ne $expectedRepairVersion) { $repairFail.Add("repaired version mismatch (expected='$expectedRepairVersion'; actual='$ver')") }
+    if ($cliRepairExit -ne 0) { $repairFail.Add("cliRepair exitCode=$cliRepairExit (expected 0)") }
     if ($repairFail.Count -gt 0) {
         $rfEnv = [PSCustomObject]@{
             capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
             preconditionInstall = $inst
-            repairExitCode = $r.result.exitCode
+            # Normalized repair-operation diagnostics (authoritative). productResultMissing / childError
+            # expose exactly WHY a repair failed (e.g. an unsupported -Action reaching the product).
+            repair = [PSCustomObject]@{
+                completed            = if ($r) { $r.completed } else { $null }
+                elevationAvailable   = $r.elevationAvailable
+                elevationSucceeded   = if ($r) { $r.elevationSucceeded } else { $null }
+                installerInvocationAttempted = if ($rr) { $rr.installerInvocationAttempted } else { $null }
+                installerStarted     = if ($rr) { $rr.installerStarted } else { $null }
+                exitCode             = if ($rr) { $rr.installerExitCode } else { $null }
+                category             = if ($rr -and $rr.installerResult) { $rr.installerResult.category } else { $null }
+                message              = if ($rr -and $rr.installerResult) { $rr.installerResult.message } else { $null }
+                wrapperError         = if ($rr) { $rr.wrapperError } else { $null }
+                installerError       = if ($rr) { $rr.installerError } else { $null }
+                productResultMissing = if ($rr) { $rr.productResultMissing } else { $null }
+                childExitCode        = if ($rr) { $rr.childExitCode } else { $null }
+                childError           = if ($rr) { $rr.childError } else { $null }
+                installerResult      = if ($rr) { $rr.installerResult } else { $null }
+                installerProgress    = if ($rr) { $rr.installerProgress } else { $null }
+            }
+            # Legacy fields retained for consumers expecting the old flat names.
+            repairExitCode = if ($rr) { $rr.installerExitCode } else { $null }
             repairElevated = $r.elevationAvailable
             repairedVersion = $ver
             serviceStateAfterRepair = $svcAfter
             cliRepairExitCode = $cliRepairExit
-            repairFailReasons = $repairFail
+            repairFailReasons = $repairFail.ToArray()
             note = 'REPAIR FAILED: did NOT claim repaired state.'
         }
         Save-Json '28-gate28-repair.json' $rfEnv
@@ -2250,11 +2293,28 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     Save-Json '28-gate28-repair.json' ([PSCustomObject]@{
         capturedUtc=(Get-Date).ToUniversalTime().ToString('o')
         preconditionInstall = $inst
-        # Explicit repair-operation evidence:
-        repairExitCode = $r.result.exitCode
-        repairElevated = $r.elevationAvailable
+        # Normalized repair-operation evidence (authoritative):
+        repair = [PSCustomObject]@{
+            completed            = $r.completed
+            elevationAvailable   = $r.elevationAvailable
+            elevationSucceeded   = $r.elevationSucceeded
+            installerInvocationAttempted = $rr.installerInvocationAttempted
+            installerStarted     = $rr.installerStarted
+            exitCode             = $rr.installerExitCode
+            category             = $rr.installerResult.category
+            message              = $rr.installerResult.message
+            wrapperError         = $rr.wrapperError
+            installerError       = $rr.installerError
+            productResultMissing = $rr.productResultMissing
+            childExitCode        = $rr.childExitCode
+            childError           = $rr.childError
+            installerResult      = $rr.installerResult
+            installerProgress    = $rr.installerProgress
+        }
         # Legacy aliases retained for consumers expecting install* naming (populated from the Repair op):
-        installExitCode = $r.result.exitCode
+        repairExitCode = $rr.installerExitCode
+        repairElevated = $r.elevationAvailable
+        installExitCode = $rr.installerExitCode
         installElevated = $r.elevationAvailable
         repairedVersion = $ver
         serviceStateAfterRepair = $svcAfter
