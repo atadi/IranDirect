@@ -779,6 +779,14 @@ function Invoke-Install {
 function Invoke-Uninstall {
     Assert-Administrator
 
+    # Capture the authoritative installed version from the install manifest BEFORE the uninstall
+    # sequence deletes that manifest (see Remove-Item $InstallRoot below). Write-ResultRecord and
+    # Unregister-Uninstall both read $version; under Set-StrictMode -Version Latest an uninitialized
+    # read is a terminating VariableIsUndefined, so the value MUST be set here for every uninstall
+    # path (normal and -PurgeState). Get-InstalledVersion is the same accessor Invoke-Status /
+    # Get-InstallStateObject already use, reading productVersion from install-manifest.json.
+    $version = Get-InstalledVersion
+
     Write-Host ''
     Write-Step 'Uninstalling PathVeer...'
 

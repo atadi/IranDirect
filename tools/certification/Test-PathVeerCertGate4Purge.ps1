@@ -226,12 +226,14 @@ Assert-True (($pA[[array]::IndexOf($pA,'-Action')+1]) -eq 'uninstall' -and ($uA[
 
 # ===================================================================
 # D) READ-ONLY PRODUCT SOURCE AUDIT (Install-PathVeer.ps1)
-#    Proves the REAL product installer defect behind the b7583e5 GATE-4 VariableIsUndefined
-#    WITHOUT executing or modifying product code. Parses the committed product script and
-#    verifies: (1) $version is assigned in exactly one place (Invoke-Install), (2) that
-#    assignment is NOT on the uninstall code path, (3) Write-ResultRecord (and Unregister-
-#    Uninstall) read $version unconditionally, (4) the uninstall result record is emitted
-#    before any version-bearing install state is deleted.
+#    Verifies the REAL product installer defect (b7583e5 GATE-4 VariableIsUndefined)
+#    and its AUTHORIZED FIX (this branch): $version must be initialized on BOTH the
+#    install and uninstall paths. Parses the committed product script and verifies:
+#    (1) $version is assigned in exactly two locations (Invoke-Install AND Invoke-Uninstall);
+#    (2) the Invoke-Uninstall assignment captures it from Get-InstalledVersion (installed
+#        state) BEFORE the uninstall sequence deletes the manifest; (3) Write-ResultRecord
+#        reads $version unconditionally; (4) uninstall deletes $InstallRoot (manifest)
+#        BEFORE emitting its result record.
 # ===================================================================
 $product = Join-Path $Root 'tools\Install-PathVeer.ps1'
 Assert-True (Test-Path $product) 'D0 product installer present (read-only audit target)'
@@ -243,26 +245,22 @@ Assert-True ($perrs.Count -eq 0) 'D1 product installer parses clean (no syntax e
 # Every assignment of $version (top-level or in any function body).
 $versionAssigns = [regex]::Matches($pText, '(?m)^\s*\$version\s*=') |
     ForEach-Object { $_.Index }
-Assert-True ($versionAssigns.Count -eq 1) "D2 '$version' is assigned in EXACTLY one location (found $($versionAssigns.Count)); the only assignment is inside Invoke-Install"
+Assert-True ($versionAssigns.Count -eq 2) "D2 '$version' is assigned in exactly TWO locations (found $($versionAssigns.Count)): Invoke-Install (install) and Invoke-Uninstall (FIXED: uninstall captures authoritative version)"
 $onlyAssignLine = ($pText.Substring(0, $versionAssigns[0]) -split "`n").Count
 
-# The only assignment must be within Invoke-Install (function that also builds the install
-# manifest), NOT within Invoke-Uninstall / Invoke-Status / Invoke-StateJson.
-# NOTE: 'Invoke-Install' contains a hyphen, so the name capture must allow '-' (use [\w-]+).
+# Both assignments must be within Invoke-Install and Invoke-Uninstall.
 $funcHeaders = [regex]::Matches($pText, '(?m)^function\s+([\w-]+)') |
     ForEach-Object { [PSCustomObject]@{ Name=$_.Groups[1].Value; Line=($pText.Substring(0,$_.Index) -split "`n").Count } }
-$enclosing = $null
-foreach ($h in $funcHeaders) { if ($h.Line -le $onlyAssignLine) { $enclosing = $h.Name } }
-Assert-True ($enclosing -eq 'Invoke-Install') "D3 the only `$version assignment is inside '$enclosing' (must be Invoke-Install, not Invoke-Uninstall)"
+$enclosing0 = $null; foreach ($h in $funcHeaders) { if ($h.Line -le $onlyAssignLine) { $enclosing0 = $h.Name } }
+$enclosing1 = $null; foreach ($h in $funcHeaders) { if ($h.Line -le ($pText.Substring(0, $versionAssigns[1]) -split "`n").Count) { $enclosing1 = $h.Name } }
+Assert-True ($enclosing0 -eq 'Invoke-Install' -and $enclosing1 -eq 'Invoke-Uninstall') "D3 '$version' assigned inside '$enclosing0' (install) and '$enclosing1' (uninstall) — both action paths initialize it"
 
 # Write-ResultRecord reads $version unconditionally (the emission path for every action).
 Assert-True ($pText -match 'version\s*=\s*if\s*\(\$version\)\s*\{\s*\$version\s*\}\s*else\s*\{\s*\$null\s*\}') `
-    'D4 Write-ResultRecord (line 506) reads $version unconditionally -> terminating under Set-StrictMode'
+    'D4 Write-ResultRecord (line 506) reads $version unconditionally -> terminating under Set-StrictMode if uninitialized'
 
-# The uninstall success path emits a result record AFTER deleting install state, before which
-# $version was never initialized on this process. Prove ordering with the REAL PowerShell parser
-# AST (not a fragile regex). The uninstall body must delete $InstallRoot (hosts install-manifest.json)
-# before emitting the result record, and must NOT assign $version anywhere on the uninstall path.
+# The uninstall success path: $version captured from Get-InstalledVersion BEFORE deleting install
+# state, and result record emitted after deletion. Prove with the REAL PowerShell parser AST.
 $ptoks = $null; $perrs = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($pText, [ref]$ptoks, [ref]$perrs)
 Assert-True ($perrs.Count -eq 0) 'D5a product script tokenizes with no parser errors'
@@ -274,7 +272,8 @@ Assert-True ($null -ne $removeRoot) 'D5c uninstall deletes $InstallRoot (manifes
 Assert-True ($null -ne $writeResult) 'D5d uninstall emits the final result record'
 Assert-True ($removeRoot.Extent.StartLineNumber -lt $writeResult.Extent.StartLineNumber) 'D5 uninstall deletes install root ($InstallRoot) BEFORE emitting its result record'
 $versionAssign = $uninstallFn.Body.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.Left.VariablePath.UserPath -eq 'version' }, $true)
-Assert-True ($null -eq $versionAssign) 'D6 Invoke-Uninstall NEVER assigns $version (only Invoke-Install does) -> uninstall result read is uninitialized; GATE-4/8 crash'
+Assert-True ($null -ne $versionAssign) 'D6 FIXED: Invoke-Uninstall NOW assigns $version (was the defect); uninstall result read is initialized'
+Assert-True ($versionAssign.Right.Extent.Text -match 'Get-InstalledVersion') 'D6b Invoke-Uninstall captures version from Get-InstalledVersion (installed state, not package/hard-coded)'
 
 # Action switch: uninstall -PurgeState is a valid product action (Invoke-Uninstall handles $PurgeState).
 Assert-True ($pText -match "'uninstall'\s*\{\s*Invoke-Uninstall\s*\}") 'D7 product action switch accepts ''uninstall'' (valid contract; -PurgeState is a switch, not a separate action)'
