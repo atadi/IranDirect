@@ -1584,19 +1584,47 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
     # a FRESH PowerShell Direct session is established via the existing bounded retry primitive.
     Restart-VM -Name $VmName -Force -Wait -For Heartbeat -Timeout 300 -ErrorAction Stop
     $session2 = New-GuestSession $script:Cred
-    $after = Invoke-Command -Session $session2 -ScriptBlock {
-        $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop
+
+    # --- Bounded, fail-closed post-reboot readiness wait -----------------
+    # A hard Hyper-V restart returns on Heartbeat (integration services up), but the PathVeer service is
+    # configured Automatic and SCM auto-start may legitimately lag by seconds. Sampling ONCE immediately
+    # after Heartbeat can catch a transient pre-auto-start Stopped state (the real GATE-3 failure at
+    # 9b1deb5: after.serviceState.value=1=Stopped, startMode.value=2=Automatic). We therefore poll the
+    # REAL persistence contract — service Running + IPC pipe alive + CLI status OK — up to a bounded cap.
+    # This is a fail-closed readiness wait: a service that never starts or crashes still fails when the
+    # bound expires; it never masks a real product defect with an arbitrary sleep.
+    $probeAfter = {
+        $svc = $null
+        try { $svc = Get-Service -Name 'PathVeer' -ErrorAction Stop } catch {}
+        $cim = $null
+        try { $cim = Get-CimInstance -ClassName Win32_Service -Filter "Name='PathVeer'" -ErrorAction SilentlyContinue } catch {}
         $cliExe = Join-Path 'C:\Program Files\PathVeer' 'Cli\PathVeer.Cli.exe'
         $pipe = [System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*PathVeer.Control.v1*' }
         $cliOk = $false; try { & $cliExe status *> $null; $cliOk = ($LASTEXITCODE -eq 0) } catch {}
         $policy = 'absent'
         if (Test-Path "$env:ProgramData\PathVeer") { $policy = 'state-present' }
         [PSCustomObject]@{
-            serviceState = $svc.Status; serviceStartMode = $svc.StartType
+            serviceState = if ($svc) { $svc.Status } else { 'absent' }
+            serviceStartMode = if ($svc) { $svc.StartType } else { $null }
+            processId = if ($cim) { $cim.ProcessId } else { $null }
             ipcPipeAlive = ($null -ne $pipe); cliWorks = $cliOk; policy = $policy
             bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
         }
     }
+    $rebootReadyLimitSec = 180
+    $rebootReadyIntervalSec = 6
+    $attempts = 0; $after = $null; $ready = $false
+    $waitStart = Get-Date
+    do {
+        $after = Invoke-Command -Session $session2 -ScriptBlock $probeAfter
+        $attempts++
+        $stateNorm = Get-EnumString $after.serviceState
+        $modeNorm  = Get-EnumString $after.serviceStartMode
+        if ($stateNorm -eq 'Running' -and $modeNorm -in @('Automatic','AutomaticDelayedStart') -and $after.ipcPipeAlive -eq $true -and $after.cliWorks -eq $true) { $ready = $true; break }
+        if ((Get-Date) - $waitStart -lt [TimeSpan]::FromSeconds($rebootReadyLimitSec)) { Start-Sleep -Seconds $rebootReadyIntervalSec }
+    } while ((Get-Date) - $waitStart -lt [TimeSpan]::FromSeconds($rebootReadyLimitSec))
+    $rebootWaitSec = [math]::Round(((Get-Date) - $waitStart).TotalSeconds, 1)
+
     # Objective reboot proof via the existing PS Direct session: OS LastBootUpTime must advance.
     $bootBefore = $before.bootTime
     $bootAfter = $after.bootTime
@@ -1605,26 +1633,46 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
         bootAfterUtc = $bootAfter
         rebooted = ($null -ne $bootAfter -and $null -ne $bootBefore -and $bootAfter -gt $bootBefore)
     }
-    Save-Json '03-gate3-reboot-persistence.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; rebootMechanism='Restart-VM (hard Hyper-V restart; not graceful OS reboot)'; before=$before; after=$after; rebootedVmOnly=$true; rebootProof=$rebootProof
-    })
-    # FAIL-CLOSED: assert the post-reboot PathVeer persistence contract. Save evidence (above) THEN throw
-    # so a broken after-state is never reported as successful gate completion.
-    $persistFail = @()
-    if ($before.serviceState -ne 'Running') { $persistFail += "pre-reboot serviceState was not Running (was: $($before.serviceState))" }
-    if ($before.serviceStartMode -notin @('Automatic','AutomaticDelayedStart')) { $persistFail += "unexpected pre-reboot start mode (was: $($before.serviceStartMode))" }
-    if ($after.serviceState -ne 'Running') { $persistFail += "post-reboot serviceState not Running (was: $($after.serviceState))" }
-    if ($after.serviceStartMode -notin @('Automatic','AutomaticDelayedStart')) { $persistFail += "post-reboot start mode not persistent (was: $($after.serviceStartMode))" }
-    if ($after.ipcPipeAlive -ne $true) { $persistFail += 'IPC pipe not alive after reboot' }
-    if ($after.cliWorks -ne $true) { $persistFail += 'CLI did not work after reboot' }
-    if (-not $rebootProof.rebooted) { $persistFail += 'OS reboot not objectively proven (LastBootUpTime did not advance)' }
+    # NORMALIZE service representations through the shared authority (Get-EnumString). Remoted ServiceController
+    # enums deserialize as {value,Value} objects; raw numeric/string comparisons against 'Running'/'Automatic'
+    # were the pre-reboot HARNESS NORMALIZATION DEFECT (real GATE-3 at 9b1deb5: before was 4=Running/2=Automatic
+    # yet the gate rejected it because it compared the wrapper OBJECT to a string literal). Pre-reboot WAS healthy.
+    $beforeStateNorm = Get-EnumString $before.serviceState
+    $beforeModeNorm  = Get-EnumString $before.serviceStartMode
+    $afterStateNorm  = Get-EnumString $after.serviceState
+    $afterModeNorm   = Get-EnumString $after.serviceStartMode
+    # Evidence is written ONCE (raw object + normalized semantic + wait telemetry + failReasons) so a broken
+    # after-state is never reported as success and no useful diagnostics are overwritten by a second write.
+    $evidence = [PSCustomObject]@{
+        capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        preconditionInstall = $inst
+        rebootMechanism = 'Restart-VM (hard Hyper-V restart; not graceful OS reboot)'
+        before = $before
+        after = $after
+        beforeStateNormalized = $beforeStateNorm
+        beforeModeNormalized = $beforeModeNorm
+        afterStateNormalized = $afterStateNorm
+        afterModeNormalized = $afterModeNorm
+        rebootedVmOnly = $true
+        rebootProof = $rebootProof
+        rebootWait = [PSCustomObject]@{ attempts = $attempts; elapsedSec = $rebootWaitSec; becameReady = $ready; limitSec = $rebootReadyLimitSec }
+    }
+    # FAIL-CLOSED: assert the post-reboot PathVeer persistence contract. Throws so a broken after-state is
+    # never reported as successful gate completion.
+    $persistFail = [System.Collections.Generic.List[string]]::new()
+    if ($beforeStateNorm -ne 'Running') { $persistFail.Add("pre-reboot serviceState was not Running (normalized: '$beforeStateNorm')") }
+    if ($beforeModeNorm -notin @('Automatic','AutomaticDelayedStart')) { $persistFail.Add("unexpected pre-reboot start mode (normalized: '$beforeModeNorm')") }
+    if ($afterStateNorm -ne 'Running') { $persistFail.Add("post-reboot serviceState not Running (normalized: '$afterStateNorm')") }
+    if ($afterModeNorm -notin @('Automatic','AutomaticDelayedStart')) { $persistFail.Add("post-reboot start mode not persistent (normalized: '$afterModeNorm')") }
+    if ($after.ipcPipeAlive -ne $true) { $persistFail.Add('IPC pipe not alive after reboot') }
+    if ($after.cliWorks -ne $true) { $persistFail.Add('CLI did not work after reboot') }
+    if (-not $rebootProof.rebooted) { $persistFail.Add('OS reboot not objectively proven (LastBootUpTime did not advance)') }
+    $evidence.failReasons = $persistFail.ToArray()
+    Save-Json '03-gate3-reboot-persistence.json' $evidence
     if ($persistFail.Count -gt 0) {
-        Save-Json '03-gate3-reboot-persistence.json' ([PSCustomObject]@{
-            capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; rebootMechanism='Restart-VM (hard Hyper-V restart; not graceful OS reboot)'; before=$before; after=$after; rebootedVmOnly=$true; rebootProof=$rebootProof; failReasons=$persistFail
-        })
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new("GATE-3 reboot persistence contract not satisfied: $($persistFail -join '; ')."),
-            'Gate3PersistenceFailed', [System.Management.Automation.ErrorCategory]::InvalidResult, $null)
+            'Gate3PersistenceFailed', [System.Management.Automation.ErrorCategory]::InvalidResult, $evidence)
     }
     return @{ Session=$session2; after=$after; rebootProof=$rebootProof }
 }
