@@ -64,11 +64,20 @@ $AzureConfigured = ($env:AZURE_KEY_VAULT_URI -and $env:AZURE_CLIENT_ID -and
                     $env:AZURE_TENANT_ID -and $env:AZURE_CLIENT_SECRET)
 $PfxConfigured  = ($env:PATHVEER_SIGN_PFX -and $env:PATHVEER_SIGN_PASSWORD)
 $ThumbConfigured = ($env:PATHVEER_SIGN_THUMBPRINT)
+$DevThumbConfigured = ($env:PATHVEER_DEV_CODESIGN_THUMBPRINT)
+
+# A development (self-signed) code-signing certificate may NEVER be combined with
+# a production signing source. Mixing them would let a dev-signed artifact be
+# presented through a production credential path.
+if ($DevThumbConfigured -and ($AzureConfigured -or $PfxConfigured -or $ThumbConfigured)) {
+    throw "Development signing (PATHVEER_DEV_CODESIGN_THUMBPRINT) must not be combined with a production signing source (AZURE_*, PATHVEER_SIGN_PFX, PATHVEER_SIGN_THUMBPRINT). Use a dev certificate OR a production certificate, not both."
+}
 
 $Backend = $null
 if ($AzureConfigured)      { $Backend = 'AzureSignTool' }
 elseif ($PfxConfigured)    { $Backend = 'Pfx' }
 elseif ($ThumbConfigured)  { $Backend = 'Thumbprint' }
+elseif ($DevThumbConfigured) { $Backend = 'DevThumbprint' }
 
 if ($Backend -eq $null) {
     if ($FailIfUnavailable) {
@@ -134,6 +143,15 @@ foreach ($file in $targets) {
             & signtool sign /fd sha256 /tr $TimestampUrl /td sha256 `
                 /sha1 $env:PATHVEER_SIGN_THUMBPRINT $file
             if ($LASTEXITCODE -ne 0) { throw "signtool failed for $file." }
+        }
+        'DevThumbprint' {
+            # Self-signed development certificate. NEVER timestamped against a
+            # public CA (a self-signed chain has no trusted timestamp authority),
+            # and NEVER used for production publication — Publish-PathVeerRelease
+            # hard-fails if dev signing is combined with a production environment.
+            & signtool sign /fd sha256 `
+                /sha1 $env:PATHVEER_DEV_CODESIGN_THUMBPRINT $file
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed for $file (dev certificate). Check PATHVEER_DEV_CODESIGN_THUMBPRINT and that the dev root is trusted." }
         }
     }
 }

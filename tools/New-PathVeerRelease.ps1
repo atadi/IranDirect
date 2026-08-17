@@ -42,7 +42,7 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('Development/Unsigned', 'Release/Unsigned', 'Release/Signed')]
+    [ValidateSet('Development/Unsigned', 'Development/Signed', 'Release/Unsigned', 'Release/Signed')]
     [string]$Mode = 'Development/Unsigned',
 
     [Parameter(Mandatory = $false)]
@@ -141,13 +141,19 @@ Copy-Item -Path (Join-Path $PackageDir '*') -Destination $PackageDest -Recurse -
 if (Test-Path $SetupPublish) { Remove-Item $SetupPublish -Recurse -Force }
 
 # 3. Signing (mode-dependent)
-$SignedMode = $Mode -eq 'Release/Signed'
+$SignedMode = $Mode -eq 'Release/Signed' -or $Mode -eq 'Development/Signed'
 if ($SignedMode) {
-    Write-Step "3/4 Authenticode signing..."
+    if ($Mode -eq 'Development/Signed' -and -not $env:PATHVEER_DEV_CODESIGN_THUMBPRINT) {
+        throw "Development/Signed requires PATHVEER_DEV_CODESIGN_THUMBPRINT (a self-signed dev certificate). Run New-PathVeerDevelopmentSigningCertificate.ps1 and Install-PathVeerDevelopmentTrust.ps1 first."
+    }
+    if ($Mode -eq 'Development/Signed' -and ($env:PATHVEER_SIGN_THUMBPRINT -or $env:PATHVEER_SIGN_PFX -or $env:AZURE_KEY_VAULT_URI)) {
+        throw "Development/Signed must not combine a dev certificate with a production signing source."
+    }
+    Write-Step "3/4 Authenticode signing ($Mode)..."
     & pwsh -NoLogo -NoProfile -File $SignStep `
         -ReleaseRoot $ArchReleaseRoot `
         -FailIfUnavailable:$true
-    if ($LASTEXITCODE -ne 0) { throw "Signing failed (Release/Signed requires usable credentials)." }
+    if ($LASTEXITCODE -ne 0) { throw "Signing failed ($Mode requires usable credentials)." }
 }
 else {
     Write-Step "3/4 Signing SKIPPED (mode '$Mode')."

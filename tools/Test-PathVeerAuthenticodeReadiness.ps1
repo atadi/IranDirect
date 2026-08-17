@@ -38,10 +38,12 @@ $Azure = ($env:AZURE_KEY_VAULT_URI -and $env:AZURE_CLIENT_ID -and
           $env:AZURE_TENANT_ID -and $env:AZURE_CLIENT_SECRET)
 $Pfx   = ($env:PATHVEER_SIGN_PFX -and $env:PATHVEER_SIGN_PASSWORD)
 $Thumb = ($env:PATHVEER_SIGN_THUMBPRINT)
+$Dev   = ($env:PATHVEER_DEV_CODESIGN_THUMBPRINT)
 
 $Provider = if ($Azure) { 'AzureSignTool (cloud/HSM)' }
             elseif ($Pfx) { 'Local PFX' }
             elseif ($Thumb) { 'Certificate store thumbprint' }
+            elseif ($Dev) { 'Development self-signed (PATHVEER_DEV_CODESIGN_THUMBPRINT)' }
             else { 'NONE' }
 
 # --- Certificate availability (metadata only, never the key) ----------------
@@ -132,6 +134,7 @@ Write-Field "Timestamp service" $TimestampService
 Write-Field "signtool.exe" $(if ($SigntoolPath) { $SigntoolPath } else { 'NOT FOUND' })
 Write-Field "Sign/verify smoke test" $Smoke
 Write-Field "Expected publisher" $ExpectedPublisher
+Write-Field "Dev signing (self-signed)" $(if ($Dev) { "CONFIGURED ($Dev)" } else { 'not configured' })
 Write-Host ""
 if ($ProductionReady) {
     Write-Host "Production ready: YES" -ForegroundColor Green

@@ -130,6 +130,14 @@ if ($Environment -eq 'production' -and -not $ConfirmProduction) {
     throw "Publishing to PRODUCTION requires -ConfirmProduction. Refusing implicit production publish."
 }
 
+# --- Development signing + production publication: HARD FAIL -----------------
+# A self-signed development certificate MUST NEVER reach a production channel.
+# Refuse if development signing is selected (explicit dev thumbprint) while a
+# production environment publish is requested.
+if ($Environment -eq 'production' -and ($Channel -eq 'beta' -or $Channel -eq 'stable') -and $env:PATHVEER_DEV_CODESIGN_THUMBPRINT) {
+    throw "Refusing to publish a DEVELOPMENT-signed release (PATHVEER_DEV_CODESIGN_THUMBPRINT is set) to a PRODUCTION environment. Development signing is for private-beta/dev testing only; use a real public-CA Authenticode identity for production publication."
+}
+
 # --- Resolve and validate the frozen release directory ----------------------
 $ReleaseDirectory = [System.IO.Path]::GetFullPath($ReleaseDirectory)
 if (-not (Test-Path $ReleaseDirectory)) { throw "Release directory not found: $ReleaseDirectory" }
