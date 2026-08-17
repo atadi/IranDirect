@@ -1641,8 +1641,20 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
     $beforeModeNorm  = Get-EnumString $before.serviceStartMode
     $afterStateNorm  = Get-EnumString $after.serviceState
     $afterModeNorm   = Get-EnumString $after.serviceStartMode
-    # Evidence is written ONCE (raw object + normalized semantic + wait telemetry + failReasons) so a broken
-    # after-state is never reported as success and no useful diagnostics are overwritten by a second write.
+    # FAIL-CLOSED: assert the post-reboot PathVeer persistence contract. Compute failures FIRST, then build
+    # the evidence object ONCE with every intended property present at construction (no post-construction
+    # property assignment — a sealed [PSCustomObject] rejects a later .failReasons =, which crashed the
+    # real 93a999e run). Throws so a broken after-state is never reported as successful gate completion.
+    $persistFail = [System.Collections.Generic.List[string]]::new()
+    if ($beforeStateNorm -ne 'Running') { $persistFail.Add("pre-reboot serviceState was not Running (normalized: '$beforeStateNorm')") }
+    if ($beforeModeNorm -notin @('Automatic','AutomaticDelayedStart')) { $persistFail.Add("unexpected pre-reboot start mode (normalized: '$beforeModeNorm')") }
+    if ($afterStateNorm -ne 'Running') { $persistFail.Add("post-reboot serviceState not Running (normalized: '$afterStateNorm')") }
+    if ($afterModeNorm -notin @('Automatic','AutomaticDelayedStart')) { $persistFail.Add("post-reboot start mode not persistent (normalized: '$afterModeNorm')") }
+    if ($after.ipcPipeAlive -ne $true) { $persistFail.Add('IPC pipe not alive after reboot') }
+    if ($after.cliWorks -ne $true) { $persistFail.Add('CLI did not work after reboot') }
+    if (-not $rebootProof.rebooted) { $persistFail.Add('OS reboot not objectively proven (LastBootUpTime did not advance)') }
+    # Evidence is written EXACTLY ONCE (raw object + normalized semantic + wait telemetry + failReasons),
+    # written BEFORE the throw so failure diagnostics are never lost. No second write overwrites useful data.
     $evidence = [PSCustomObject]@{
         capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
         preconditionInstall = $inst
@@ -1656,18 +1668,8 @@ function Run-GATE3([System.Management.Automation.Runspaces.PSSession]$Session) {
         rebootedVmOnly = $true
         rebootProof = $rebootProof
         rebootWait = [PSCustomObject]@{ attempts = $attempts; elapsedSec = $rebootWaitSec; becameReady = $ready; limitSec = $rebootReadyLimitSec }
+        failReasons = $persistFail.ToArray()
     }
-    # FAIL-CLOSED: assert the post-reboot PathVeer persistence contract. Throws so a broken after-state is
-    # never reported as successful gate completion.
-    $persistFail = [System.Collections.Generic.List[string]]::new()
-    if ($beforeStateNorm -ne 'Running') { $persistFail.Add("pre-reboot serviceState was not Running (normalized: '$beforeStateNorm')") }
-    if ($beforeModeNorm -notin @('Automatic','AutomaticDelayedStart')) { $persistFail.Add("unexpected pre-reboot start mode (normalized: '$beforeModeNorm')") }
-    if ($afterStateNorm -ne 'Running') { $persistFail.Add("post-reboot serviceState not Running (normalized: '$afterStateNorm')") }
-    if ($afterModeNorm -notin @('Automatic','AutomaticDelayedStart')) { $persistFail.Add("post-reboot start mode not persistent (normalized: '$afterModeNorm')") }
-    if ($after.ipcPipeAlive -ne $true) { $persistFail.Add('IPC pipe not alive after reboot') }
-    if ($after.cliWorks -ne $true) { $persistFail.Add('CLI did not work after reboot') }
-    if (-not $rebootProof.rebooted) { $persistFail.Add('OS reboot not objectively proven (LastBootUpTime did not advance)') }
-    $evidence.failReasons = $persistFail.ToArray()
     Save-Json '03-gate3-reboot-persistence.json' $evidence
     if ($persistFail.Count -gt 0) {
         throw [System.Management.Automation.ErrorRecord]::new(
@@ -2454,6 +2456,11 @@ function Test-PathVeerCertificationDoctorScope {
     }
 }
 
+# Run every requested stage. The entire loop is wrapped in try/finally so that a terminating exception
+# from ANY gate (e.g. GATE-3's fail-closed persistence throw) can NEVER bypass the final Restore-Clean:
+# the finally block runs on both normal completion and on a thrown error, leaving the guest at the clean
+# baseline (or preserved, per PreserveVmState) before the error surfaces to the operator.
+try {
 foreach ($st in $stages) {
     if (-not $SkipRestore) {
         if (Test-PathVeerCertificationPreRestore -StageName $st -SkipRestore $SkipRestore) {
@@ -2554,19 +2561,20 @@ foreach ($st in $stages) {
         'GATE28' { Run-GATE28 $sess $CandidatePackage | Out-Null }
         'GATE9'  { Run-GATE9  $sess | Out-Null }
     }
-}
-
-# Final: leave the guest at the clean baseline for user review (do not leave a cert state polluted),
-# UNLESS a stage explicitly requested VM preservation (PREP-preserved VM, or a failed VERIFY VM held
-# for diagnostics). No top-level `return` controls this decision.
-if ($script:JeaSession) { $script:JeaSession | Remove-PSSession -ErrorAction SilentlyContinue; $script:JeaSession = $null }
-if (Test-PathVeerCertificationFinalRestore -SkipRestore $SkipRestore -PreserveVmState $script:PreserveVmState) {
-    if ($sess) { $sess | Remove-PSSession -ErrorAction SilentlyContinue }
-    Restore-Clean
-    Write-Host "Guest restored to certification baseline '$CertificationSnapshot'." -ForegroundColor Green
-} elseif ($script:PreserveVmState) {
-    if ($sess) { $sess | Remove-PSSession -ErrorAction SilentlyContinue }
-    Write-Host "Guest state PRESERVED (intentional; do not restore until the next stage consumes it)." -ForegroundColor Yellow
+} finally {
+    # Final: leave the guest at the clean baseline for user review (do not leave a cert state polluted),
+    # UNLESS a stage explicitly requested VM preservation (PREP-preserved VM, or a failed VERIFY VM held
+    # for diagnostics). Runs on BOTH normal completion AND a gate throw (see try above), so cleanup can
+    # never be bypassed. PreserveVmState semantics (BASELINE/PREP/VERIFY-failure) are unchanged.
+    if ($script:JeaSession) { $script:JeaSession | Remove-PSSession -ErrorAction SilentlyContinue; $script:JeaSession = $null }
+    if (Test-PathVeerCertificationFinalRestore -SkipRestore $SkipRestore -PreserveVmState $script:PreserveVmState) {
+        if ($sess) { $sess | Remove-PSSession -ErrorAction SilentlyContinue }
+        Restore-Clean
+        Write-Host "Guest restored to certification baseline '$CertificationSnapshot'." -ForegroundColor Green
+    } elseif ($script:PreserveVmState) {
+        if ($sess) { $sess | Remove-PSSession -ErrorAction SilentlyContinue }
+        Write-Host "Guest state PRESERVED (intentional; do not restore until the next stage consumes it)." -ForegroundColor Yellow
+    }
 }
 
 Write-Host "`nAll evidence written to: $EvidenceDir" -ForegroundColor Green

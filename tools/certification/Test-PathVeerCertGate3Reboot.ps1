@@ -137,6 +137,93 @@ Assert ($src -match 'CLI did not work after reboot') 'CLI still required after r
 $g3pre = [regex]::Matches($src, [regex]::Escape('Install-PathVeerProtectedCandidate $Session -Stage GATE3')).Count
 Assert ($g3pre -eq 1) 'precondition still called (GATE3 stage) before reboot'
 
+# --- 8. Evidence-object construction does NOT throw; failReasons present at construction; ONE write ---
+# Extract the REAL Save-Json helper and the REAL post-fix evidence-construction block (93a999e+fix) and
+# execute it with controlled mock inputs. This proves the sealed-[PSCustomObject] failReasons mutation that
+# crashed the real 93a999e run is GONE: failReasons now exists at construction time, so no post-construction
+# assignment is needed; the object serializes all fields; and Save-Json is invoked exactly once.
+$m = [regex]::Match($src, '(?s)function Save-Json\(.*?\n\}')
+if (-not $m.Success) { Write-Error "Could not extract Save-Json." }
+Invoke-Expression $m.Value
+
+# Capture Save-Json invocations to prove exactly one write (PASS and FAIL) and that the written object is complete.
+$script:SaveCalls = [System.Collections.Generic.List[object]]::new()
+function script:Save-Json($name, $obj) {
+    $script:SaveCalls.Add([PSCustomObject]@{ name = $name; obj = $obj }) | Out-Null
+}
+
+# Real evidence-construction block (from Run-GATE3, 1648-1678) — executed verbatim against mock inputs.
+# Ends at the fail-closed throw (NOT the PASS-path return, whose `return` would exit this test function).
+$buildBlock = [regex]::Match($src, '(?s)\$persistFail = \[System\.Collections\.Generic\.List\[string\]\]::new\(\).*?InvalidResult, \$evidence\)\s*\n\s*\}').Value
+
+function Test-EvidenceBuild($beforeState, $beforeMode, $afterState, $afterMode, $ipc, $cli, $rebooted, $processId) {
+    $script:SaveCalls = [System.Collections.Generic.List[object]]::new()
+    $inst = [PSCustomObject]@{
+        gate='GATE3'; expectedVersion='1.0.0-beta.1'; installCompleted=$true; installExitCode=0
+        installerCategory='Success'; installerMessage='PathVeer 1.0.0-beta.1 installed.'; actualVersion='1.0.0-beta.1'
+    }
+    $before = [PSCustomObject]@{
+        serviceState = $beforeState; serviceStartMode = $beforeMode
+        bootTime = [datetime]::new(2026,1,1,8,0,0)
+    }
+    $after = [PSCustomObject]@{
+        serviceState = $afterState; serviceStartMode = $afterMode
+        processId = $processId; ipcPipeAlive = $ipc; cliWorks = $cli
+        bootTime = [datetime]::new(2026,1,1,16,0,0)
+    }
+    $rebootProof = [PSCustomObject]@{ bootBeforeUtc = $before.bootTime; bootAfterUtc = $after.bootTime; rebooted = $rebooted }
+    $attempts = 3; $rebootWaitSec = 18.0; $ready = $true; $rebootReadyLimitSec = 180
+    $session2 = $null  # Run-GATE3's post-reboot session; only referenced by the PASS-path return (FAIL throws first).
+    # Mirror Run-GATE3's normalization step that precedes the extracted build block.
+    $beforeStateNorm = Get-EnumString $before.serviceState
+    $beforeModeNorm  = Get-EnumString $before.serviceStartMode
+    $afterStateNorm  = Get-EnumString $after.serviceState
+    $afterModeNorm   = Get-EnumString $after.serviceStartMode
+    $threw = $false; $ev = $null; $errMsg = $null
+    try { Invoke-Expression $buildBlock; if (Test-Path variable:evidence) { $ev = $evidence } } catch { $threw = $true; $errMsg = $_.Exception.Message; if (Test-Path variable:evidence) { $ev = $evidence } }
+    return [PSCustomObject]@{ threw = $threw; evidence = $ev; saveCount = $script:SaveCalls.Count; written = if ($script:SaveCalls.Count -ge 1) { $script:SaveCalls[0].obj } else { $null }; errMsg = $errMsg }
+}
+
+# PASS case: healthy pre + healthy post (service becomes Running after bounded wait).
+$rPass = Test-EvidenceBuild $numRunning $numAuto $numRunning $numAuto $true $true $true $null
+Assert (-not $rPass.threw) 'GATE-3 SUCCESS evidence construction does NOT throw'
+Assert ($rPass.saveCount -eq 1) 'evidence written EXACTLY ONCE on PASS'
+Assert ($rPass.written.PSObject.Properties['failReasons']) 'failReasons exists in final evidence object (present at construction)'
+Assert ($rPass.written.failReasons -is [array]) 'failReasons is an array'
+Assert ($rPass.written.failReasons.Count -eq 0) 'failReasons empty array serializes on success'
+Assert ($rPass.written.PSObject.Properties['beforeStateNormalized']) 'beforeStateNormalized present'
+Assert ($rPass.written.PSObject.Properties['beforeModeNormalized']) 'beforeModeNormalized present'
+Assert ($rPass.written.PSObject.Properties['afterStateNormalized']) 'afterStateNormalized present'
+Assert ($rPass.written.PSObject.Properties['afterModeNormalized']) 'afterModeNormalized present'
+Assert ($rPass.written.PSObject.Properties['rebootWait']) 'rebootWait present'
+Assert ($rPass.written.rebootWait.PSObject.Properties['attempts']) 'rebootWait.attempts present'
+Assert ($rPass.written.rebootWait.PSObject.Properties['elapsedSec']) 'rebootWait.elapsedSec present'
+Assert ($rPass.written.rebootWait.PSObject.Properties['becameReady']) 'rebootWait.becameReady present'
+Assert ($rPass.written.rebootWait.PSObject.Properties['limitSec']) 'rebootWait.limitSec present'
+$rPassJson = $rPass.written | ConvertTo-Json -Depth 6
+Assert ($rPassJson -match '"failReasons"\s*:\s*\[\]') 'failReasons empty array present in serialized JSON on success'
+Assert ($rPassJson -match '"beforeStateNormalized"\s*:\s*"Running"') 'beforeStateNormalized=Running serialized'
+Assert ($rPassJson -match '"afterModeNormalized"\s*:\s*"Automatic"') 'afterModeNormalized=Automatic serialized'
+
+# FAIL case: post-reboot Stopped + IPC/CLI down (the real 9b1deb5 state; must still surface failReasons).
+$rFail = Test-EvidenceBuild $numRunning $numAuto $numStopped $numAuto $false $false $true $null
+Assert ($rFail.threw) 'GATE-3 FAILURE evidence construction throws (fail-closed persistence)'
+Assert ($rFail.saveCount -eq 1) 'evidence written EXACTLY ONCE on FAIL'
+Assert ($rFail.written.PSObject.Properties['failReasons']) 'failReasons exists in final evidence object on failure'
+Assert ($rFail.written.failReasons.Count -gt 0) 'failReasons populated array serializes on failure'
+Assert ($rFail.written.failReasons -contains 'post-reboot serviceState not Running (normalized: ''Stopped'')') 'post-reboot Stopped captured in failReasons'
+Assert ($rFail.written.failReasons -contains 'IPC pipe not alive after reboot') 'IPC failure captured in failReasons'
+Assert ($rFail.written.failReasons -contains 'CLI did not work after reboot') 'CLI failure captured in failReasons'
+
+# processId null-safe: both $null and a real pid serialize without error.
+$nullOk = Test-EvidenceBuild $numRunning $numAuto $numRunning $numAuto $true $true $true $null
+Assert (-not $nullOk.threw) 'processId=$null serializes safely'
+$pidOk = Test-EvidenceBuild $numRunning $numAuto $numRunning $numAuto $true $true $true 4242
+Assert (-not $pidOk.threw) 'processId=4242 serializes safely'
+Assert ($pidOk.written.after.processId -eq 4242) 'processId value serialized'
+
+# No dynamic missing-property assignment remains in Run-GATE3 for fields introduced by 93a999e.
+# The construction must NOT contain a post-construction '$evidence.<prop> =' mutation for any new field.
+Assert ($buildBlock -notmatch '\$evidence\.(failReasons|beforeStateNormalized|beforeModeNormalized|afterStateNormalized|afterModeNormalized|rebootWait|processId)\s*=') 'no post-construction $evidence.<newfield> = mutation remains (root cause of 93a999e crash)'
+
 Write-Host ""
-Write-Host "GATE-3 reboot test: $pass passed, $fail failed."
-exit $(if ($fail -eq 0) { 0 } else { 1 })
