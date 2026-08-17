@@ -2027,7 +2027,7 @@ function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
     if ($null -eq $u.result) { $purgeFail.Add('purge returned no result object (JEA invocation rejected before product body)') }
     if ($purge.installerInvocationAttempted -ne $true) { $purgeFail.Add('product purge invocation was not attempted by the trusted wrapper') }
     if ($purge.installerStarted -ne $true) { $purgeFail.Add('product purge process did not start') }
-    if ($purge.productResultMissing -eq $true) { $purgeFail.Add("product purge wrote no result record (body likely never ran); childExitCode=$($purge.childExitCode); childError='$($purge.childError)'") }
+    if ($purge.productResultMissing -eq $true) { $purgeFail.Add("product purge wrote no result record (child process started but produced no structured result; it may have crashed before Write-ResultRecord); childExitCode=$($purge.childExitCode); childError='$($purge.childError)'") }
     if ($null -eq $purge.exitCode) { $purgeFail.Add('purge produced no installer exit code (product result shape malformed)') }
     elseif ($purge.exitCode -ne 0) { $purgeFail.Add("purge exitCode=$($purge.exitCode) (expected 0); category='$($purge.category)'; message='$($purge.message)'") }
     if ($purge.installerResult -and $purge.installerResult.success -eq $false) { $purgeFail.Add("product purge reported failure: [$($purge.category)] $($purge.message)") }
