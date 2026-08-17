@@ -151,13 +151,13 @@ real-VM validated). No VM rerun required for integration.
 
 ## 12. Authorization boundaries
 
-- **Merge into canonical:** NOT AUTHORIZED (awaiting operator).
+- **Merge into canonical:** COMPLETE (fast-forward 9f9d060 → 909f9f8; `development/service-authority` now at 909f9f8, 0/0 ahead-behind; post-merge canonical validation PASSED).
 - **Publication (beta/stable/R2/latest.json/Release/tag):** NOT AUTHORIZED.
 - This audit did NOT touch canonical refs; only audited.
 
 ---
 
-**Final statement: READY FOR MERGE AUTHORIZATION** — all runnable gates closed,
+**Final statement: MERGE COMPLETE — CANONICAL INTEGRATION VALIDATED** — all runnable gates closed,
 no unresolved product/harness defects, clean topology (canonical undiverged),
 0 merge conflicts, clean hygiene/secret/parser/build, beta.1 immutable.
 Remaining blockers (GATE-1/6/7 historical/two-version, GATE-9 signing/trust)
