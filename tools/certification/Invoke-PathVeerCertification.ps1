@@ -2561,6 +2561,7 @@ foreach ($st in $stages) {
         'GATE28' { Run-GATE28 $sess $CandidatePackage | Out-Null }
         'GATE9'  { Run-GATE9  $sess | Out-Null }
     }
+}
 } finally {
     # Final: leave the guest at the clean baseline for user review (do not leave a cert state polluted),
     # UNLESS a stage explicitly requested VM preservation (PREP-preserved VM, or a failed VERIFY VM held
