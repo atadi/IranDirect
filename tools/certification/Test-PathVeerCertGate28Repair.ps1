@@ -95,11 +95,43 @@ Assert-True ($orchText -notmatch "'-Action'\s*,\s*'PurgeUninstall'") 'A8c orches
 # B) GATE-28 RESULT DECISION: extract the REAL Run-GATE28 repair block
 # ===================================================================
 # The decision block: from '$repairFail = [System.Collections.Generic.List[string]]::new()' through the
-# final 'return @{ repairedVersion=$ver; serviceStateAfterRepair=$svcAfter }'. It is the authoritative
-# shipped logic (fail-closed ordering + normalized repair object + legacy aliases).
-$m2 = [regex]::Match($orchText, '(?s)\$repairFail = \[System\.Collections\.Generic\.List\[string\]\]::new\(\).*?return @\{ repairedVersion=\$ver; serviceStateAfterRepair=\$svcAfter \}')
+# final 'return @{ repairedVersion=$ver; serviceStateAfterRepair=$svcAfterNorm }'. It is the authoritative
+# shipped logic (fail-closed ordering + normalized repair object + legacy aliases + raw/normalized state).
+$orchText = Get-Content -LiteralPath $orch -Raw
+$m2 = [regex]::Match($orchText, '(?s)\$repairFail = \[System\.Collections\.Generic\.List\[string\]\]\:\:new\(\).*?return @\{ repairedVersion=\$ver; serviceStateAfterRepair=\$svcAfterNorm \}')
 Assert-True $m2.Success 'B0 extracted Run-GATE28 repair decision block from committed orchestrator'
 $decision = $m2.Value
+
+# The SAME shared enum normalizer GATE-3 uses. Re-declared here (verbatim copy of Get-EnumString) so the
+# extracted decision block can call it inside the mock sandbox; the structural test B14 proves it is the
+# identical implementation to the orchestrator's Get-EnumString.
+function Get-EnumString($obj) {
+    if ($null -eq $obj) { return $null }
+    if ($obj -is [string]) { return [string]$obj }
+    if ($obj -is [System.Enum]) { return $obj.ToString() }
+    if ($obj -is [int]) {
+        if ($obj -eq 1) { return 'Stopped' }
+        if ($obj -eq 4) { return 'Running' }
+        if ($obj -eq 2) { return 'Automatic' }
+        return [string]$obj
+    }
+    try {
+        if ($obj.PSObject.Properties['Value'] -and $obj.Value -is [string] -and $obj.Value) { return [string]$obj.Value }
+    } catch {}
+    try {
+        if ($obj.PSObject.Properties['value']) {
+            $v = $obj.value
+            if ($v -is [string] -and $v) { return [string]$v }
+            if ($v -is [int]) {
+                if ($v -eq 1) { return 'Stopped' }
+                if ($v -eq 4) { return 'Running' }
+                if ($v -eq 2) { return 'Automatic' }
+                return [string]$v
+            }
+        }
+    } catch {}
+    return [string]$obj
+}
 
 # Stub Save-Json; capture thrown evidence via a global.
 $script:LastSaved = $null
@@ -134,24 +166,25 @@ function Run-Repair($r, $svc, $ver, $cliExit) {
     }
     function Invoke-GuestJeaCli { param($Session,$JeaSession,$Verb); return $script:CliMock }
     $threw = $false; $blockErr = $null
-    # The shipped block ends with `return @{ repairedVersion=$ver; serviceStateAfterRepair=$svcAfter }`.
+    # The shipped block ends with `return @{ repairedVersion=$ver; serviceStateAfterRepair=$svcAfterNorm }`.
     # Replace that trailing return (test-only copy) so we can capture the resolved scalars instead of
     # letting the return abort the function before our capture lines run. The decision LOGIC is unchanged.
-    $decisionLocal = $decision -replace 'return @\{ repairedVersion=\$ver; serviceStateAfterRepair=\$svcAfter \}', '$script:VerOut = $ver; $script:SvcOut = $svcAfter; $script:CliOut = $cliRepairExit'
+    $decisionLocal = $decision -replace 'return @\{ repairedVersion=\$ver; serviceStateAfterRepair=\$svcAfterNorm \}', '$script:VerOut = $ver; $script:SvcRawOut = $svcAfterRaw; $script:SvcNormOut = $svcAfterNorm; $script:CliOut = $cliRepairExit'
     try {
         Invoke-Expression @"
 `$r = `$r
-`$svcAfter = `$null; `$ver = `$null; `$cliRepairExit = `$null
+`$svcAfterRaw = `$null; `$svcAfterNorm = `$null; `$ver = `$null; `$cliRepairExit = `$null
 `$inst = `$inst
 $decisionLocal
 `$script:VerOut = `$ver
-`$script:SvcOut = `$svcAfter
+`$script:SvcRawOut = `$svcAfterRaw
+`$script:SvcNormOut = `$svcAfterNorm
 `$script:CliOut = `$cliRepairExit
 "@
     } catch {
         $threw = $true; $blockErr = $_.Exception.Message
     }
-    return [PSCustomObject]@{ Threw=$threw; Error=$blockErr; Saved=$script:LastSaved; Ver=$script:VerOut; Svc=$script:SvcOut; Cli=$script:CliOut }
+    return [PSCustomObject]@{ Threw=$threw; Error=$blockErr; Saved=$script:LastSaved; Ver=$script:VerOut; SvcRaw=$script:SvcRawOut; SvcNorm=$script:SvcNormOut; Cli=$script:CliOut }
 }
 
 function ProdResult($success, $category, $message) {
@@ -163,6 +196,7 @@ $r = Build-RepairResult @{ completed=$true; elevationAvailable=$true; elevationS
 $res = Run-Repair $r 'Running' '1.0.0-beta.1' 0
 Assert-True (-not $res.Threw) 'B1 product repair success + Running service + same version + CLI ok -> PASS (no throw)'
 Assert-True ($res.Ver -eq '1.0.0-beta.1') 'B1b repaired version = 1.0.0-beta.1'
+Assert-True ($res.SvcNorm -eq 'Running') 'B1c normalized service state = Running'
 
 # --- B2: wrapper result null -> FAIL (no product ran) ---
 $r = [PSCustomObject]@{ completed=$null; elevationAvailable=$true }   # no .result
@@ -226,6 +260,119 @@ $repObj = $res.Saved.Obj.repair
 Assert-True ($null -ne $repObj) 'B13c normalized repair object present in evidence'
 Assert-True ($repObj.productResultMissing -eq $true) 'B13d repair.productResultMissing=true exposed (root-cause diagnostic)'
 Assert-True ($repObj.childError -like '*Repair*') 'B13e repair.childError exposes the unsupported -Action'
+
+# ===================================================================
+# C) ENUM NORMALIZATION (the exact GATE-28 harness defect) — reuse Get-EnumString
+# ===================================================================
+# A) raw integer 4 -> Running -> PASS when all other repair invariants succeed
+$r = Build-RepairResult @{ completed=$true; elevationAvailable=$true; elevationSucceeded=$true; installerInvocationAttempted=$true; installerStarted=$true; installerExitCode=0; productResultMissing=$false; installerResult=(ProdResult $true 'Success' 'PathVeer 1.0.0-beta.1 installed.') }
+$res = Run-Repair $r ([int]4) '1.0.0-beta.1' 0
+Assert-True (-not $res.Threw) 'A raw integer 4 -> normalized Running -> PASS (all other invariants succeed)'
+Assert-True ($res.SvcNorm -eq 'Running') 'A-b normalized state = Running from raw int 4'
+Assert-True ($res.SvcRaw -eq 4) 'A-c raw state preserved = 4'
+
+function New-RemotedState($intVal, $strVal) {
+    # Exactly reproduce the remoted ServiceController representation PowerShell Remoting produces:
+    # a PSCustomObject with DISTINCT lower-case `value` (int) and Pascal-case `Value` (string) properties.
+    # A literal @{value=4; Value='Running'} hash collapses to ONE key (case-insensitive), and Add-Member
+    # on a [PSCustomObject] cast also collapses, so we add raw PSNoteProperties (which are case-sensitive).
+    $o = [PSObject]::new()
+    $o.PSObject.Properties.Add([System.Management.Automation.PSNoteProperty]::new('value', $intVal))
+    $o.PSObject.Properties.Add([System.Management.Automation.PSNoteProperty]::new('Value', $strVal))
+    return $o
+}
+
+# B) remoted object {value=4, Value=Running} -> Running -> PASS
+$remoted4 = New-RemotedState 4 'Running'
+$res = Run-Repair $r $remoted4 '1.0.0-beta.1' 0
+Assert-True (-not $res.Threw) 'B remoted {value=4,Value=Running} -> Running -> PASS'
+Assert-True ($res.SvcNorm -eq 'Running') 'B-b normalized = Running from remoted object'
+Assert-True (($res.SvcRaw -is [PSCustomObject]) -and $res.SvcRaw.Value -eq 'Running') 'B-c raw remoted object preserved in evidence'
+
+# C) literal 'Running' -> PASS
+$res = Run-Repair $r 'Running' '1.0.0-beta.1' 0
+Assert-True (-not $res.Threw) 'C literal string Running -> PASS'
+Assert-True ($res.SvcNorm -eq 'Running') 'C-b normalized = Running'
+
+# D) raw integer 1 -> Stopped -> FAIL
+$res = Run-Repair $r ([int]1) '1.0.0-beta.1' 0
+Assert-True $res.Threw 'D raw integer 1 -> Stopped -> FAIL'
+
+# E) remoted {value=1, Value=Stopped} -> FAIL
+$remoted1 = New-RemotedState 1 'Stopped'
+$res = Run-Repair $r $remoted1 '1.0.0-beta.1' 0
+Assert-True $res.Threw 'E remoted {value=1,Value=Stopped} -> FAIL'
+
+# F) unknown numeric enum -> FAIL CLOSED (not misread as Running)
+$res = Run-Repair $r ([int]7) '1.0.0-beta.1' 0
+Assert-True $res.Threw 'F unknown numeric enum (7) -> FAIL CLOSED (not defaulted to Running)'
+Assert-True ($res.Saved -and $res.Saved.Obj.serviceStateAfterRepairNormalized -ne 'Running') 'F-b unknown enum normalized != Running'
+
+# G) null state -> FAIL
+$res = Run-Repair $r $null '1.0.0-beta.1' 0
+Assert-True $res.Threw 'G null service state -> FAIL (fail closed)'
+
+# H) successful state=4 does NOT override repair exitCode failure
+$rFail = Build-RepairResult @{ elevationAvailable=$true; installerInvocationAttempted=$true; installerStarted=$true; installerExitCode=1; productResultMissing=$false; installerResult=(ProdResult $false 'InstallFailed' 'x') }
+$res = Run-Repair $rFail ([int]4) '1.0.0-beta.1' 0
+Assert-True $res.Threw 'H state=Running does NOT mask repair exitCode=1 failure'
+
+# I) successful state=4 does NOT override productResultMissing
+$rMiss = Build-RepairResult @{ elevationAvailable=$true; installerInvocationAttempted=$true; installerStarted=$true; installerExitCode=1; productResultMissing=$true; installerResult=$null }
+$res = Run-Repair $rMiss ([int]4) '1.0.0-beta.1' 0
+Assert-True $res.Threw 'I state=Running does NOT mask productResultMissing=true'
+
+# J) successful state=4 does NOT override version mismatch
+$res = Run-Repair $r ([int]4) '2.0.0' 0
+Assert-True $res.Threw 'J state=Running does NOT mask version mismatch'
+
+# K) successful state=4 does NOT override cliRepairExitCode != 0
+$res = Run-Repair $r ([int]4) '1.0.0-beta.1' 1
+Assert-True $res.Threw 'K state=Running does NOT mask CLI repair failure'
+
+# L) exact real-world fixture: every required invariant true -> PASS
+#    repair exitCode 0, installerResult.success true, productResultMissing false,
+#    service raw { value=4, Value=Running }, repairedVersion 1.0.0-beta.1, cliRepairExitCode 0
+$fixture = New-RemotedState 4 'Running'
+$res = Run-Repair $r $fixture '1.0.0-beta.1' 0
+Assert-True (-not $res.Threw) 'L exact real-world fixture (exit0+success+state4/Running+ver1.0.0-beta.1+cli0) -> PASS'
+Assert-True ($res.SvcNorm -eq 'Running') 'L-b normalized Running'
+Assert-True ($res.Ver -eq '1.0.0-beta.1') 'L-c version 1.0.0-beta.1'
+Assert-True ($res.Cli -eq 0) 'L-d cli 0'
+
+# ===================================================================
+# D) STRUCTURAL: GATE-28 uses the SAME enum normalizer as GATE-3 (no second impl)
+# ===================================================================
+# B14: the normalizer used by GATE-28's decision block (Get-EnumString) is byte-identical to the
+# GATE-3 orchestrator helper. Extract the real Get-EnumString body and compare to the test's copy.
+$mGate3 = [regex]::Match($orchText, '(?sm)function Get-EnumString\(\$obj\) \{.*?\r?\n\}\r?\n')
+$gate3Body = if ($mGate3.Success) { $mGate3.Value } else { '' }
+# Extract the test copy's Get-EnumString from THIS file via the same regex (not ${function:...}.ToString(),
+# which PowerShell reformats and would differ in whitespace). Both are byte-identical -> single source of truth.
+$testFileText = Get-Content -LiteralPath $PSScriptRootReal/Test-PathVeerCertGate28Repair.ps1 -Raw
+$mTest = [regex]::Match($testFileText, '(?sm)function Get-EnumString\(\$obj\) \{.*?\r?\n\}\r?\n')
+$testBody = if ($mTest.Success) { $mTest.Value } else { '' }
+function Inner-Body($s) {
+    $first = $s.IndexOf('{'); $last = $s.LastIndexOf('}')
+    if ($first -lt 0 -or $last -lt 0 -or $last -le $first) { return $s }
+    return ($s.Substring($first + 1, $last - $first - 1) -replace '\s+', ' ').Trim()
+}
+$gate3Inner = Inner-Body $gate3Body
+$testInner  = Inner-Body $testBody
+Assert-True $mGate3.Success 'B14 real Get-EnumString helper found in orchestrator'
+Assert-True ($gate3Inner -eq $testInner) 'B14b GATE-28 normalizer is byte-identical to GATE-3 Get-EnumString (single source of truth, no second impl)'
+# B15: GATE-3 itself calls Get-EnumString (proof of reuse, not a new mechanism).
+Assert-True ($orchText -match 'Get-EnumString \$after\.serviceState') 'B15 GATE-3 reuses Get-EnumString for post-reboot service state normalization'
+
+# B16: evidence schema carries BOTH raw and normalized service state (no information loss).
+$r16 = Build-RepairResult @{ completed=$true; elevationAvailable=$true; elevationSucceeded=$true; installerInvocationAttempted=$true; installerStarted=$true; installerExitCode=0; productResultMissing=$false; installerResult=(ProdResult $true 'Success' 'PathVeer 1.0.0-beta.1 installed.') }
+$res16 = Run-Repair $r16 ([int]4) '1.0.0-beta.1' 0
+Assert-True (-not $res16.Threw) 'B16 raw+normalized fixture passes'
+$saved16 = $res16.Saved.Obj
+Assert-True ($null -ne $saved16.serviceStateAfterRepairRaw) 'B16b evidence has serviceStateAfterRepairRaw'
+Assert-True ($saved16.serviceStateAfterRepair -eq 'Running') 'B16c evidence serviceStateAfterRepair = normalized Running'
+Assert-True ($saved16.serviceStateAfterRepairNormalized -eq 'Running') 'B16d evidence serviceStateAfterRepairNormalized = Running'
+Assert-True ($saved16.serviceStateAfterRepairRaw -eq 4) 'B16e evidence raw value (4) preserved alongside normalized'
 
 # ===================================================================
 # Report

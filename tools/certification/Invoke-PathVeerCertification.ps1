@@ -2240,8 +2240,14 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
         if ($rr.childError) { $repairFail.Add("repair child error: $($rr.childError)") }
     }
     # Only when the repair OPERATION succeeded do we inspect downstream product state.
+    $svcAfterRaw = $null; $svcAfterNorm = $null
     if ($repairFail.Count -eq 0) {
-        $svcAfter = (Invoke-Command -Session $Session -ScriptBlock { (Get-Service -Name 'PathVeer' -ErrorAction Stop).Status })
+        $svcAfterRaw = (Invoke-Command -Session $Session -ScriptBlock { (Get-Service -Name 'PathVeer' -ErrorAction Stop).Status })
+        # Normalize through the SAME shared authority GATE-3 uses (Get-EnumString). Remoted ServiceController
+        # enums deserialize as {value,Value} objects; comparing the raw object/number to the string 'Running'
+        # is the pre-fix HARNESS NORMALIZATION DEFECT (real GATE-28 at 32138e7: state='4' was rejected because
+        # the gate compared the wrapper to a string literal). 4=Running, 1=Stopped; unknown -> fail closed.
+        $svcAfterNorm = (Get-EnumString $svcAfterRaw)
         $ver = (Invoke-Command -Session $Session -ScriptBlock { (Get-Content 'C:\Program Files\PathVeer\install-manifest.json' -Raw | ConvertFrom-Json).productVersion })
         # CLI repair verb (privileged, guarded, via trusted wrapper). Verifies post-repair CLI operation.
         $rep = Invoke-GuestJeaCli -Session $Session -JeaSession $jea -Verb 'repair'
@@ -2250,7 +2256,11 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
     # FAIL-CLOSED: require Repair success + same-version verification + CLI repair success before
     # claiming repaired state. The expected protected version is the canonical 1.0.0-beta.1 candidate.
     $expectedRepairVersion = '1.0.0-beta.1'
-    if ($null -ne $svcAfter -and $svcAfter -ne 'Running') { $repairFail.Add("PathVeer service not Running after repair (state='$svcAfter')") }
+    # Compare the NORMALIZED service state ('Running'), never the raw remoted object/number (GATE-3 reuse).
+    # FAIL-CLOSED: any state that is NOT explicitly 'Running' (null, unknown numeric, Stopped) fails the gate.
+    # The pre-fix code guarded with `$null -ne $svcAfterNorm`, which silently SKIPPED a missing/unknown state
+    # and could be misread as success; now we fail unless normalized == 'Running'.
+    if ($svcAfterNorm -ne 'Running') { $repairFail.Add("PathVeer service not Running after repair (normalized='$svcAfterNorm')") }
     if ($ver -ne $expectedRepairVersion) { $repairFail.Add("repaired version mismatch (expected='$expectedRepairVersion'; actual='$ver')") }
     if ($cliRepairExit -ne 0) { $repairFail.Add("cliRepair exitCode=$cliRepairExit (expected 0)") }
     if ($repairFail.Count -gt 0) {
@@ -2280,7 +2290,10 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
             repairExitCode = if ($rr) { $rr.installerExitCode } else { $null }
             repairElevated = $r.elevationAvailable
             repairedVersion = $ver
-            serviceStateAfterRepair = $svcAfter
+            # Raw AND normalized service state (both retained so the representation can never be ambiguous).
+            serviceStateAfterRepairRaw = $svcAfterRaw
+            serviceStateAfterRepair = $svcAfterNorm
+            serviceStateAfterRepairNormalized = $svcAfterNorm
             cliRepairExitCode = $cliRepairExit
             repairFailReasons = $repairFail.ToArray()
             note = 'REPAIR FAILED: did NOT claim repaired state.'
@@ -2317,10 +2330,13 @@ function Run-GATE28([System.Management.Automation.Runspaces.PSSession]$Session, 
         installExitCode = $rr.installerExitCode
         installElevated = $r.elevationAvailable
         repairedVersion = $ver
-        serviceStateAfterRepair = $svcAfter
+        # Raw AND normalized service state (both retained so the representation can never be ambiguous).
+        serviceStateAfterRepairRaw = $svcAfterRaw
+        serviceStateAfterRepair = $svcAfterNorm
+        serviceStateAfterRepairNormalized = $svcAfterNorm
         cliRepairExitCode = $cliRepairExit
     })
-    return @{ repairedVersion=$ver; serviceStateAfterRepair=$svcAfter }
+    return @{ repairedVersion=$ver; serviceStateAfterRepair=$svcAfterNorm }
 }
 
 function Run-GATE9([System.Management.Automation.Runspaces.PSSession]$Session) {
