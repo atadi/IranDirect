@@ -238,3 +238,41 @@ pwsh -NoProfile -File tools\certification\Invoke-PathVeerCertification.ps1 -Stag
 > consistency) fails the gate. The full `doctor` exit code + summary are always retained in
 > `02-gate2-custom-route.json` for transparency. (If a future build exposes structured
 > `DiagnosticReport.Results`, prefer those over parsing the rendered summary.)
+
+> **READ-ONLY BASELINE RESIDUE PROBE (pre-install, disambiguates exit 107).**
+> When a GATE install precondition fails with `installExitCode=107` (`ReadinessFailed`), the
+> readiness `Reason` (surface via `installerCategory`/`installerMessage`, persisted in
+> `NN-gateN-install-precondition.json`) is the primary classifier. To independently confirm whether
+> the restored `PV-CERT-HARNESS` is a CLEAN baseline vs. already carries installed-PathVeer residue,
+> run this probe AFTER restoring the checkpoint but BEFORE invoking the gate/installer. It is
+> strictly read-only -- it never mutates the VM, and it runs BEFORE any failed install can create
+> residue of its own.
+>
+> **RUN ON DESKTOP** (establish PS Direct to the VM, no install):
+> ```powershell
+> $vm = 'PathVeer-Cert-VM'; $cred = Get-Credential  # VM admin; never echoed
+> $s = New-PSSession -VMName $vm -Credential $cred -ErrorAction Stop
+> Invoke-Command -Session $s -ScriptBlock {
+>     [PSCustomObject]@{
+>         servicePathVeerPresent = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
+>         serviceState           = try { (Get-Service -Name 'PathVeer' -ErrorAction Stop).Status } catch { 'absent' }
+>         programFilesPresent    = (Test-Path 'C:\Program Files\PathVeer')
+>         installManifestPresent = (Test-Path 'C:\Program Files\PathVeer\install-manifest.json')
+>         uninstallRegistered    = ($null -ne (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'PathVeer*' }))
+>         controlPipePresent     = (([System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*PathVeer.Control.v1*' }) -ne $null)
+>         pathVeerProcesses      = @(Get-Process -Name 'PathVeer*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+>         # ProgramData/PathVeer MAY legitimately exist per the product lifecycle contract; it is NOT
+>         # by itself illegal residue. Report its CONTENTS, not merely its existence:
+>         programDataPathVeer     = (Test-Path "$env:ProgramData\PathVeer")
+>         programDataPathVeerChildren = if (Test-Path "$env:ProgramData\PathVeer") { @(Get-ChildItem "$env:ProgramData\PathVeer" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) } else { @() }
+>     }
+> }
+> Remove-PSSession $s
+> ```
+> **Interpretation.** A CLEAN baseline answers: `servicePathVeerPresent=$false`, `programFilesPresent=$false`,
+> `installManifestPresent=$false`, `uninstallRegistered=$false`, `controlPipePresent=$false`,
+> `pathVeerProcesses=@()`. If instead `servicePresent=$true` / `programFilesPresent=$true` /
+> `installManifestPresent=$true` / `uninstallRegistered=$true`, the checkpoint unexpectedly contains
+> installed-PathVeer residue (checkpoint/restore defect), and the 107 must be re-examined in that
+> light. `programDataPathVeer=$true` alone is NOT proof of residue -- inspect
+> `programDataPathVeerChildren`; only installer-created product files there would be suspicious.
