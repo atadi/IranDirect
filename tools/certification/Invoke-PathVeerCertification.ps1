@@ -1981,32 +1981,70 @@ function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
             programData = (Test-Path "$env:ProgramData\PathVeer")
         }
     }
-    # Hard purge via trusted wrapper.
+    # Hard purge via trusted wrapper (harness semantic 'PurgeUninstall' is translated by the JEA module
+    # to the PRODUCT contract 'uninstall -PurgeState').
     $u = Invoke-GuestJeaInstall -Session $Session -JeaSession $jea -Action PurgeUninstall
+    $ir = if ($u.result) { $u.result } else { $null }
+    # Normalize the purge operation result. CRITICAL: $u.elevationAvailable means only that the JEA
+    # privileged channel was available — NOT that the product purge succeeded. Concrete product evidence
+    # (installerInvocationAttempted / installerStarted / installerExitCode / installerResult) is required.
+    $purge = [PSCustomObject]@{
+        completed                    = if ($u.PSObject.Properties.Match('completed').Count) { $u.completed } else { $null }
+        elevationAvailable           = if ($u.PSObject.Properties.Match('elevationAvailable').Count) { $u.elevationAvailable } else { $null }
+        elevationSucceeded           = if ($u.PSObject.Properties.Match('elevationSucceeded').Count) { $u.elevationSucceeded } else { $null }
+        installerInvocationAttempted = if ($ir) { $ir.installerInvocationAttempted } else { $null }
+        installerStarted             = if ($ir) { $ir.installerStarted } else { $null }
+        exitCode                     = if ($ir) { $ir.installerExitCode } else { $null }
+        category                     = if ($ir -and $ir.installerResult -and $ir.installerResult.PSObject.Properties.Match('category').Count) { $ir.installerResult.category } else { $null }
+        message                      = if ($ir -and $ir.installerResult -and $ir.installerResult.PSObject.Properties.Match('message').Count) { $ir.installerResult.message } else { $null }
+        wrapperError                 = if ($ir) { $ir.wrapperError } else { $null }
+        installerError               = if ($ir) { $ir.installerError } else { $null }
+        productResultMissing         = if ($ir) { $ir.productResultMissing } else { $null }
+        childExitCode                = if ($ir) { $ir.childExitCode } else { $null }
+        childError                   = if ($ir) { $ir.childError } else { $null }
+        installerResult              = if ($ir) { $ir.installerResult } else { $null }
+        installerProgress            = if ($ir) { $ir.installerProgress } else { $null }
+    }
     $afterUninstall = Invoke-Command -Session $Session -ScriptBlock {
-        param($u)
+        param($exitCode, $elevated)
         [PSCustomObject]@{
             serviceExists = ($null -ne (Get-Service -Name 'PathVeer' -ErrorAction SilentlyContinue))
             programFiles = (Test-Path 'C:\Program Files\PathVeer')
             programData = (Test-Path "$env:ProgramData\PathVeer")
             appsAndFeaturesEntry = ($null -ne (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PathVeer' -ErrorAction SilentlyContinue))
-            uninstallExitCode = $u.result.exitCode
-            uninstallElevated = $u.elevationAvailable
+            uninstallExitCode = $exitCode
+            uninstallElevated = $elevated
         }
-    } -ArgumentList $u
-    # FAIL-CLOSED: verify the purge actually succeeded BEFORE reinstalling. A failed purge must not be
-    # masked by a subsequent reinstall — persist structured evidence and throw.
-    $purgeFail = @()
-    if ($u.result.exitCode -ne 0) { $purgeFail += "purge-exitCode=$($u.result.exitCode) (expected 0)" }
-    if ($afterUninstall.serviceExists) { $purgeFail += 'PathVeer service still present after purge' }
-    if ($afterUninstall.programFiles) { $purgeFail += 'C:\Program Files\PathVeer still present after purge' }
-    if ($afterUninstall.programData) { $purgeFail += '%ProgramData%\PathVeer still present after purge (expected removed by PurgeState contract)' }
-    if ($afterUninstall.appsAndFeaturesEntry) { $purgeFail += 'PathVeer Apps & Features registration remains after purge (expected removed)' }
+    } -ArgumentList $purge.exitCode, $purge.elevationAvailable
+    # FAIL-CLOSED SEQUENCING (GATE-4 purge contract). Distinct failure classes:
+    #   A) purge invocation rejected before the product body (no result object / not attempted / not started)
+    #   B) purge launched but product returned failure (no result record, nonzero exit, reported failure)
+    #   D) product success but purge postconditions not satisfied (a REAL purge product defect)
+    # Only a CONCRETE successful product result + postconditions may justify reinstall. Any earlier gap
+    # FAILS the purge and SKIPS reinstall so a broken purge can never be masked by a subsequent reinstall.
+    $reinstallSkipped = $true
+    $purgeFail = [System.Collections.Generic.List[string]]::new()
+    if ($null -eq $u.result) { $purgeFail.Add('purge returned no result object (JEA invocation rejected before product body)') }
+    if ($purge.installerInvocationAttempted -ne $true) { $purgeFail.Add('product purge invocation was not attempted by the trusted wrapper') }
+    if ($purge.installerStarted -ne $true) { $purgeFail.Add('product purge process did not start') }
+    if ($purge.productResultMissing -eq $true) { $purgeFail.Add("product purge wrote no result record (body likely never ran); childExitCode=$($purge.childExitCode); childError='$($purge.childError)'") }
+    if ($null -eq $purge.exitCode) { $purgeFail.Add('purge produced no installer exit code (product result shape malformed)') }
+    elseif ($purge.exitCode -ne 0) { $purgeFail.Add("purge exitCode=$($purge.exitCode) (expected 0); category='$($purge.category)'; message='$($purge.message)'") }
+    if ($purge.installerResult -and $purge.installerResult.success -eq $false) { $purgeFail.Add("product purge reported failure: [$($purge.category)] $($purge.message)") }
+    $productPurgeSucceeded = ($purgeFail.Count -eq 0)
+    if ($productPurgeSucceeded) {
+        if ($afterUninstall.serviceExists)       { $purgeFail.Add('PathVeer service still present after purge (expected removed by uninstall -PurgeState)') }
+        if ($afterUninstall.programFiles)         { $purgeFail.Add('C:\Program Files\PathVeer still present after purge') }
+        if ($afterUninstall.programData)          { $purgeFail.Add('%ProgramData%\PathVeer still present after purge (expected removed by PurgeState contract)') }
+        if ($afterUninstall.appsAndFeaturesEntry) { $purgeFail.Add('PathVeer Apps & Features registration remains after purge (expected removed by uninstall -RegisterShell cleanup)') }
+    }
     if ($purgeFail.Count -gt 0) {
         $pfEnv = [PSCustomObject]@{
             capturedUtc = (Get-Date).ToUniversalTime().ToString('o')
             preconditionInstall = $inst; installVerified = $afterInstall
-            uninstall = $afterUninstall; purgeFailReasons = $purgeFail
+            purge = $purge; uninstall = $afterUninstall
+            purgeFailReasons = $purgeFail.ToArray()
+            reinstallSkipped = $true
             note = 'PURGE FAILED: did NOT reinstall over a failed purge state.'
         }
         Save-Json '04-gate4-purge-reinstall.json' $pfEnv
@@ -2014,6 +2052,7 @@ function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
             [System.InvalidOperationException]::new("GATE-4 purge precondition failed: $($purgeFail -join '; '). Reinstall was skipped."),
             'Gate4PurgeFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $pfEnv)
     }
+    $reinstallSkipped = $false
     # Clean reinstall (elevated) — only reached after a verified successful purge. Reuse the shared
     # install precondition so the reinstall proves exitCode==0, service exists, manifest parses, AND
     # actualVersion == expected protected version (not just exit code + service presence).
@@ -2030,7 +2069,7 @@ function Run-GATE4([System.Management.Automation.Runspaces.PSSession]$Session) {
             'Gate4ReinstallFailed', [System.Management.Automation.ErrorCategory]::ResourceUnavailable, $null)
     }
     Save-Json '04-gate4-purge-reinstall.json' ([PSCustomObject]@{
-        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; uninstall = $afterUninstall; reinstall = $reinstallResult; reinstalledServiceState = $svc.reinstalledServiceState
+        capturedUtc=(Get-Date).ToUniversalTime().ToString('o'); preconditionInstall=$inst; installVerified=$afterInstall; purge = $purge; uninstall = $afterUninstall; reinstall = $reinstallResult; reinstalledServiceState = $svc.reinstalledServiceState; reinstallSkipped = $false
     })
     return $reinstallResult
 }

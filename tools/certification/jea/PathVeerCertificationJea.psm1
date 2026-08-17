@@ -150,8 +150,10 @@ function Invoke-PathVeerCertificationInstall {
     $installerError                = $null
     $installerResult               = $null
     $installerProgress             = $null
+    $childError                    = $null
     $resultFile   = $null
     $progressFile = $null
+    $errFile      = $null
 
     $exitCode = $null; $errorMsg = $null; $featList = @()
     try {
@@ -174,10 +176,28 @@ function Invoke-PathVeerCertificationInstall {
         }
         $resultFile   = Join-Path $script:ResultsDir ('pathveer-cert-install-' + [guid]::NewGuid().ToString('N') + '.json')
         $progressFile = Join-Path $script:ResultsDir ('pathveer-cert-progress-' + [guid]::NewGuid().ToString('N') + '.json')
+        $errFile      = Join-Path $script:ResultsDir ('pathveer-cert-err-' + [guid]::NewGuid().ToString('N') + '.txt')
 
         # Build a fixed, validated argument list. No caller-supplied paths/strings reach the process.
+        # Translate the CERTIFICATION harness action vocabulary to the PRODUCT installer contract.
+        # The product installer (tools/Install-PathVeer.ps1) supports install / uninstall (-PurgeState) /
+        # status / statejson. It has NO 'PurgeUninstall' action and rejects it at parameter binding before
+        # the body runs, so Invoke-Uninstall never executes. The harness may keep using 'PurgeUninstall' as a
+        # convenient semantic; we translate it to the product 'uninstall -PurgeState' so the product purge
+        # body actually runs. The install path registered Apps&Features + Start Menu entries via -RegisterShell,
+        # so the symmetric uninstall must request the same cleanup (-RegisterShell) or the Apps&Features
+        # registration survives — breaking the GATE-4/GATE-8 postconditions. Pass -RegisterShell for both
+        # Uninstall and PurgeUninstall; the harness 'Uninstall' maps to product 'uninstall' WITHOUT -PurgeState
+        # (GATE-8 state-preservation contract).
+        $productAction = $Action
+        $addPurgeState = $false
+        $addRegisterShell = $false
+        switch ($Action) {
+            'PurgeUninstall' { $productAction = 'uninstall'; $addPurgeState = $true;  $addRegisterShell = $true }
+            'Uninstall'      { $productAction = 'uninstall';                         $addRegisterShell = $true }
+        }
         $psiArgs = @('-NoProfile', '-File', $script:InstallScript)
-        $psiArgs += '-Action';  $psiArgs += $Action
+        $psiArgs += '-Action';  $psiArgs += $productAction
         $psiArgs += '-PackageDirectory'; $psiArgs += $script:InstallPackage
         # Split + validate the comma-joined feature string against the fixed set (trusted code).
         foreach ($tok in ($Feature -split ',')) {
@@ -188,6 +208,10 @@ function Invoke-PathVeerCertificationInstall {
         if ($Action -in @('Install','Upgrade','Repair')) {
             foreach ($f in $featList) { $psiArgs += "-$f" }
         }
+        if ($Action -in @('Uninstall','PurgeUninstall')) {
+            $psiArgs += '-RegisterShell'
+        }
+        if ($addPurgeState) { $psiArgs += '-PurgeState' }
         $psiArgs += '-ResultFile';   $psiArgs += $resultFile
         $psiArgs += '-ProgressFile'; $psiArgs += $progressFile
 
@@ -219,10 +243,12 @@ function Invoke-PathVeerCertificationInstall {
         # [child stdout...] + [final object] as an Object[] and the Desktop bridge's
         # $res.PSObject.Properties.Match('childUser') sees 0 matches -> null/false telemetry
         # (exactly the real-VM GATE-5 childUser=null / childIsAdministrator=false symptom).
-        # Diagnostic evidence is preserved: stderr is untouched, and the installer writes its
-        # real result/progress to $resultFile/$progressFile (parsed below), not to stdout.
-        # $LASTEXITCODE is set by the external process and is unaffected by stdout suppression.
-        $null = & $hostExe @psiArgs
+        # Diagnostic evidence is preserved: stderr is captured to $errFile, and the installer writes its
+        # real result/progress to $resultFile/$progressFile (parsed below), not to stdout. Capturing stderr
+        # to a file (NOT merged into the success stream) keeps the single-object contract intact while making
+        # child parameter-binding failures (e.g. an invalid -Action) visible instead of collapsing into a
+        # null exit code. $LASTEXITCODE is set by the external process and is unaffected by stdout suppression.
+        $null = & $hostExe @psiArgs 2> $errFile
         $installerReturned  = $true
         $installerExitCode  = $LASTEXITCODE
         if (Test-Path -LiteralPath $resultFile) {
@@ -230,6 +256,9 @@ function Invoke-PathVeerCertificationInstall {
         }
         if (Test-Path -LiteralPath $progressFile) {
             try { $installerProgress = (Get-Content -LiteralPath $progressFile -Raw -ErrorAction Stop) } catch {}
+        }
+        if (Test-Path -LiteralPath $errFile) {
+            try { $childError = (Get-Content -LiteralPath $errFile -Raw -ErrorAction Stop).Trim() } catch { $childError = $null }
         }
     } catch {
         $errorMsg = $_.Exception.Message
@@ -240,6 +269,7 @@ function Invoke-PathVeerCertificationInstall {
         # lifecycle object from being returned to the caller.
         if ($resultFile)   { Remove-Item -LiteralPath $resultFile   -ErrorAction SilentlyContinue }
         if ($progressFile) { Remove-Item -LiteralPath $progressFile -ErrorAction SilentlyContinue }
+        if ($errFile)      { Remove-Item -LiteralPath $errFile      -ErrorAction SilentlyContinue }
     }
     # Capture the JEA virtual-account child identity. This function runs INSIDE the elevated
     # RunAsVirtualAccount context, so GetCurrent() reports the virtual account (proven admin).
@@ -263,6 +293,15 @@ function Invoke-PathVeerCertificationInstall {
         installerError = $installerError
         installerResult = $installerResult
         installerProgress = $installerProgress
+        # Normalized product-operation diagnostics (visible to the orchestrator independent of the
+        # bridge wrapper). productResultMissing = $true means the product installer wrote NO result
+        # record — its body either never ran (e.g. parameter-binding rejection of an invalid -Action)
+        # or crashed before Write-ResultRecord. That is the exact signature of the GATE-4 harness
+        # invocation defect and must FAIL-CLOSED at the gate, never be read as success.
+        wrapperError = $installerError
+        childExitCode = $installerExitCode
+        childError = $childError
+        productResultMissing = ($null -eq $installerResult)
         childUser = $childId.Name
         childIsAdministrator = $childWp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
         serviceState = (Get-PathVeerServiceState)
