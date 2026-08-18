@@ -92,6 +92,32 @@ function Assert-Skip([string]$name, [string]$why) {
     Write-Host "  SKIP  $name : $why" -ForegroundColor DarkGray; $script:skip++
 }
 
+# Remove every dev root/leaf cert from CurrentUser\My and CurrentUser\Root (used by the
+# partial-state regression so Zero/One/Multiple scenarios start from a known state and
+# never leave residue). Safe to call repeatedly; no-op when nothing matches.
+function Remove-DevCerts {
+    foreach ($loc in @('My', 'Root')) {
+        $items = Get-ChildItem "Cert:\CurrentUser\$loc" -ErrorAction SilentlyContinue
+        if ($items) {
+            @($items) | Where-Object { $_.Subject -match 'PathVeer Development Root CA|PathVeer Development Code Signing' } |
+                ForEach-Object { try { Remove-Item "Cert:\CurrentUser\$loc\$($_.Thumbprint)" -ErrorAction SilentlyContinue } catch { } }
+        }
+    }
+}
+
+# Count dev root/leaf certs across CurrentUser\My and CurrentUser\Root (always an int,
+# never $null, thanks to @(...)).
+function Count-DevCerts {
+    $n = 0
+    foreach ($loc in @('My', 'Root')) {
+        $items = Get-ChildItem "Cert:\CurrentUser\$loc" -ErrorAction SilentlyContinue
+        if ($items) {
+            $n += @(@($items) | Where-Object { $_.Subject -match 'PathVeer Development Root CA|PathVeer Development Code Signing' }).Count
+        }
+    }
+    return $n
+}
+
 # ---------- A) Tooling-contract checks (no cert required) ----------
 
 # 14. production + Development signing mode -> HARD FAIL
@@ -109,10 +135,12 @@ Assert-Contract '14. prod publish + dev signing env -> HARD FAIL' {
 # 15. test restores original signing env (verified at the end in finally; asserted here that we don't leak)
 # (Substantive restore is in the finally block below; this check records intent.)
 
-# 16. rerun/partial-state safety: generator refuses when a dev cert already exists without -Rotate
+# 16. rerun/partial-state safety: generator refuses when a dev cert already exists without -Rotate,
+#     and reaches the CREATION path when zero exist (the $null.Count regression).
 Assert-Contract '16. rerun/partial-state safety (generator requires -Rotate)' {
-    # Seed a pre-existing dev root using the GENERATOR's actual default root subject name,
-    # so its Find-ExistingDevCerts detects it and refuses to create an orphan without -Rotate.
+    $gen = Join-Path $PSScriptRoot 'New-PathVeerDevelopmentSigningCertificate.ps1'
+
+    # --- (a) EXISTING -> safe failure without -Rotate ---
     $probe = New-SelfSignedCertificate -CertStoreLocation 'Cert:\CurrentUser\My' -Type Custom `
         -Subject 'CN=PathVeer Development Root CA' -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
         -KeyUsage CertSign,CRLSign -KeyUsageProperty Sign -TextExtension @('2.5.29.19={hex}30060101ff020100') `
@@ -121,8 +149,7 @@ Assert-Contract '16. rerun/partial-state safety (generator requires -Rotate)' {
         $cerProbe = Join-Path $env:TEMP ('marker-'+[guid]::NewGuid().ToString('N')+'.cer')
         Export-Certificate -Cert $probe -FilePath $cerProbe -Type CERT | Out-Null
         try {
-            & $PWSH -NoLogo -NoProfile -File (Join-Path $PSScriptRoot 'New-PathVeerDevelopmentSigningCertificate.ps1') `
-                -ExportRootCerPath $cerProbe 2>&1 | Out-Null
+            & $PWSH -NoLogo -NoProfile -File $gen -ExportRootCerPath $cerProbe 2>&1 | Out-Null
             # `&` does not throw on a non-zero child exit; the generator signals rejection via
             # a non-zero exit code (it threw). Treat non-zero exit as the correct rejection.
             $threw = ($LASTEXITCODE -ne 0)
@@ -133,6 +160,39 @@ Assert-Contract '16. rerun/partial-state safety (generator requires -Rotate)' {
     }
     finally {
         try { Remove-Item "Cert:\CurrentUser\My\$($probe.Thumbprint)" -ErrorAction SilentlyContinue } catch { }
+    }
+
+    # --- (b) ZERO existing -> creation path reached (the $null.Count regression) ---
+    # Ensure the store is clean of dev certs, then run the generator WITHOUT -Rotate and
+    # assert it SUCCEEDS (previously this threw '$null.Count' under Set-StrictMode at line 113).
+    Remove-DevCerts
+    $cerCreate = Join-Path $env:TEMP ('create-'+[guid]::NewGuid().ToString('N')+'.cer')
+    try {
+        & $PWSH -NoLogo -NoProfile -File $gen -ExportRootCerPath $cerCreate 2>&1 | Out-Null
+        $created = ($LASTEXITCODE -eq 0)
+        if (Test-Path $cerCreate) { Remove-Item $cerCreate -Force -ErrorAction SilentlyContinue }
+        if (-not $created) { throw "generator FAILED to create with zero existing certs (LASTEXIT=$LASTEXITCODE) — the `$null.Count regression is NOT fixed" }
+    }
+    finally {
+        # (c) no orphan: the certs this clause created are removed; -Rotate is deterministic.
+        Remove-DevCerts
+    }
+
+    # --- (d) -Rotate determinism: create then -Rotate replaces without orphan (count stays 1 root+1 leaf) ---
+    $cerR1 = Join-Path $env:TEMP ('r1-'+[guid]::NewGuid().ToString('N')+'.cer')
+    $cerR2 = Join-Path $env:TEMP ('r2-'+[guid]::NewGuid().ToString('N')+'.cer')
+    try {
+        & $PWSH -NoLogo -NoProfile -File $gen -ExportRootCerPath $cerR1 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "first create failed" }
+        & $PWSH -NoLogo -NoProfile -File $gen -Rotate -ExportRootCerPath $cerR2 2>&1 | Out-Null
+        $rotated = ($LASTEXITCODE -eq 0)
+        if (-not $rotated) { throw "-Rotate failed to replace existing cert (LASTEXIT=$LASTEXITCODE)" }
+        $count = (Count-DevCerts)
+        if ([int]$count -ne 2) { throw "-Rotate left $count dev certs (expected exactly 2: 1 root + 1 leaf)" }
+    }
+    finally {
+        foreach ($f in @($cerR1, $cerR2)) { if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue } }
+        Remove-DevCerts
     }
 }
 

@@ -98,18 +98,25 @@ $RootBasicConstraintsHex = '30060101ff020100'
 $LeafBasicConstraintsHex = '3000'
 
 # --- Partial-state / rerun safety ---------------------------------------------
+# Returns a SAFE array (never $null) of any existing dev root/leaf certs, so callers
+# can use .Count reliably under Set-StrictMode (an empty pipeline otherwise returns
+# $null, and `$null.Count` throws).
 function Find-ExistingDevCerts {
     $found = @()
     foreach ($storeName in @('My', 'Root')) {
         try {
             $items = Get-ChildItem -Path "Cert:\CurrentUser\$storeName" -ErrorAction SilentlyContinue
-            $found += $items | Where-Object { $_.Subject -eq "CN=$RootName" -or $_.Subject -eq "CN=$LeafName" }
+            if ($items) {
+                $found += @($items) | Where-Object { $_.Subject -eq "CN=$RootName" -or $_.Subject -eq "CN=$LeafName" }
+            }
         } catch { }
     }
     return $found
 }
 
-$existing = Find-ExistingDevCerts
+# @(...) guarantees an array even when Find-ExistingDevCerts matches nothing (a
+# zero-match pipeline emits $null, not @(), under Set-StrictMode).
+$existing = @(Find-ExistingDevCerts)
 if ($existing.Count -gt 0) {
     if (-not $Rotate) {
         $thumbs = ($existing | ForEach-Object { $_.Thumbprint }) -join ', '
