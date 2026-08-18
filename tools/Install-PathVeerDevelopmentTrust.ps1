@@ -62,9 +62,10 @@ if ($ext -in @('.pfx', '.p12')) {
     throw "Refusing private-key container '$CerPath'. Pass the public .cer only."
 }
 
-# Load the certificate bytes and confirm there is no private key.
-$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-    $CerPath, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
+# Load the certificate via the public-only constructor (proven under pwsh 7.6.5:
+# [X509Certificate2]::new(path) loads a .cer with HasPrivateKey=False; no KeyStorageFlags
+# needed for a public certificate, and avoids any ambiguity a 2-arg overload could surface).
+$cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($CerPath)
 if ($cert.HasPrivateKey) {
     throw "The provided file contains a PRIVATE KEY. Install-PathVeerDevelopmentTrust accepts public .cer only."
 }
