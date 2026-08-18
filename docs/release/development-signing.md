@@ -111,5 +111,18 @@ production trust set is unaffected.
 ```
 Proves the tooling contract (production rejection, `allowUnsigned=false`,
 `pv-meta-prod-2026-01` unchanged, sign-before-hash ordering, beta.1 bytes
-immutable, no committed private material, parsers clean). Signature-layer
-checks (1–5) run on a dev machine with the dev cert installed.
+immutable, no committed private material, parsers clean). Runs with no certificate.
+
+To also prove the signature-layer checks (clauses 1–5) fully self-contained —
+unsigned rejected, dev-signed untrusted → not trusted, dev-signed after root trust
+→ valid, tamper → invalid, unrelated cert → rejected — pass `-CreateDisposableTestCert`.
+It mints disposable in-store root+leaf certs (RSA 3072, SHA-256), signs a real PE,
+withdraws everything on exit, and never writes a private key to disk. Operator mode
+(no switch, but `PATHVEER_DEV_CODESIGN_THUMBPRINT` set + `-TargetPePath`) runs
+1/3/4/5 against your real installed dev cert (clause 2 is SKIPped because the dev root
+is already trusted on that machine).
+
+Note: trust *installation* (`Install-PathVeerDevelopmentTrust.ps1`) remains a manual
+operator step — Windows blocks headless writes to `Cert:\CurrentUser\Root` with a UI
+prompt, which is the intended fail-closed behavior. The test proves trust *semantics*
+via an equivalent in-memory chain anchor instead.

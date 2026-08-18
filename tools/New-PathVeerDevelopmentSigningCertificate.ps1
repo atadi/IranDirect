@@ -74,9 +74,8 @@ $root = New-SelfSignedCertificate -CertStoreLocation 'Cert:\CurrentUser\My' `
     -Subject "CN=$RootName" `
     -KeyAlgorithm RSA -KeyLength 4096 -HashAlgorithm SHA256 `
     -KeyUsage CertSign, CRLSign -KeyUsageProperty Sign `
-    -BasicConstraints 'Critical, CA:TRUE, PathLength:0' `
     -NotBefore $notBefore -NotAfter $notAfter `
-    -TextExtension @('2.5.29.19={text}CA:TRUE, PathLength:0')
+    -TextExtension @('2.5.29.19={hex}30030101ff020100')  # CA:TRUE, PathLength:0 (DER-encoded; keep deterministic across PS 5.1 / pwsh 7)
 
 # Move the root into the user Trusted Root store so it can issue a trusted chain
 # for local verification. This is a LOCAL development-machine trust only.

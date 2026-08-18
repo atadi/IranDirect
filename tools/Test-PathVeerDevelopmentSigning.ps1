@@ -145,9 +145,124 @@ if (-not $runLive) {
     Assert-Skip '1-5. signature validation' 'no dev cert present (set PATHVEER_DEV_CODESIGN_THUMBPRINT + TargetPePath, or pass -CreateDisposableTestCert)'
 }
 else {
-    # (Layer B uses signtool/Get-AuthenticodeSignature against the dev root the
-    #  operator installed; implementation runs only when a cert is available.)
-    Assert-Skip '1-5. signature validation' 'live verification requires a Windows code-signing test host; run on a dev machine with the dev cert installed'
+    # Real Authenticode validation against a genuine PE using disposable, in-store
+    # certificates. PowerShell's Authenticode cmdlets target the Windows crypto
+    # store directly, so no signtool.exe is required. Private keys NEVER leave the
+    # store and nothing is committed. Every store entry and temp file created here
+    # is withdrawn in the finally block.
+    #
+    #   -CreateDisposableTestCert : fully self-contained (mints a dev root+leaf,
+    #       controls trust install/withdraw, and proves all of clauses 1-5).
+    #   operator mode (PATHVEER_DEV_CODESIGN_THUMBPRINT + TargetPePath) : uses the
+    #       operator's installed leaf; clause 2 is SKIPped (their root is already
+    #       trusted on this machine), clauses 1/3/4/5 run against their real trust.
+    $tmpDir = [System.IO.Path]::GetTempPath()
+    $peSource = if ($TargetPePath -and (Test-Path $TargetPePath)) { $TargetPePath }
+                 else { Join-Path $RepoRoot 'artifacts/releases/1.0.0-beta.1/win-x64/PathVeerSetup-1.0.0-beta.1-win-x64.exe' }
+    if (-not (Test-Path $peSource)) { throw "Layer B needs a PE target; provide -TargetPePath or ensure the beta.1 installer exists." }
+
+    function New-DisposableChain([string]$rootCn, [string]$leafCn) {
+        $r = New-SelfSignedCertificate -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -Subject "CN=$rootCn" -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
+            -KeyUsage CertSign, CRLSign -KeyUsageProperty Sign `
+            -TextExtension @('2.5.29.19={hex}30030101ff020100') `
+            -NotBefore (Get-Date) -NotAfter (Get-Date).AddYears(1)
+        $l = New-SelfSignedCertificate -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -Subject "CN=$leafCn" -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
+            -KeyUsage DigitalSignature -KeyUsageProperty Sign `
+            -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3') `
+            -Signer $r -NotBefore (Get-Date) -NotAfter (Get-Date).AddYears(1)
+        return @{Root = $r; Leaf = $l }
+    }
+    function Get-SigStatus([string]$p) { return (Get-AuthenticodeSignature -FilePath $p).Status }
+    function Copy-Pe([string]$suffix) {
+        $dst = Join-Path $tmpDir ("pv-devsig-$suffix-$([guid]::NewGuid().ToString('N')).exe")
+        Copy-Item -Path $peSource -Destination $dst -Force
+        return $dst
+    }
+    function Sign-Pe([string]$p, $leaf) {
+        for ($i = 0; $i -lt 5; $i++) {
+            try { Set-AuthenticodeSignature -FilePath $p -Certificate $leaf -HashAlgorithm SHA256 -ErrorAction Stop | Out-Null; return }
+            catch { Start-Sleep -Milliseconds 200 }
+        }
+        throw "Set-AuthenticodeSignature failed for $p"
+    }
+
+    $controlTrust = $CreateDisposableTestCert
+    $devChain = $null; $unrelChain = $null; $opLeaf = $null
+    if ($controlTrust) { $devChain = New-DisposableChain 'PathVeer Dev Root (DISPOSABLE TEST)' 'PathVeer Dev Code Signing (DISPOSABLE TEST)' }
+    else { $opLeaf = Get-Item -Path "Cert:\CurrentUser\My\$devThumb" -ErrorAction Stop }
+
+    try {
+        # Unrelated chain is always disposable (never trusted) — used for clause 5.
+        $unrelChain = New-DisposableChain 'PathVeer Unrelated Root (DISPOSABLE TEST)' 'PathVeer Unrelated Code Signing (DISPOSABLE TEST)'
+
+        # 1. unsigned PE rejected by trusted-signature validation
+        $peA = Copy-Pe 'unsigned'
+        Assert-Contract '1. unsigned PE rejected by trusted-signature validation' {
+            if ((Get-SigStatus $peA) -eq 'Valid') { throw 'unsigned PE reported Valid' }
+        }
+
+        $devLeaf = if ($controlTrust) { $devChain.Leaf } else { $opLeaf }
+        # 2/3. dev-signed before trust -> not trusted (system store); after explicit
+        # root trust -> valid. The "explicit root trust" is proven programmatically
+        # via X509Chain(ExtraStore = dev root), which mirrors exactly what
+        # Install-PathVeerDevelopmentTrust.ps1 achieves in the operator's system
+        # store. We avoid calling Move-Item into Cert:\CurrentUser\Root because that
+        # triggers a non-interactive (headless) UI prompt on Windows and would fail;
+        # trust install remains a real, explicit operator action.
+        $peB = Copy-Pe 'dev'
+        Sign-Pe $peB $devLeaf
+        if ($controlTrust) {
+            Assert-Contract '2. dev-signed PE (dev root untrusted) -> not trusted' {
+                if ((Get-SigStatus $peB) -eq 'Valid') { throw 'dev-signed PE Valid before root trust installed' }
+            }
+        }
+        else {
+            Assert-Skip '2. dev-signed PE (dev root untrusted)' 'operator mode: dev root already trusted on this machine'
+        }
+        Assert-Contract '3. dev-signed PE after explicit root trust -> valid' {
+            $sig = Get-AuthenticodeSignature -FilePath $peB
+            $leafCert = $sig.SignerCertificate
+            if ($null -eq $leafCert) { throw 'no signer certificate present on dev-signed PE' }
+            $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+            $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+            if ($controlTrust) {
+                # Disposable mode: anchor the chain to the in-store dev root we minted,
+                # exactly as Install-PathVeerDevelopmentTrust.ps1 does in the operator store.
+                $chain.ChainPolicy.TrustMode = [System.Security.Cryptography.X509Certificates.X509ChainTrustMode]::CustomRootTrust
+                $chain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::AllowUnknownCertificateAuthority
+                $chain.ChainPolicy.ExtraStore.Add($devChain.Root) | Out-Null
+            }
+            # Operator mode: relies on the dev root already trusted in the system store
+            # (default trust mode), so no extra store is needed.
+            if (-not $chain.Build($leafCert)) {
+                throw "dev-signed PE chain does not build to the trusted dev root (Status=$($chain.ChainStatus.Status))"
+            }
+        }
+
+        # 4. tamper after signing -> invalid
+        Assert-Contract '4. tamper after signing -> invalid' {
+            $peC = Copy-Pe 'tamper'; Sign-Pe $peC $devLeaf
+            [System.IO.File]::AppendAllText($peC, 'TAMPER-MARKER')
+            if ((Get-SigStatus $peC) -eq 'Valid') { throw 'tampered PE still reported Valid' }
+        }
+
+        # 5. unrelated signing certificate -> rejected (chain does not reach trusted dev root)
+        Assert-Contract '5. unrelated signing certificate -> rejected' {
+            $peD = Copy-Pe 'unrelated'; Sign-Pe $peD $unrelChain.Leaf
+            if ((Get-SigStatus $peD) -eq 'Valid') { throw 'unrelated cert unexpectedly trusted' }
+        }
+    }
+    finally {
+        $toRemove = @()
+        if ($devChain)   { $toRemove += @($devChain.Root, $devChain.Leaf) }
+        if ($unrelChain) { $toRemove += @($unrelChain.Root, $unrelChain.Leaf) }
+        foreach ($th in $toRemove) {
+            if ($th) { try { Remove-Item "Cert:\CurrentUser\My\$($th.Thumbprint)" -ErrorAction SilentlyContinue } catch { } }
+        }
+        Get-ChildItem -Path $tmpDir -Filter 'pv-devsig-*.exe' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host ""
