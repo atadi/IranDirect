@@ -95,10 +95,10 @@ $env:PATHVEER_DEV_CODESIGN_THUMBPRINT = '<leaf-thumbprint-from-step-1>'
 ### 6. Sign local disposable artifacts
 
 ```powershell
-.\tools\New-PathVeerRelease.ps1 -Version 1.0.0-beta.1 -Mode Development/Signed `
+.\tools\New-PathVeerRelease.ps1 -Version 1.0.0-devsign.2 -Mode Development/Signed `
     -Channel beta -OutputDirectory .\out-dev
 # or sign an existing bundle directly:
-.\tools\Sign-PathVeerArtifacts.ps1 -ReleaseRoot .\out-dev\1.0.0-beta.1\win-x64
+.\tools\Sign-PathVeerArtifacts.ps1 -ReleaseRoot .\out-dev\1.0.0-devsign.2\win-x64
 ```
 
 ### 7. Verify signature
@@ -106,7 +106,7 @@ $env:PATHVEER_DEV_CODESIGN_THUMBPRINT = '<leaf-thumbprint-from-step-1>'
 On a machine where the dev root is trusted:
 
 ```powershell
-Get-AuthenticodeSignature .\out-dev\1.0.0-beta.1\win-x64\PathVeerSetup-1.0.0-beta.1-win-x64.exe
+Get-AuthenticodeSignature .\out-dev\1.0.0-devsign.2\win-x64\PathVeerSetup-1.0.0-devsign.2-win-x64.exe
 # Status should be Valid; untrusted machines report UnknownError/NotTrusted.
 ```
 
@@ -160,4 +160,10 @@ runs clauses 7–13 against your real installed dev cert; clause 2 is SKIPped be
 your dev root is already trusted.
 
 Trust installation (`Install-PathVeerDevelopmentTrust.ps1`) runs as a real, explicit
-operator action and imports the public `.cer` headlessly (no private key moved).
+operator action. **It preserves your signing identity:** if a certificate with the same
+thumbprint already exists in `Cert:\CurrentUser\My` *with a private key* (your signing
+root), the installer exports that key to a temporary PFX, adds the public copy to
+`Cert:\CurrentUser\Root` for verification trust, then re-imports the keyed root back into
+`My` — so the root remains available for signing AND is trusted for verification. It never
+touches a private key outside the local store and never moves the key to another machine.
+On a clean machine the install is a plain public-cert import.

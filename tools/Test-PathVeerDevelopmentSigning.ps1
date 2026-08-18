@@ -35,11 +35,13 @@
         12. tampered PE fails (Status != Valid)
         13. unrelated signing certificate -> rejected
 
-    Disposable mode mints a real root+leaf in-store, imports the public root into
-    Cert:\CurrentUser\Root headlessly (no private key moves), signs a real PE, then
-    withdraws every store entry + temp file in finally. Operator mode reuses the
-    operator's installed dev cert (clause 2 is SKIPped because their root is already
-    trusted). The dev root in Cert:\CurrentUser\Root is restored to its prior state.
+    Disposable mode mints a real root+leaf in-store, attempts to import the public root
+    into Cert:\CurrentUser\Root (headless import is UI-blocked on Windows, so clauses 9-11
+    run only when the operator has already installed trust interactively), signs a real PE,
+    then withdraws its OWN store entries (by exact thumbprint) + temp files. Cleanup is
+    strictly scoped to certificates this test invocation created — an operator's real dev
+    root/leaf is never touched by subject. Operator mode reuses the operator's installed
+    dev cert (clause 2 is SKIPped because their root is already trusted).
 
 .PARAMETER TargetPePath
     A PE (e.g. a built PathVeer.Service.exe) used for live signature checks.
@@ -92,30 +94,68 @@ function Assert-Skip([string]$name, [string]$why) {
     Write-Host "  SKIP  $name : $why" -ForegroundColor DarkGray; $script:skip++
 }
 
-# Remove every dev root/leaf cert from CurrentUser\My and CurrentUser\Root (used by the
-# partial-state regression so Zero/One/Multiple scenarios start from a known state and
-# never leave residue). Safe to call repeatedly; no-op when nothing matches.
-function Remove-DevCerts {
-    foreach ($loc in @('My', 'Root')) {
-        $items = Get-ChildItem "Cert:\CurrentUser\$loc" -ErrorAction SilentlyContinue
-        if ($items) {
-            @($items) | Where-Object { $_.Subject -match 'PathVeer Development Root CA|PathVeer Development Code Signing' } |
-                ForEach-Object { try { Remove-Item "Cert:\CurrentUser\$loc\$($_.Thumbprint)" -ErrorAction SilentlyContinue } catch { } }
+# IMPORTANT: cleanup is scoped to certificates THIS TEST INVOCATION created, identified by
+# exact thumbprint — NEVER by subject. A subject match ('PathVeer Development*') would delete
+# an operator's real dev root/leaf if they happen to be present, which is unacceptable. Every
+# cert the test mints is recorded in $script:testOwnedThumbs (see Track-TestCert) and only
+# those are withdrawn.
+$script:testOwnedThumbs = @()
+
+function Track-TestCert([System.Security.Cryptography.X509Certificates.X509Certificate2]$c) {
+    if ($c -and $c.Thumbprint -and ($script:testOwnedThumbs -notcontains $c.Thumbprint)) {
+        $script:testOwnedThumbs += $c.Thumbprint
+    }
+}
+
+# Remove ONLY the certs this test created (by exact thumbprint) from My and Root.
+function Remove-TestOwnedCerts {
+    foreach ($th in $script:testOwnedThumbs) {
+        foreach ($loc in @('My', 'Root')) {
+            try { Remove-Item "Cert:\CurrentUser\$loc\$th" -ErrorAction SilentlyContinue } catch { }
         }
     }
 }
 
-# Count dev root/leaf certs across CurrentUser\My and CurrentUser\Root (always an int,
-# never $null, thanks to @(...)).
-function Count-DevCerts {
+# Count ONLY the certs this test created (by exact thumbprint) across My and Root.
+function Count-TestOwnedCerts {
     $n = 0
-    foreach ($loc in @('My', 'Root')) {
-        $items = Get-ChildItem "Cert:\CurrentUser\$loc" -ErrorAction SilentlyContinue
-        if ($items) {
-            $n += @(@($items) | Where-Object { $_.Subject -match 'PathVeer Development Root CA|PathVeer Development Code Signing' }).Count
+    foreach ($th in $script:testOwnedThumbs) {
+        foreach ($loc in @('My', 'Root')) {
+            $items = Get-ChildItem "Cert:\CurrentUser\$loc" -ErrorAction SilentlyContinue
+            if ($items) {
+                $n += @(@($items) | Where-Object { $_.Thumbprint -eq $th }).Count
+            }
         }
     }
     return $n
+}
+
+# Read-only: does ANY 'PathVeer Development*' cert already exist (operator-owned)? Used only
+# to decide whether to SKIP creation-path assertions — NEVER for deletion. We must not touch
+# an operator's real dev root/leaf (e.g. while debugging a trust-install regression).
+function Find-AnyDevCert {
+    foreach ($loc in @('My', 'Root')) {
+        $items = Get-ChildItem "Cert:\CurrentUser\$loc" -ErrorAction SilentlyContinue
+        if ($items) {
+            # @(...) guarantees an array so .Count is always safe (a no-match pipeline yields $null).
+            $hit = @(@($items) | Where-Object { $_.Subject -match 'PathVeer Development Root CA|PathVeer Development Code Signing' })
+            if ($hit.Count -gt 0) { return $true }
+        }
+    }
+    return $false
+}
+
+# Capture the current 'PathVeer Development*' certs (disposable, created by THIS test) into
+# the tracked list for later scoped cleanup. Only call this where the test owns the certs
+# (clean store or right after the generator created them in a disposable run).
+function Capture-DevTestCerts {
+    foreach ($loc in @('My', 'Root')) {
+        $items = Get-ChildItem "Cert:\CurrentUser\$loc" -ErrorAction SilentlyContinue
+        if ($items) {
+            @($items) | Where-Object { $_.Subject -match 'PathVeer Development Root CA|PathVeer Development Code Signing' } |
+                ForEach-Object { Track-TestCert $_ }
+        }
+    }
 }
 
 # ---------- A) Tooling-contract checks (no cert required) ----------
@@ -139,8 +179,11 @@ Assert-Contract '14. prod publish + dev signing env -> HARD FAIL' {
 #     and reaches the CREATION path when zero exist (the $null.Count regression).
 Assert-Contract '16. rerun/partial-state safety (generator requires -Rotate)' {
     $gen = Join-Path $PSScriptRoot 'New-PathVeerDevelopmentSigningCertificate.ps1'
+    $operatorDevPresent = Find-AnyDevCert
 
     # --- (a) EXISTING -> safe failure without -Rotate ---
+    # Seeds its OWN probe (removed by exact thumbprint in finally) and asserts the generator
+    # refuses. Safe even if the operator's real dev cert is also present (different thumbprint).
     $probe = New-SelfSignedCertificate -CertStoreLocation 'Cert:\CurrentUser\My' -Type Custom `
         -Subject 'CN=PathVeer Development Root CA' -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
         -KeyUsage CertSign,CRLSign -KeyUsageProperty Sign -TextExtension @('2.5.29.19={hex}30060101ff020100') `
@@ -162,20 +205,26 @@ Assert-Contract '16. rerun/partial-state safety (generator requires -Rotate)' {
         try { Remove-Item "Cert:\CurrentUser\My\$($probe.Thumbprint)" -ErrorAction SilentlyContinue } catch { }
     }
 
+    # --- (b)/(d) creation-path assertions require a CLEAN store (no operator dev certs) ---
+    # If the operator's real dev root/leaf is present, the generator correctly refuses without
+    # -Rotate; we must NOT delete the operator's certs to force a clean state, so we SKIP these.
+    if ($operatorDevPresent) {
+        Assert-Skip '16(b/d). creation/rotate path' 'operator dev certificate(s) already present; generator correctly requires -Rotate and we will not remove operator-owned certs to test. Run on a clean store for full coverage.'
+        return
+    }
+
     # --- (b) ZERO existing -> creation path reached (the $null.Count regression) ---
-    # Ensure the store is clean of dev certs, then run the generator WITHOUT -Rotate and
-    # assert it SUCCEEDS (previously this threw '$null.Count' under Set-StrictMode at line 113).
-    Remove-DevCerts
     $cerCreate = Join-Path $env:TEMP ('create-'+[guid]::NewGuid().ToString('N')+'.cer')
     try {
         & $PWSH -NoLogo -NoProfile -File $gen -ExportRootCerPath $cerCreate 2>&1 | Out-Null
         $created = ($LASTEXITCODE -eq 0)
         if (Test-Path $cerCreate) { Remove-Item $cerCreate -Force -ErrorAction SilentlyContinue }
         if (-not $created) { throw "generator FAILED to create with zero existing certs (LASTEXIT=$LASTEXITCODE) — the `$null.Count regression is NOT fixed" }
+        Capture-DevTestCerts
     }
     finally {
-        # (c) no orphan: the certs this clause created are removed; -Rotate is deterministic.
-        Remove-DevCerts
+        # (c) no orphan: the certs this clause created are removed (scoped to tracked thumbs).
+        Remove-TestOwnedCerts
     }
 
     # --- (d) -Rotate determinism: create then -Rotate replaces without orphan (count stays 1 root+1 leaf) ---
@@ -187,13 +236,89 @@ Assert-Contract '16. rerun/partial-state safety (generator requires -Rotate)' {
         & $PWSH -NoLogo -NoProfile -File $gen -Rotate -ExportRootCerPath $cerR2 2>&1 | Out-Null
         $rotated = ($LASTEXITCODE -eq 0)
         if (-not $rotated) { throw "-Rotate failed to replace existing cert (LASTEXIT=$LASTEXITCODE)" }
-        $count = (Count-DevCerts)
+        Capture-DevTestCerts
+        $count = (Count-TestOwnedCerts)
         if ([int]$count -ne 2) { throw "-Rotate left $count dev certs (expected exactly 2: 1 root + 1 leaf)" }
     }
     finally {
         foreach ($f in @($cerR1, $cerR2)) { if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue } }
-        Remove-DevCerts
+        Remove-TestOwnedCerts
     }
+}
+
+# 16b. trust-install preserves the operator's signing identities (regression for the
+#     458E7E77 root / 3D4AD78 leaf disappearance). Reproduces the EXACT operator sequence
+#     with disposable certs only; never touches the operator's real thumbprints.
+Assert-Contract '16b. trust-install preserves My private identities + survives signing' {
+    $install = Join-Path $PSScriptRoot 'Install-PathVeerDevelopmentTrust.ps1'
+    if (-not $SigntoolPath) { throw "signtool.exe required for the signing half of this regression." }
+
+    # Reproduce the EXACT operator regression (root 458E7E77 / leaf 3D4AD78 disappearance) with
+    # disposable certs ONLY. We use UNIQUE subjects so this runs on ANY machine — including one
+    # where the operator's real dev root/leaf is already present — without ever colliding with or
+    # touching the operator's certs (the installer's My-preservation logic keys on thumbprint, not
+    # subject, so a same-thumbprint keyed My cert would be preserved; an operator cert has a
+    # DIFFERENT thumbprint and is left untouched). Cleanup removes only the tracked thumbs.
+    $uid = [guid]::NewGuid().ToString('N').Substring(0,8)
+    $rootSubj = "CN=PathVeer Install-Proof Root $uid"
+    $leafSubj = "CN=PathVeer Install-Proof Leaf $uid"
+    $rMy = New-SelfSignedCertificate -CertStoreLocation 'Cert:\CurrentUser\My' -Type Custom `
+        -Subject $rootSubj -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
+        -KeyUsage CertSign,CRLSign -KeyUsageProperty Sign `
+        -TextExtension @('2.5.29.19={hex}30060101ff020100') -NotBefore (Get-Date) -NotAfter (Get-Date).AddYears(1)
+    $lMy = New-SelfSignedCertificate -CertStoreLocation 'Cert:\CurrentUser\My' -Type Custom `
+        -Subject $leafSubj -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
+        -KeyUsage DigitalSignature -KeyUsageProperty Sign `
+        -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={hex}3000') `
+        -Signer $rMy -NotBefore (Get-Date) -NotAfter (Get-Date).AddYears(1)
+    Track-TestCert $rMy; Track-TestCert $lMy
+    $rootThumb = $rMy.Thumbprint; $leafThumb = $lMy.Thumbprint
+
+    # 3. originals in My with private keys
+    if (-not $rMy.HasPrivateKey) { throw "disposable root missing private key in My before install" }
+    if (-not $lMy.HasPrivateKey) { throw "disposable leaf missing private key in My before install" }
+
+    # 4-5. run the REAL installer path with the exported public .cer
+    $cer = Join-Path $env:TEMP ("inst-root-$uid.cer")
+    Export-Certificate -Cert $rMy -FilePath $cer -Type CERT | Out-Null
+    & $PWSH -NoLogo -NoProfile -File $install -CerPath $cer 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Install-PathVeerDevelopmentTrust.ps1 failed (exit $LASTEXITCODE)" }
+
+    # 6. Root-store public copy exists, key=False
+    $rootRoot = Get-ChildItem 'Cert:\CurrentUser\Root' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Thumbprint -eq $rootThumb } | Select-Object -First 1
+    if (-not $rootRoot) { throw "dev root NOT installed into Cert:\CurrentUser\Root" }
+    if ($rootRoot.HasPrivateKey) { throw "Root-store copy unexpectedly carries a private key" }
+
+    # 7. CRITICAL: original root AND leaf still in My with private keys (the regression)
+    $rAfter = Get-Item "Cert:\CurrentUser\My\$rootThumb" -ErrorAction SilentlyContinue
+    $lAfter = Get-Item "Cert:\CurrentUser\My\$leafThumb" -ErrorAction SilentlyContinue
+    if (-not $rAfter -or -not $rAfter.HasPrivateKey) { throw "root NO LONGER in My with private key after install (regression NOT fixed)" }
+    if (-not $lAfter -or -not $lAfter.HasPrivateKey) { throw "leaf NO LONGER in My with private key after install (regression NOT fixed)" }
+
+    # 8. neither identity moved/replaced/removed — thumbprints unchanged
+    if ($rAfter.Thumbprint -ne $rootThumb) { throw "root thumbprint changed after install" }
+    if ($lAfter.Thumbprint -ne $leafThumb) { throw "leaf thumbprint changed after install" }
+
+    # 9-10. sign a PE with the SURVIVING leaf and verify with real SignTool evidence
+    $smallPe = Join-Path $RepoRoot 'artifacts/releases/1.0.0-beta.1/win-x64/PathVeer-1.0.0-beta.1/Cli/createdump.exe'
+    if (-not (Test-Path $smallPe)) { throw "Layer B PE source missing" }
+    $pe = Join-Path $env:TEMP ("pv-instpres-$uid.exe")
+    Copy-Item -Path $smallPe -Destination $pe -Force
+    try {
+        & $SigntoolPath sign /fd sha256 /sha1 $leafThumb $pe 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "signtool sign with surviving leaf failed (exit $LASTEXITCODE)" }
+        & $SigntoolPath verify /pa /v $pe 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "signtool verify /pa exit=$LASTEXITCODE (leaf signing broken after install)" }
+        $status = (Get-AuthenticodeSignature -FilePath $pe).Status
+        if ($status -ne 'Valid') { throw "Get-AuthenticodeSignature.Status=$status" }
+    }
+    finally {
+        if (Test-Path $pe) { Remove-Item $pe -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $cer) { Remove-Item $cer -Force -ErrorAction SilentlyContinue }
+    }
+
+    # 11. cleanup happens in the script finally via Remove-TestOwnedCerts (only tracked thumbs)
 }
 
 # 17. beta.1 installer bytes unchanged
@@ -448,6 +573,12 @@ else {
 # is unset again unless the operator explicitly set it before the run (we never set it ourselves
 # without restoring). We do not assert on operator-provided values, only that we did not leak ours.
 Write-Host "  (15. signing env restored: disposable mode sets no operator env; prod-guard test restores PATHVEER_DEV_CODESIGN_THUMBPRINT in its finally)" -ForegroundColor DarkGray
+
+# Global scoped cleanup safety net: remove ONLY certificates this test invocation created
+# (tracked by exact thumbprint). Never subject-based — an operator's real dev certs survive.
+Remove-TestOwnedCerts
+Get-ChildItem -Path $tmpDir -Filter 'pv-devsig-*.exe' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path $env:TEMP -Filter 'pv-instpres-*.exe' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "RESULT: pass=$pass fail=$fail skip=$skip" -ForegroundColor Cyan

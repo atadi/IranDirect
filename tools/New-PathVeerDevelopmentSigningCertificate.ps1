@@ -178,7 +178,7 @@ Write-Host ""
 Write-Host "Next steps (operator, on this machine):" -ForegroundColor Cyan
 Write-Host "  Trust root:      .\tools\Install-PathVeerDevelopmentTrust.ps1 -CerPath '$ExportRootCerPath'"
 Write-Host "  Set signing env:  `$env:PATHVEER_DEV_CODESIGN_THUMBPRINT = '$($leaf.Thumbprint)'"
-Write-Host "  Sign dev bundle: .\tools\New-PathVeerRelease.ps1 -Version 1.0.0-beta.1 -Mode Development/Signed"
+Write-Host "  Sign dev bundle: .\tools\New-PathVeerRelease.ps1 -Version 1.0.0-devsign.2 -Mode Development/Signed"
 Write-Host "  Verify:          .\tools\Test-PathVeerDevelopmentSigning.ps1 -CreateDisposableTestCert"
 Write-Host ""
 Write-Host "NEVER install the dev root on a production machine or publish a dev-signed" -ForegroundColor Yellow
