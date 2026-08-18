@@ -46,7 +46,15 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('win-x64', 'win-arm64')]
-    [string]$RuntimeIdentifier = 'win-x64'
+    [string]$RuntimeIdentifier = 'win-x64',
+
+    # Phase 37.1 fix: when set, skip the dotnet publish + metadata steps and
+    # ONLY regenerate package-hashes.sha256 over an existing, already-finalized
+    # package directory (e.g. the release copy whose PE bytes were just changed
+    # by Authenticode signing). This guarantees the inner integrity manifest
+    # covers the FINAL bytes that are actually installed, not pre-sign bytes.
+    [Parameter(Mandatory = $false)]
+    [switch]$HashOnly
 )
 
 Set-StrictMode -Version Latest
@@ -118,9 +126,26 @@ function Publish-Component {
 }
 
 function New-HashManifest {
+    param(
+        # When supplied, the manifest is regenerated over this (already-finalized)
+        # root. Used by the release pipeline to re-hash AFTER Authenticode signing
+        # changed the PE bytes, so the manifest always covers the final bytes that
+        # are actually installed.
+        [string]$TargetRoot = $PackageRoot
+    )
+
     Write-Step 'Computing SHA-256 package manifest...'
 
-    $hashFile = Join-Path $PackageRoot 'package-hashes.sha256'
+    # Canonicalize both roots so separator/normalization differences cannot
+    # corrupt the relative-path derivation. The previous implementation used
+    # character-count slicing ($FullName.Substring($Root.Length + 1)); that
+    # assumes Root and FullName share identical textual normalization, an
+    # invariant that a real release build demonstrated can fail for EVERY entry
+    # (dropping the leading character of the version directory). We now derive
+    # relative paths with Path.GetRelativePath, which is normalization-agnostic.
+    $canonicalRoot = [System.IO.Path]::GetFullPath($TargetRoot)
+
+    $hashFile = Join-Path $canonicalRoot 'package-hashes.sha256'
 
     if (Test-Path $hashFile) {
         Remove-Item $hashFile -Force
@@ -128,10 +153,31 @@ function New-HashManifest {
 
     $lines = New-Object System.Collections.Generic.List[string]
 
-    Get-ChildItem -Path $PackageRoot -Recurse -File |
+    Get-ChildItem -Path $canonicalRoot -Recurse -File |
         Sort-Object FullName |
         ForEach-Object {
-            $relative = $_.FullName.Substring($PackageRoot.Length + 1)
+            $relative = [System.IO.Path]::GetRelativePath(
+                $canonicalRoot,
+                [System.IO.Path]::GetFullPath($_.FullName))
+
+            # Fail closed on any entry that is not safely package-root-relative.
+            # The manifest is the integrity source of truth for the installer; a
+            # rooted, empty, or parent-traversing entry would either be rejected
+            # by the verifier or (worse) point outside the package. Reject here
+            # so a bad entry can never reach a payload.
+            if ([string]::IsNullOrWhiteSpace($relative) -or
+                [System.IO.Path]::IsPathRooted($relative) -or
+                $relative -eq '..' -or
+                $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
+                $relative.StartsWith('..' + [System.IO.Path]::AltDirectorySeparatorChar)) {
+                throw "Refusing to record non-package-relative entry '$relative' in $hashFile."
+            }
+
+            # Normalize separators to backslash to match the installer reader's
+            # expectations and keep the manifest stable across hosts.
+            $relative = $relative.Replace([System.IO.Path]::AltDirectorySeparatorChar,
+                                          [System.IO.Path]::DirectorySeparatorChar)
+
             $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             $lines.Add("$hash $relative")
         }
@@ -159,6 +205,25 @@ function New-PackageMetadata {
 }
 
 # ---------------------------------------------------------------------------
+
+if ($HashOnly) {
+    # Refresh mode (Phase 37.1 fix): the package directory already exists and
+    # its bytes are finalized (e.g. just Authenticode-signed). Recompute the
+    # integrity manifest over those FINAL bytes. Refuse if the directory is
+    # missing so a typo cannot silently produce an empty manifest.
+    if (-not (Test-Path $PackageRoot)) {
+        throw "HashOnly was requested but the package directory does not exist: $PackageRoot"
+    }
+
+    Write-Step "HashOnly: regenerating package-hashes.sha256 over finalized bytes..."
+    New-HashManifest -TargetRoot $PackageRoot
+
+    Write-Host ''
+    Write-Host "SUCCESS: package hashes refreshed" -ForegroundColor Green
+    Write-Host "  $PackageRoot" -ForegroundColor DarkGray
+    Write-Host ''
+    exit 0
+}
 
 if (Test-Path $PackageRoot) {
     Write-Step "Removing previous package at $PackageRoot..."
