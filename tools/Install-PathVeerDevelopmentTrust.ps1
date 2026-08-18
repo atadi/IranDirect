@@ -9,11 +9,18 @@
 
       * refuse .pfx / .p12 / files containing a private key,
       * refuse to run on a non-Windows host,
+      * validate the public root is a proper CA (Basic Constraints CA:TRUE) with NO
+        Extended Key Usage (a dev root must NOT carry Client/Server Auth EKU, or
+        Windows application-policy validation rejects code-signing children),
       * install into Cert:\CurrentUser\Root by default (or -LocalMachine if admin),
       * NEVER touch the PathVeer production installer or any production trust path.
 
     This trust is for the operator's development machine to verify dev-signed
     binaries locally. It must not be present on production systems.
+
+    The PUBLIC root .cer is imported into the trusted store; the private key remains
+    in the signing workstation's Cert:\CurrentUser\My and is NEVER moved or exported by
+    this script.
 
 .PARAMETER CerPath
     Path to the root PUBLIC certificate (.cer). Required.
@@ -36,7 +43,11 @@ $ErrorActionPreference = 'Stop'
 
 function Write-Step([string]$m) { Write-Host $m -ForegroundColor Cyan }
 
-if (-not $IsWindows) {
+# PS-version-agnostic Windows detection. PowerShell variables are case-insensitive and $IsWindows
+# is a read-only automatic constant on PowerShell 7, so we use a distinct name and never assign
+# to (any case-variant of) $IsWindows.
+$runningWindows = $env:OS -eq 'Windows_NT'
+if (-not $runningWindows) {
     throw "Trust installation requires Windows (Cert:\ store)."
 }
 if (-not (Test-Path $CerPath)) {
@@ -61,6 +72,22 @@ if (-not $cert.Subject.Contains('Development Root CA')) {
     Write-Warning "Certificate subject does not look like the PathVeer development root: $($cert.Subject)"
 }
 
+# Validate the root profile: it MUST be a CA with NO EKU. A root carrying a default
+# Client/Server Auth EKU would make `signtool verify /pa` reject code-signing children.
+$bc = $cert.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.19' }
+$eku = $cert.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.37' }
+if (-not $bc) {
+    throw "The provided root has NO Basic Constraints extension; it is not a valid CA certificate."
+}
+$bcRaw = [System.BitConverter]::ToString($bc.RawData).Replace('-', '').ToLowerInvariant()
+if ($bcRaw -notmatch '^3006|^30') {
+    throw "Unrecognized Basic Constraints encoding on the root: $bcRaw"
+}
+if ($eku) {
+    $ekuVals = ($eku.EnhancedKeyUsages | ForEach-Object { $_.Value }) -join ','
+    throw "The provided root carries an Extended Key Usage ($ekuVals). A development root MUST have NO EKU; install would break code-signing chain validation (signtool verify /pa)."
+}
+
 $storeLocation = if ($LocalMachine) { 'LocalMachine' } else { 'CurrentUser' }
 $store = $null
 try {
@@ -79,5 +106,5 @@ finally {
 }
 
 Write-Host ""
-Write-Host "Dev root trusted locally. Dev-signed PEs from this root will now verify on this machine." -ForegroundColor Green
+Write-Host "Dev root trusted locally (public .cer imported; private key untouched). Dev-signed PEs from this root will now verify on this machine." -ForegroundColor Green
 Write-Host "Remove later with: .\tools\Remove-PathVeerDevelopmentTrust.ps1 -Thumbprint $($cert.Thumbprint)" -ForegroundColor DarkGray

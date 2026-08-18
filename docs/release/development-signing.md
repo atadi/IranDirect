@@ -22,13 +22,35 @@ is set while a `production` environment publish is requested.
 
 ## Certificate design
 
-- **Root** `CN=PathVeer Development Root CA`: `CA:TRUE`, RSA 4096, SHA-256,
-  KeyUsage `CertSign`+`CRLSign`.
-- **Leaf** `CN=PathVeer Development Code Signing`: signed by dev root, EKU
-  `1.3.6.1.5.5.7.3.3` (codeSigning), KeyUsage `DigitalSignature`, RSA 4096,
-  SHA-256.
+The profiles below are the **Microsoft-compatible subset proven by real SignTool
+evidence** (see "Why the root must carry NO EKU" below). A dev root that injects a
+default Client/Server Authentication EKU (what `New-SelfSignedCertificate` emits
+without `-Type Custom`) makes `signtool verify /pa` fail with *"The signing
+certificate is not valid for the requested usage."*
+
+- **Root** `CN=PathVeer Development Root CA`: `CA:TRUE`, `PathLength:0` (canonical
+  DER `30 06 01 01 FF 02 01 00`), KeyUsage `CertSign`+`CRLSign`, **NO Extended Key
+  Usage**, RSA 4096, SHA-256. Built with `-Type Custom` so no default EKU is added.
+- **Leaf** `CN=PathVeer Development Code Signing`: End Entity (Basic Constraints
+  `30 00`), EKU `1.3.6.1.5.5.7.3.3` (codeSigning), KeyUsage `DigitalSignature`, RSA
+  4096, SHA-256, signed by the dev root.
 - Private keys stay in the local certificate store; they are **never** written
   to the repo, logs, or env.
+
+### Why the root must carry NO EKU (proven)
+
+A disposable pair was generated both ways and run through `signtool` on Windows:
+
+| Root profile | `signtool sign` | `signtool verify /pa` | `Get-AuthenticodeSignature` |
+|--------------|-----------------|------------------------|------------------------------|
+| default EKU (Client+Server Auth) | exit 0 | **exit 1** | UnknownError |
+| `-Type Custom`, EKU NONE | exit 0 | **exit 0** | Valid |
+
+`.NET X509Chain.Build` returned `true` for *both* — so .NET chain validity is
+**insufficient**. Windows Authenticode **application-policy** validation (what
+`signtool verify /pa` enforces) is authoritative, and it requires the code-signing
+EKU to be reachable through a chain whose root does not constrain EKU to
+Client/Server Auth. Hence the root carries no EKU at all.
 
 ## Operator workflow
 
@@ -40,8 +62,11 @@ $rootCer = '.\PathVeerDevelopmentRootCA.cer'
     -ExportRootCerPath $rootCer `
     -ExportLeafPfxPath '.\dev-signing-backup.pfx'   # optional encrypted backup
 ```
-This installs the root into `Cert:\CurrentUser\Root` and the leaf into
-`Cert:\CurrentUser\My`. It prints both thumbprints.
+This creates the root in `Cert:\CurrentUser\My` (private key local) and exports the
+**public** root `.cer`; the leaf is created in `Cert:\CurrentUser\My`. It prints both
+thumbprints. **The private-key root is not moved into the trusted store by this
+script** — trust install is a separate step (see below). If a matching dev cert
+already exists in the store, the generator fails safely unless you pass `-Rotate`.
 
 ### 2. Export public root
 
@@ -109,20 +134,30 @@ production trust set is unaffected.
 ```powershell
 .\tools\Test-PathVeerDevelopmentSigning.ps1
 ```
-Proves the tooling contract (production rejection, `allowUnsigned=false`,
-`pv-meta-prod-2026-01` unchanged, sign-before-hash ordering, beta.1 bytes
-immutable, no committed private material, parsers clean). Runs with no certificate.
+Proves the tooling contract with no certificate (production rejection,
+`allowUnsigned=false`, `pv-meta-prod-2026-01` unchanged, beta.1 bytes immutable, no
+committed private material, rerun/partial-state safety, parsers clean).
 
-To also prove the signature-layer checks (clauses 1–5) fully self-contained —
-unsigned rejected, dev-signed untrusted → not trusted, dev-signed after root trust
-→ valid, tamper → invalid, unrelated cert → rejected — pass `-CreateDisposableTestCert`.
-It mints disposable in-store root+leaf certs (RSA 3072, SHA-256), signs a real PE,
-withdraws everything on exit, and never writes a private key to disk. Operator mode
-(no switch, but `PATHVEER_DEV_CODESIGN_THUMBPRINT` set + `-TargetPePath`) runs
-1/3/4/5 against your real installed dev cert (clause 2 is SKIPped because the dev root
-is already trusted on that machine).
+To exercise the full cert **profile** with a disposable pair, pass
+`-CreateDisposableTestCert`. It mints a disposable root+leaf (root EKU NONE, canonical
+BC `30 06 01 01 FF 02 01 00`, leaf End-Entity `30 00`), signs a real PE, and asserts
+the profile (clauses 1–8: root has no EKU, CA:TRUE, PathLength:0, KU
+CertSign+CRLSign; leaf CA:false, KU DigitalSignature, EKU exact code-signing OID),
+`.NET chain.Build`, tamper→invalid, unrelated→rejected — **without** mutating the
+system trust store (it anchors the chain in-memory via `X509Chain.ExtraStore`).
 
-Note: trust *installation* (`Install-PathVeerDevelopmentTrust.ps1`) remains a manual
-operator step — Windows blocks headless writes to `Cert:\CurrentUser\Root` with a UI
-prompt, which is the intended fail-closed behavior. The test proves trust *semantics*
-via an equivalent in-memory chain anchor instead.
+Clauses 9–11 (real `signtool verify /pa` exit 0 **and** `Get-AuthenticodeSignature.Status = Valid`)
+require the dev root to be trusted in `Cert:\CurrentUser\Root`. Windows blocks headless
+writes there with a UI prompt, so the disposable test SKIPs 9–11 and prints the reason;
+an operator who has run `Install-PathVeerDevelopmentTrust.ps1` (interactive) gets them
+live. The corrected profile's real SignTool evidence is documented in *"Why the root
+must carry NO EKU"* above (NEW profile → `verify /pa` exit 0 + `Status=Valid`; the
+old default-EKU profile → exit 1 + `UnknownError`). All store entries and temp files
+are withdrawn in `finally`. Requires PowerShell 7+.
+
+Operator mode (no switch, but `PATHVEER_DEV_CODESIGN_THUMBPRINT` set + `-TargetPePath`)
+runs clauses 7–13 against your real installed dev cert; clause 2 is SKIPped because
+your dev root is already trusted.
+
+Trust installation (`Install-PathVeerDevelopmentTrust.ps1`) runs as a real, explicit
+operator action and imports the public `.cer` headlessly (no private key moved).
