@@ -221,7 +221,7 @@ function Test-PackageIntegrity {
         $checked++
     }
 
-    Write-Detail "$checked files verified (integrity only; package is not signed)."
+    Write-Detail "$checked files verified against the package integrity manifest."
 }
 
 function Install-Payload {

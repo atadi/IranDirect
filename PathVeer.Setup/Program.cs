@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Principal;
-using System.Threading;
 using PathVeer.Core.Installer;
 
 namespace PathVeer.Setup;
@@ -27,9 +26,6 @@ public static class Program
     private const string ScriptResourceName =
         "PathVeer.Setup.Resources.Install-PathVeer.ps1";
 
-    private const string SingleInstanceMutexName =
-        @"Global\PathVeer.Setup.SingleInstance";
-
     private static readonly string[] PassthroughVerbs =
     [
         "--install", "--uninstall", "--status",
@@ -38,16 +34,6 @@ public static class Program
 
     public static int Main(string[] args)
     {
-        // Single-instance protection: only one setup process should act on
-        // SCM / Program Files / ProgramData at a time (no broad app lock).
-        using var mutex = new Mutex(true, SingleInstanceMutexName, out bool created);
-        if (!created)
-        {
-            Console.Error.WriteLine(
-                "ERROR: another instance of PathVeer Setup is already running.");
-            return SetupExitCodes.InvalidArguments;
-        }
-
         Console.Title = "PathVeer Setup";
 
         bool quiet = args.Any(a =>
@@ -63,9 +49,27 @@ public static class Program
             return SetupExitCodes.Success;
         }
 
-        if (!IsAdministrator())
+        // Self-elevation gate runs BEFORE the single-instance mutex. A
+        // non-administrator here is the ordinary Explorer double-click path: it
+        // must NOT own the mutex, or the elevated child it spawns would see the
+        // name already taken and exit (PROVEN ISSUE #1). The parent relaunches
+        // the elevated copy and (when the child returns) exits without ever
+        // holding the installer lock. Only the elevated process that actually
+        // mutates the system owns the single-instance claim.
+        if (!ProcessPrivileges.IsAdministrator())
         {
             return RelaunchElevated(args, quiet);
+        }
+
+        // Single-instance protection: the ELEVATED installer owns the mutex so
+        // two real elevated instances cannot act on SCM/Program Files/ProgramData
+        // at the same time. Acquired only after elevation is confirmed.
+        using var singleInstance = SetupSingleInstance.TryAcquire();
+        if (singleInstance is null)
+        {
+            Console.Error.WriteLine(
+                "ERROR: another instance of PathVeer Setup is already running.");
+            return SetupExitCodes.InvalidArguments;
         }
 
         string? packageDirectory = ResolvePackageDirectory(args);
@@ -117,9 +121,11 @@ public static class Program
         ApplicationConfiguration.Initialize();
         using var form = new InstallForm(controller, ThisVersion());
         Application.Run(form);
-        return form.DialogResult == DialogResult.Cancel
-            ? SetupExitCodes.UserCancelled
-            : SetupExitCodes.Success;
+
+        // The form carries the authoritative operation result. The explicit
+        // contract prevents a closed failure window from being silently reported
+        // as success (NEW ISSUE #2). Closing before mutation == user cancel.
+        return form.ResultExitCode;
     }
 
     private static int RunQuiet(InstallController controller, string[] args)
@@ -216,14 +222,6 @@ public static class Program
         return path;
     }
 
-    private static bool IsAdministrator()
-    {
-        using var identity = WindowsIdentity.GetCurrent();
-        var principal = new WindowsPrincipal(identity);
-        return principal.IsInRole(
-            WindowsBuiltInRole.Administrator);
-    }
-
     private static int RelaunchElevated(string[] args, bool quiet)
     {
         Console.WriteLine(
@@ -253,9 +251,11 @@ public static class Program
         }
         catch (System.ComponentModel.Win32Exception)
         {
+            // runas UAC prompt was dismissed / denied. This is an explicit,
+            // stable denial — NOT a generic argument error or relaunch failure.
             Console.Error.WriteLine(
                 "Elevation was cancelled by the user. Installation aborted.");
-            return SetupExitCodes.ElevationDenied;
+            return SetupExitCodes.FromElevationDenied();
         }
     }
 

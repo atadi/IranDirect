@@ -41,6 +41,36 @@ public sealed class InstallForm : Form
 
     private readonly StringBuilder _log = new();
 
+    /// <summary>
+    /// Explicit, authoritative result contract between the interactive form and
+    /// <c>Program.Main</c>. Defaults to <see cref="SetupExitCodes.UserCancelled"/>
+    /// (closing before the operation runs == user cancel) so a window that is
+    /// dismissed without an operation result is NEVER silently reported as
+    /// <see cref="SetupExitCodes.Success"/> (NEW ISSUE #2). Success/failure set it
+    /// explicitly; closing the result window never erases it.
+    /// </summary>
+    public int ResultExitCode { get; private set; } = SetupExitCodes.UserCancelled;
+
+#if DEBUG
+    /// <summary>
+    /// Test seam: applies the SAME result contract as <see cref="OnCompleted"/>
+    /// but without the WinForms <c>Invoke</c> hop, so unit tests can drive the
+    /// latch without a live message loop. Production code uses
+    /// <see cref="OnCompleted"/> (which calls this path on the UI thread).
+    /// </summary>
+    public void SimulateCompleted(ResultRecord result)
+    {
+        if (result.Success)
+        {
+            ResultExitCode = SetupExitCodes.Success;
+        }
+        else
+        {
+            ResultExitCode = SetupExitCodes.MapResultCategory(result.Category);
+        }
+    }
+#endif
+
     public InstallForm(InstallController controller, string targetVersion)
     {
         _controller = controller;
@@ -147,7 +177,7 @@ public sealed class InstallForm : Form
         };
         _primaryButton = new Button { Text = "Install", Width = 110, Height = 32 };
         _secondaryButton = new Button { Text = "Cancel", Width = 110, Height = 32 };
-        _cancelButton = new Button { Text = "Close", Width = 110, Height = 32, Visible = false };
+        _cancelButton = new Button { Text = "Finish", Width = 110, Height = 32, Visible = false };
         _buttons.Controls.AddRange(new Control[] { _primaryButton, _secondaryButton });
 
         _root.Controls.Add(_titleLabel, 0, 0);
@@ -405,11 +435,13 @@ public sealed class InstallForm : Form
         {
             if (result.Success)
             {
+                ResultExitCode = SetupExitCodes.Success;
                 ShowSuccess(result);
             }
             else
             {
-                ShowFailure(MapCategoryToExitCode(result.Category));
+                ResultExitCode = SetupExitCodes.MapResultCategory(result.Category);
+                ShowFailure(ResultExitCode);
             }
         });
     }
@@ -446,6 +478,11 @@ public sealed class InstallForm : Form
 
     private void ShowFailure(int exitCode)
     {
+        // Latch the failure code into the contract so Program.Main returns it
+        // regardless of which path produced the failure (Completed event or the
+        // worker fallback). Closing the result window must NOT erase it.
+        ResultExitCode = exitCode;
+
         _progress.Visible = false;
         _stageLabel.Visible = false;
         _optionsPanel.Enabled = true;
@@ -499,20 +536,5 @@ public sealed class InstallForm : Form
         ProgressStages.ReleasingRoutes => "Releasing managed routes...",
         ProgressStages.Finished => "Finishing...",
         _ => "Working...",
-    };
-
-    private static int MapCategoryToExitCode(string category) => category switch
-    {
-        "UserCancelled" => SetupExitCodes.UserCancelled,
-        "ElevationDenied" => SetupExitCodes.ElevationDenied,
-        "InvalidArguments" => SetupExitCodes.InvalidArguments,
-        "DowngradeBlocked" => SetupExitCodes.DowngradeBlocked,
-        "PackageVerificationFail" => SetupExitCodes.PackageVerificationFailed,
-        "LegacyUnsupported" => SetupExitCodes.LegacyUnsupported,
-        "ServiceFailed" => SetupExitCodes.ServiceFailed,
-        "ReadinessFailed" => SetupExitCodes.ReadinessFailed,
-        "UninstallFailed" => SetupExitCodes.UninstallFailed,
-        "PurgeFailed" => SetupExitCodes.PurgeFailed,
-        _ => SetupExitCodes.GenericFailure,
     };
 }

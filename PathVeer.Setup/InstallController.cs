@@ -106,6 +106,18 @@ public sealed class InstallController
     }
 
     /// <summary>
+    /// The authoritative exit-code resolution the bootstrapper returns for a
+    /// completed operation. Success yields 0; any failure yields the stable code
+    /// mapped from the deployment script's <c>category</c> (via
+    /// <see cref="SetupExitCodes.MapResultCategory"/>). This is the single path
+    /// <see cref="Execute"/> uses, and the same mapping the interactive form
+    /// applies to the <see cref="Completed"/> result — so console, unattended,
+    /// and UI paths cannot disagree (NEW ISSUE #2 contract).
+    /// </summary>
+    public int ResolveExitCode(ResultRecord result)
+        => result.Success ? SetupExitCodes.Success : MapCategory(result.Category);
+
+    /// <summary>
     /// Queries the authoritative deployment contract for the current machine
     /// state. Pure detection — no mutation.
     /// </summary>
@@ -315,20 +327,8 @@ public sealed class InstallController
         }
     }
 
-    private static int MapCategory(string category) => category switch
-    {
-        "UserCancelled" => SetupExitCodes.UserCancelled,
-        "ElevationDenied" => SetupExitCodes.ElevationDenied,
-        "InvalidArguments" => SetupExitCodes.InvalidArguments,
-        "DowngradeBlocked" => SetupExitCodes.DowngradeBlocked,
-        "PackageVerificationFail" => SetupExitCodes.PackageVerificationFailed,
-        "LegacyUnsupported" => SetupExitCodes.LegacyUnsupported,
-        "ServiceFailed" => SetupExitCodes.ServiceFailed,
-        "ReadinessFailed" => SetupExitCodes.ReadinessFailed,
-        "UninstallFailed" => SetupExitCodes.UninstallFailed,
-        "PurgeFailed" => SetupExitCodes.PurgeFailed,
-        _ => SetupExitCodes.GenericFailure,
-    };
+    private static int MapCategory(string category)
+        => SetupExitCodes.MapResultCategory(category);
 
     private static int MapProcessExit(int code) => code switch
     {

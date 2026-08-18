@@ -153,20 +153,8 @@ public class InstallerControllerTests
     }
 
     // Local mirror of the controller's private mapper for contract verification.
-    private static int MapCategoryLocal(string category) => category switch
-    {
-        "UserCancelled" => SetupExitCodes.UserCancelled,
-        "ElevationDenied" => SetupExitCodes.ElevationDenied,
-        "InvalidArguments" => SetupExitCodes.InvalidArguments,
-        "DowngradeBlocked" => SetupExitCodes.DowngradeBlocked,
-        "PackageVerificationFail" => SetupExitCodes.PackageVerificationFailed,
-        "LegacyUnsupported" => SetupExitCodes.LegacyUnsupported,
-        "ServiceFailed" => SetupExitCodes.ServiceFailed,
-        "ReadinessFailed" => SetupExitCodes.ReadinessFailed,
-        "UninstallFailed" => SetupExitCodes.UninstallFailed,
-        "PurgeFailed" => SetupExitCodes.PurgeFailed,
-        _ => SetupExitCodes.GenericFailure,
-    };
+    private static int MapCategoryLocal(string category)
+        => SetupExitCodes.MapResultCategory(category);
 
     // --- Start Menu / uninstall path generation (no real FS writes) --------
 

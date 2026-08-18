@@ -29,6 +29,37 @@ public static class SetupExitCodes
     public const int RelaunchFailed = 5;
     public const int RuntimePrerequisiteMissing = 110;
 
+    /// <summary>
+    /// Maps a <see cref="System.Security.Principal.WindowsPrincipal"/> admin
+    /// check failure into the stable elevation-denied contract. The bootstrapper
+    /// catches the runas <see cref="System.ComponentModel.Win32Exception"/> and
+    /// routes through this so the denial is not confused with a generic argument
+    /// error (102) or relaunch failure (5).
+    /// </summary>
+    public static int FromElevationDenied() => ElevationDenied;
+
+    /// <summary>
+    /// Single source of truth mapping the deployment script's result
+    /// <c>category</c> (written to -ResultFile) to a stable exit code. Both
+    /// <c>InstallController</c> and <c>InstallForm</c> delegate here so the
+    /// console, the unattended path, and the interactive UI can never disagree
+    /// on which exit code a given failure category produces.
+    /// </summary>
+    public static int MapResultCategory(string category) => category switch
+    {
+        "UserCancelled" => UserCancelled,
+        "ElevationDenied" => ElevationDenied,
+        "InvalidArguments" => InvalidArguments,
+        "DowngradeBlocked" => DowngradeBlocked,
+        "PackageVerificationFail" => PackageVerificationFailed,
+        "LegacyUnsupported" => LegacyUnsupported,
+        "ServiceFailed" => ServiceFailed,
+        "ReadinessFailed" => ReadinessFailed,
+        "UninstallFailed" => UninstallFailed,
+        "PurgeFailed" => PurgeFailed,
+        _ => GenericFailure,
+    };
+
     public static string Describe(int code) => code switch
     {
         Success => "PathVeer was installed successfully.",
