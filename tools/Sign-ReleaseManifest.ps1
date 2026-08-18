@@ -251,25 +251,52 @@ if (-not [string]::IsNullOrWhiteSpace($SignerCommand)) {
     Remove-Item -LiteralPath $payloadFile -ErrorAction SilentlyContinue
 } else {
     # Local raw-key path (default). Prefer a secure DPAPI key store when
-    # -ProductionKeyStore is given; otherwise fall back to PATHVEER_META_SIGN_KEY.
-    $rawKeyB64 = $env:PATHVEER_META_SIGN_KEY
-    if ([string]::IsNullOrWhiteSpace($rawKeyB64) -and -not [string]::IsNullOrWhiteSpace($ProductionKeyStore)) {
-        $keyFile = Join-Path $ProductionKeyStore ("metadata-signing-{0}.xml" -f $KeyId)
-        if (-not (Test-Path -LiteralPath $keyFile)) {
-            throw "Production key store not found for keyId '$KeyId' at $keyFile."
+    # -ProductionKeyStore is given; otherwise fall back to PATHVEER_META_SIGN_KEY
+    # (production) or PATHVEER_DEV_META_SIGN_KEY (development), selected by KeyId.
+    #
+    # Security boundary: development signing MUST NOT consume the production key.
+    # When KeyId is the development keyId we read ONLY PATHVEER_DEV_META_SIGN_KEY;
+    # when it is the production keyId we read ONLY PATHVEER_META_SIGN_KEY. There is
+    # NO automatic fallback between the two — a misconfiguration fails closed.
+    $isDevKeyId = ($KeyId -eq 'pv-meta-dev-2026-01')
+    if ($isDevKeyId) {
+        if (-not [string]::IsNullOrWhiteSpace($env:PATHVEER_META_SIGN_KEY)) {
+            throw "KeyId '$KeyId' is the development metadata key but PATHVEER_META_SIGN_KEY (production) is set. Development signing must not consume the production key. Unset PATHVEER_META_SIGN_KEY (or set PATHVEER_DEV_META_SIGN_KEY instead)."
         }
-        # Bare DPAPI-protected SecureString -> recover the 96-byte X|Y|D blob.
-        $ss = Import-Clixml -LiteralPath $keyFile
-        $rawKeyB64 = [Runtime.InteropServices.Marshal]::PtrToStringUni(
-            [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss))
-        [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode(
-            [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss)) | Out-Null
+        $rawKeyB64 = $env:PATHVEER_DEV_META_SIGN_KEY
+        if ([string]::IsNullOrWhiteSpace($rawKeyB64) -and -not [string]::IsNullOrWhiteSpace($ProductionKeyStore)) {
+            $keyFile = Join-Path $ProductionKeyStore ("metadata-signing-{0}.xml" -f $KeyId)
+            if (-not (Test-Path -LiteralPath $keyFile)) {
+                throw "Development key store not found for keyId '$KeyId' at $keyFile."
+            }
+            $ss = Import-Clixml -LiteralPath $keyFile
+            $rawKeyB64 = [Runtime.InteropServices.Marshal]::PtrToStringUni(
+                [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss))
+            [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode(
+                [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss)) | Out-Null
+        }
+    } else {
+        $rawKeyB64 = $env:PATHVEER_META_SIGN_KEY
+        if ([string]::IsNullOrWhiteSpace($rawKeyB64) -and -not [string]::IsNullOrWhiteSpace($ProductionKeyStore)) {
+            $keyFile = Join-Path $ProductionKeyStore ("metadata-signing-{0}.xml" -f $KeyId)
+            if (-not (Test-Path -LiteralPath $keyFile)) {
+                throw "Production key store not found for keyId '$KeyId' at $keyFile."
+            }
+            $ss = Import-Clixml -LiteralPath $keyFile
+            $rawKeyB64 = [Runtime.InteropServices.Marshal]::PtrToStringUni(
+                [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss))
+            [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode(
+                [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($ss)) | Out-Null
+        }
     }
     if ([string]::IsNullOrWhiteSpace($rawKeyB64)) {
         if ($FailIfUnavailable) {
+            if ($isDevKeyId) {
+                throw "Release/Development-Signed was requested but PATHVEER_DEV_META_SIGN_KEY is not set (no development release-metadata signing key available)."
+            }
             throw "Release/Signed was requested but PATHVEER_META_SIGN_KEY is not set (no release-metadata signing key available)."
         }
-        Write-Host "  No release-metadata signing key (PATHVEER_META_SIGN_KEY). Manifest left UNSIGNED (developer mode)." -ForegroundColor DarkGray
+        Write-Host "  No release-metadata signing key. Manifest left UNSIGNED (developer mode)." -ForegroundColor DarkGray
         exit 0
     }
 

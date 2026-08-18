@@ -15,6 +15,7 @@
        matching private keys are machine-local protected secrets and never ship. -->
   <ItemGroup>
     <EmbeddedResource Include="Update\BuiltInReleaseTrust\pv-meta-prod-2026-01.json" LogicalName="PathVeer.Core.Update.BuiltInReleaseTrust.pv-meta-prod-2026-01.json" />
+    <EmbeddedResource Include="Update\BuiltInReleaseTrust\pv-meta-dev-2026-01.json" LogicalName="PathVeer.Core.Update.BuiltInReleaseTrust.pv-meta-dev-2026-01.json" />
   </ItemGroup>
 
 </Project>

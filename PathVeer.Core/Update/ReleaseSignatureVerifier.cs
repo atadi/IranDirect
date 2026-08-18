@@ -50,6 +50,21 @@ public sealed class ReleaseSignatureVerifier
     }
 
     /// <summary>
+    /// Development trust bootstrap. Uses ONLY the built-in development release-metadata
+    /// public key (BuiltInReleaseTrust.Development). It is intentionally SEPARATE from
+    /// <see cref="ForProduction"/>: a development-signed manifest (keyId
+    /// pv-meta-dev-2026-01) is verified here, and a production-signed manifest is
+    /// NOT accepted by this verifier (and vice versa). The result is always
+    /// signed-only (allowUnsigned = false): an unsigned or unknown dev manifest
+    /// hard-fails. Never consumes the production metadata private key.
+    /// </summary>
+    public static ReleaseSignatureVerifier ForDevelopment()
+    {
+        var keys = BuiltInReleaseTrust.Development().ToDictionary(k => k.Key, k => k.Value, StringComparer.Ordinal);
+        return new ReleaseSignatureVerifier(keys, allowUnsigned: false);
+    }
+
+    /// <summary>
     /// Phase 37.5 — development / test trusted-key bootstrap from the
     /// PATHVEER_TRUSTED_META_KEYS environment variable. Kept for dev, staging and
     /// tests; it does NOT embed any production key, so production code must use

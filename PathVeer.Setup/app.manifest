@@ -3,13 +3,26 @@
   <assemblyIdentity version="1.0.0.0" name="PathVeer.Setup" type="win32" />
 
   <!-- Per-monitor DPI awareness so the installer scales correctly at
-       125% / 150% / 200% displays (Phase 37.2 §38). -->
-  <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-  <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">permonitorv2, permonitor</dpiAwareness>
+       125% / 150% / 200% displays (Phase 37.2 §38).
+       DPI settings live under the asm.v3 application/windowsSettings node. -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">permonitorv2, permonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
 
   <!-- The bootstrapper self-elevates via runas when required, so the initial
-       launch uses asInvoker to avoid a redundant UAC prompt. -->
-  <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+       launch uses asInvoker to avoid a redundant UAC prompt.
+       requestedExecutionLevel MUST be nested under trustInfo/security/
+       requestedPrivileges (not a direct child of assembly). -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
 
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>

@@ -142,12 +142,32 @@ if (Test-Path $SetupPublish) { Remove-Item $SetupPublish -Recurse -Force }
 
 # 3. Signing (mode-dependent)
 $SignedMode = $Mode -eq 'Release/Signed' -or $Mode -eq 'Development/Signed'
+
+# Resolve the metadata signing keyId for this mode. Development/Signed MUST use the
+# separate development ES256 key (pv-meta-dev-2026-01); Release/Signed uses the
+# production key (pv-meta-prod-2026-01). An explicit -MetadataKeyId that is neither
+# the prod default nor empty overrides this (e.g. a rotation key).
+if ([string]::IsNullOrWhiteSpace($MetadataKeyId) -or $MetadataKeyId -eq 'pv-meta-prod-2026-01') {
+    if ($Mode -eq 'Development/Signed') { $MetadataKeyId = 'pv-meta-dev-2026-01' }
+    else { $MetadataKeyId = 'pv-meta-prod-2026-01' }
+}
+
 if ($SignedMode) {
     if ($Mode -eq 'Development/Signed' -and -not $env:PATHVEER_DEV_CODESIGN_THUMBPRINT) {
         throw "Development/Signed requires PATHVEER_DEV_CODESIGN_THUMBPRINT (a self-signed dev certificate). Run New-PathVeerDevelopmentSigningCertificate.ps1 and Install-PathVeerDevelopmentTrust.ps1 first."
     }
     if ($Mode -eq 'Development/Signed' -and ($env:PATHVEER_SIGN_THUMBPRINT -or $env:PATHVEER_SIGN_PFX -or $env:AZURE_KEY_VAULT_URI)) {
         throw "Development/Signed must not combine a dev certificate with a production signing source."
+    }
+    # Development metadata signing MUST NOT consume the production metadata key.
+    if ($Mode -eq 'Development/Signed' -and $MetadataKeyId -eq 'pv-meta-prod-2026-01') {
+        throw "Development/Signed must not use the production metadata keyId (pv-meta-prod-2026-01). It uses pv-meta-dev-2026-01."
+    }
+    if ($Mode -eq 'Development/Signed' -and -not $env:PATHVEER_DEV_META_SIGN_KEY -and -not $ProductionKeyStore) {
+        throw "Development/Signed requires PATHVEER_DEV_META_SIGN_KEY (development ES256 key). The production metadata private key must not be used for disposable development releases."
+    }
+    if ($Mode -eq 'Release/Signed' -and $MetadataKeyId -eq 'pv-meta-dev-2026-01') {
+        throw "Release/Signed must not use the development metadata keyId (pv-meta-dev-2026-01). It uses pv-meta-prod-2026-01."
     }
     Write-Step "3/4 Authenticode signing ($Mode)..."
     & pwsh -NoLogo -NoProfile -File $SignStep `
