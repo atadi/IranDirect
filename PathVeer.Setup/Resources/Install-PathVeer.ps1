@@ -529,12 +529,41 @@ $Script:ExitCode = 0
 
         function Compare-VersionOrder {
         param([string]$A, [string]$B)
-        # Returns -1 if A<B, 0 if equal (ignoring prerelease), 1 if A>B.
-        $na = ($A -replace '-.*$', '')
-        $nb = ($B -replace '-.*$', '')
-        $va = [version]::new($na)
-        $vb = [version]::new($nb)
-        return $va.CompareTo($vb)
+        # Deterministic installed-version contract, shared with the GUI
+        # classifier (InstallStateClassifier.CompareVersions). Mirrors the C#
+        # CompareVersionParts decomposition:
+        #   base : numeric major.minor.build
+        #   rank : 1 = stable (no '-' tag), 0 = prerelease (has '-' tag)
+        #   seq  : trailing integer of the prerelease tag (devsign.5 -> 5, beta.1 -> 1)
+        # Order: base wins; stable outranks prerelease of same base; prereleases
+        # ordered by seq. So 1.0.0-devsign.4 < 1.0.0-devsign.5 (upgrade) and
+        # 1.0.0-devsign.6 > 1.0.0-devsign.5 (downgrade). Returns -1/0/1.
+        function Pcf($v) {
+            if ([string]::IsNullOrWhiteSpace($v)) { $v = '0.0.0' }
+            $base = $v
+            $rank = 1
+            $seq  = 0
+            $dash = $v.IndexOf('-')
+            if ($dash -ge 0) {
+                $base = $v.Substring(0, $dash)
+                $rank = 0 # prerelease ranks BELOW stable
+                $tag  = $v.Substring($dash + 1)
+                $digits = ''
+                foreach ($c in $tag.ToCharArray()) {
+                    if ($c -match '[0-9]') { $digits += $c } else { $digits = '' }
+                }
+                if ($digits -ne '') { $seq = [int]$digits }
+            }
+            if (-not [version]::TryParse($base, [ref]$null)) { $base = '0.0.0' }
+            return [PSCustomObject]@{ base = [version]::new($base); rank = $rank; seq = $seq }
+        }
+        $pa = Pcf $A
+        $pb = Pcf $B
+        $cb = $pa.base.CompareTo($pb.base)
+        if ($cb -ne 0) { return $cb }
+        $cr = $pa.rank.CompareTo($pb.rank)
+        if ($cr -ne 0) { return $cr }
+        return $pa.seq.CompareTo($pb.seq)
         }
 
         # --- Phase 37.2: Windows shell integration ---------------------------------

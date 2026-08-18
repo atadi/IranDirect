@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -25,12 +25,21 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Reuse the canonical PathVeer product icon (the only product icon in the
+         repo) for the Setup EXE and its Explorer/title-bar representation. We do
+         not invent a second visual identity. -->
+    <ApplicationIcon>..\PathVeer.Tray\tray-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Embed the PowerShell deployment script as a resource. -->
     <EmbeddedResource Include="Resources\Install-PathVeer.ps1">
       <LogicalName>PathVeer.Setup.Resources.Install-PathVeer.ps1</LogicalName>
+    </EmbeddedResource>
+    <!-- Product icon: embed so the single-file Setup EXE shows the PathVeer
+         brand in its title bar and (via ApplicationIcon) in Explorer. -->
+    <EmbeddedResource Include="..\PathVeer.Tray\tray-icon.ico">
+      <LogicalName>PathVeer.Setup.Resources.tray-icon.ico</LogicalName>
     </EmbeddedResource>
     <ProjectReference Include="..\PathVeer.Core\PathVeer.Core.csproj" />
   </ItemGroup>

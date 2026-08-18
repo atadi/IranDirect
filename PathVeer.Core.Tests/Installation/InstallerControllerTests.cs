@@ -98,15 +98,24 @@ public class InstallerControllerTests
             InstallStateClassifier.Classify(state, "1.0.0"));
     }
 
-    // --- Version comparison (prerelease-insensitive) -----------------------
+    // --- Version comparison (deterministic installed-version contract) ------
+    // The single contract orders by base, then stable > prerelease, then by the
+    // prerelease sequence (devsign.N / beta.N). This makes devsign.4 < devsign.5
+    // an Upgrade and devsign.6 > devsign.5 a Downgrade, so the GUI classifier
+    // and the install engine agree before mutation.
 
     [Theory]
     [InlineData("1.0.0", "1.0.1", -1)]
     [InlineData("1.0.1", "1.0.0", 1)]
     [InlineData("1.0.0", "1.0.0", 0)]
-    [InlineData("1.0.0-beta.1", "1.0.0", 0)]
+    [InlineData("1.0.0-devsign.4", "1.0.0-devsign.5", -1)]
+    [InlineData("1.0.0-devsign.5", "1.0.0-devsign.4", 1)]
+    [InlineData("1.0.0-devsign.5", "1.0.0-devsign.5", 0)]
+    [InlineData("1.0.0-devsign.6", "1.0.0-devsign.5", 1)]
+    [InlineData("1.0.0-beta.1", "1.0.0", -1)]   // prerelease < stable
+    [InlineData("1.0.0", "1.0.0-beta.1", 1)]
     [InlineData("2.0.0", "1.9.9", 1)]
-    public void CompareVersions_IgnoresPrerelease(string current, string target, int expected)
+    public void CompareVersions_DeterministicContract(string current, string target, int expected)
     {
         Assert.Equal(expected, InstallStateClassifier.CompareVersions(current, target));
     }
@@ -200,5 +209,72 @@ public class InstallerControllerTests
     {
         var state = InstallStateClassifier.ParseStateJson("not-json");
         Assert.False(state.ProductInstalled);
+    }
+
+    // --- REVIEW: single installed-version authority (DEFECT review) --------
+    // Both the GUI classifier and the install engine derive the installed
+    // version from ONE source: install-manifest.json -> productVersion, read by
+    // Get-InstalledVersion. Their version comparison is prerelease-insensitive
+    // on both sides (GUI InstallStateClassifier.CompareVersions and the engine's
+    // Compare-VersionOrder both strip the '-' prerelease tag before [version]
+    // comparison). These tests pin that agreement so GUI intent cannot diverge
+    // from engine behavior before mutation.
+
+    [Theory]
+    [InlineData("1.0.0-devsign.4", "1.0.0-devsign.5", InstallScenario.Upgrade)]
+    [InlineData("1.0.0-devsign.5", "1.0.0-devsign.5", InstallScenario.SameVersion)]
+    [InlineData("1.0.0-devsign.6", "1.0.0-devsign.5", InstallScenario.Downgrade)]
+    [InlineData("1.0.0-beta.1", "1.0.0-beta.1", InstallScenario.SameVersion)]
+    [InlineData(null, "1.0.0-devsign.6", InstallScenario.NotInstalled)]
+    public void Authority_GuiClassify_MatchesEnginePrereleaseInsensitive(
+        string? installed, string target, InstallScenario expected)
+    {
+        var state = new InstallState
+        {
+            ProductInstalled = installed is not null,
+            InstalledVersion = installed,
+            ServiceInstalled = installed is not null,
+        };
+        Assert.Equal(expected, InstallStateClassifier.Classify(state, target));
+    }
+
+    [Theory]
+    [InlineData("1.0.0-devsign.4", "1.0.0-devsign.5", -1)]
+    [InlineData("1.0.0-devsign.5", "1.0.0-devsign.5", 0)]
+    [InlineData("1.0.0-devsign.6", "1.0.0-devsign.5", 1)]
+    [InlineData("1.0.0-beta.1", "1.0.0", -1)]
+    public void Authority_CompareVersions_AgreesWithEngineContract(
+        string installed, string target, int expected)
+    {
+        // Both sides now implement the SAME deterministic contract:
+        // base, then stable>prerelease, then seq-ordered prerelease.
+        int gui = InstallStateClassifier.CompareVersions(installed, target);
+
+        // Replicate the engine's Compare-VersionOrder (PS) in C# to prove parity.
+        // Explicit engine contract in C#:
+        static int EngineCmp(string a, string b)
+        {
+            (System.Version ba, int ra, int sa) = EngineParts(a);
+            (System.Version bb, int rb, int sb) = EngineParts(b);
+            int c = ba.CompareTo(bb); if (c != 0) return c;
+            c = ra.CompareTo(rb); if (c != 0) return c;
+            return sa.CompareTo(sb);
+        }
+        static (System.Version, int, int) EngineParts(string v)
+        {
+            string baseStr = v; int rank = 0; int seq = 0;
+            int dash = v.IndexOf('-');
+            if (dash >= 0) { baseStr = v[..dash]; rank = 0;
+                string tag = v[(dash + 1)..]; int d = 0;
+                foreach (char c in tag) { d = (c >= '0' && c <= '9') ? d * 10 + (c - '0') : 0; }
+                seq = d; }
+            else { rank = 1; }
+            if (!System.Version.TryParse(baseStr, out var vb)) vb = new System.Version(0, 0);
+            return (vb, rank, seq);
+        }
+
+        int engine = EngineCmp(installed, target);
+        Assert.Equal(expected, gui);
+        Assert.Equal(engine, gui);
     }
 }

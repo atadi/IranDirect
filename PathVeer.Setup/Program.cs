@@ -90,7 +90,12 @@ public static class Program
             return SetupExitCodes.ScriptResourceMissing;
         }
 
-        Console.WriteLine($"PathVeer Setup {ThisVersion()}");
+        // Full provenance (includes +<commit>) kept for diagnostics/logging;
+        // the interactive form receives the friendly version without the SHA.
+        string fullVersion = ThisVersion();
+        string friendlyVersion = SetupVersion.Friendly(fullVersion);
+
+        Console.WriteLine($"PathVeer Setup {fullVersion}");
         Console.WriteLine($"Package: {packageDirectory}");
         Console.WriteLine();
 
@@ -119,7 +124,7 @@ public static class Program
         }
 
         ApplicationConfiguration.Initialize();
-        using var form = new InstallForm(controller, ThisVersion());
+        using var form = new InstallForm(controller, friendlyVersion);
         Application.Run(form);
 
         // The form carries the authoritative operation result. The explicit

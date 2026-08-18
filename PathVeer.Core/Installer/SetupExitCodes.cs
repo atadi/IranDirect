@@ -30,6 +30,15 @@ public static class SetupExitCodes
     public const int RuntimePrerequisiteMissing = 110;
 
     /// <summary>
+    /// The operation thread returned but no terminal result record was received
+    /// from the deployment contract. This is a fail-closed contract violation:
+    /// the UI must never remain stuck in the "Working" mutation state. The
+    /// installer surfaces an explicit non-zero failure instead of silently
+    /// reporting success or hanging on a marquee.
+    /// </summary>
+    public const int ContractViolation = 111;
+
+    /// <summary>
     /// Maps a <see cref="System.Security.Principal.WindowsPrincipal"/> admin
     /// check failure into the stable elevation-denied contract. The bootstrapper
     /// catches the runas <see cref="System.ComponentModel.Win32Exception"/> and
@@ -57,6 +66,7 @@ public static class SetupExitCodes
         "ReadinessFailed" => ReadinessFailed,
         "UninstallFailed" => UninstallFailed,
         "PurgeFailed" => PurgeFailed,
+        "ContractViolation" => ContractViolation,
         _ => GenericFailure,
     };
 
@@ -78,6 +88,7 @@ public static class SetupExitCodes
         PowerShellUnavailable => "PowerShell could not be started to run the installer.",
         RelaunchFailed => "Setup could not restart with administrator privileges.",
         RuntimePrerequisiteMissing => "The required .NET runtime is not installed. PathVeer cannot run until it is present.",
+        ContractViolation => "The installer finished without a final result. The operation may be incomplete; no changes are assumed. Re-run Setup to verify the installation state.",
         _ => "Setup finished with an unexpected error.",
     };
 }

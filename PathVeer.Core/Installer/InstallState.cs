@@ -59,18 +59,53 @@ public static class InstallStateClassifier
 {
     public static int CompareVersions(string? current, string target)
     {
-        var a = Normalize(current);
-        var b = Normalize(target);
-        if (!Version.TryParse(a, out var va)) va = new Version(0, 0);
-        if (!Version.TryParse(b, out var vb)) vb = new Version(0, 0);
-        return va.CompareTo(vb);
+        return CompareVersionParts(current).CompareTo(CompareVersionParts(target));
     }
 
-    private static string Normalize(string? v)
+    /// <summary>
+    /// Single deterministic installed-version contract shared by the GUI
+    /// classifier and the install engine (Compare-VersionOrder in
+    /// Install-PathVeer.ps1). A version is decomposed into:
+    ///   * base  : numeric major.minor.build
+    ///   * rank  : 1 = stable (no prerelease), 0 = prerelease (has '-' tag)
+    ///             so a stable release outranks any prerelease of the same base
+    ///   * seq   : the trailing integer of the prerelease tag
+    ///             (devsign.5 -> 5, beta.1 -> 1); 0 when absent
+    /// Ordering: base wins; then a stable release outranks any prerelease of the
+    /// same base; then prereleases are ordered by their sequence number. This
+    /// makes 1.0.0-devsign.4 &lt; 1.0.0-devsign.5 (Upgrade) and
+    /// 1.0.0-devsign.6 &gt; 1.0.0-devsign.5 (Downgrade), while still treating a
+    /// bare 1.0.0 as newer than 1.0.0-beta.1.
+    /// </summary>
+    private static (Version Base, int Rank, int Seq) CompareVersionParts(string? v)
     {
-        if (string.IsNullOrWhiteSpace(v)) return "0.0.0";
-        int dash = v.IndexOf('-');
-        return (dash >= 0 ? v[..dash] : v).Trim();
+        string raw = string.IsNullOrWhiteSpace(v) ? "0.0.0" : v.Trim();
+        string baseStr = raw;
+        int rank = 0;
+        int seq = 0;
+
+        int dash = raw.IndexOf('-');
+        if (dash >= 0)
+        {
+            baseStr = raw[..dash];
+            rank = 0; // prerelease ranks BELOW stable
+            // Trailing integer of the prerelease tag, if any.
+            string tag = raw[(dash + 1)..];
+            int lastDigits = 0;
+            foreach (char c in tag)
+            {
+                if (c >= '0' && c <= '9') { lastDigits = lastDigits * 10 + (c - '0'); }
+                else { lastDigits = 0; }
+            }
+            seq = lastDigits;
+        }
+        else
+        {
+            rank = 1; // stable outranks any prerelease of the same base
+        }
+
+        if (!Version.TryParse(baseStr, out var va)) va = new Version(0, 0);
+        return (va, rank, seq);
     }
 
     public static InstallScenario Classify(InstallState state, string targetVersion)

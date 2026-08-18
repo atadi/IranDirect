@@ -62,12 +62,23 @@ public sealed class InstallForm : Form
     {
         if (result.Success)
         {
-            ResultExitCode = SetupExitCodes.Success;
+            TerminalShowSuccess(result);
         }
         else
         {
-            ResultExitCode = SetupExitCodes.MapResultCategory(result.Category);
+            TerminalShowFailure(SetupExitCodes.MapResultCategory(result.Category));
         }
+    }
+
+    // --- DEBUG test seams: expose the SAME fail-closed logic the RunOperation
+    // worker uses, so unit tests can drive the post-return terminal rule without
+    // spawning a real PowerShell operation. ---
+    public bool DebugTerminalSignaled() => _terminalTransitioned.IsSet;
+
+    public void DebugFailClosedContractViolation()
+    {
+        if (this.IsDisposed) return;
+        TerminalShowFailure(SetupExitCodes.ContractViolation);
     }
 #endif
 
@@ -77,10 +88,33 @@ public sealed class InstallForm : Form
         _targetVersion = targetVersion;
         InitializeComponent();
         ApplyHighDpi();
+        LoadProductIcon();
         _controller.Progress += OnProgress;
         _controller.LogLine += OnLog;
         _controller.Completed += OnCompleted;
         DetectAndRender();
+    }
+
+    // Branded title-bar / taskbar icon, loaded from the embedded product ico
+    // (the canonical PathVeer icon, shared with the Tray). Falls back silently
+    // to the system default if the resource is missing.
+    private void LoadProductIcon()
+    {
+        try
+        {
+            var asm = typeof(InstallForm).Assembly;
+            using var stream = asm.GetManifestResourceStream(
+                "PathVeer.Setup.Resources.tray-icon.ico");
+            if (stream is not null)
+            {
+                using var icon = new Icon(stream);
+                this.Icon = (Icon)icon.Clone();
+            }
+        }
+        catch
+        {
+            // Non-fatal: the form works without a custom icon.
+        }
     }
 
     private void ApplyHighDpi()
@@ -383,21 +417,73 @@ public sealed class InstallForm : Form
                 exitCode = SetupExitCodes.GenericFailure;
             }
 
-            // The Completed event handles success/failure UI; ensure the
-            // thread returns to the UI thread for any direct completion.
-            this.Invoke(() =>
+            // Fail-closed completion rule:
+            // The operation thread has now RETURNED. A well-formed run raises the
+            // controller's Completed event (OnCompleted) which performs the single
+            // terminal UI transition. If that transition never arrived (dropped
+            // invoke, disposed form, lost subscriber, or a backend that returns
+            // without writing a result record), the UI must NOT remain stuck on
+            // the "Working" marquee forever. Wait briefly for the real terminal
+            // transition; if it has not happened, surface an explicit non-zero
+            // ContractViolation so the user gets a result and the process exits
+            // non-zero instead of hanging.
+            bool terminal = _terminalTransitioned.Wait(TimeSpan.FromSeconds(2));
+            if (!terminal)
             {
-                if (exitCode != SetupExitCodes.Success && _completedFired == false)
+                this.Invoke(() =>
                 {
-                    ShowFailure(exitCode);
-                }
-            });
+                    if (this.IsDisposed) return;
+                    TerminalShowFailure(SetupExitCodes.ContractViolation);
+                });
+            }
         });
         worker.SetApartmentState(ApartmentState.STA);
         worker.Start();
     }
 
+    // Guards the single terminal UI transition (success OR failure). Set inside
+    // the UI-thread transition so the fail-closed worker check and the real
+    // Completed callback can never both run, and re-entrancy cannot produce a
+    // second transition.
+    private readonly ManualResetEventSlim _terminalTransitioned = new(false);
     private bool _completedFired;
+
+    private void OnCompleted(ResultRecord result)
+    {
+        if (this.IsDisposed) return;
+        this.Invoke(() =>
+        {
+            if (this.IsDisposed) return;
+            if (result.Success)
+            {
+                ResultExitCode = SetupExitCodes.Success;
+                TerminalShowSuccess(result);
+            }
+            else
+            {
+                ResultExitCode = SetupExitCodes.MapResultCategory(result.Category);
+                TerminalShowFailure(ResultExitCode);
+            }
+        });
+    }
+
+    // Idempotent terminal transition. Exactly one of these runs per operation.
+    private void TerminalShowSuccess(ResultRecord result)
+    {
+        if (_terminalTransitioned.IsSet) return;
+        _terminalTransitioned.Set();
+        _completedFired = true;
+        ResultExitCode = SetupExitCodes.Success;
+        ShowSuccess(result);
+    }
+
+    private void TerminalShowFailure(int exitCode)
+    {
+        if (_terminalTransitioned.IsSet) return;
+        _terminalTransitioned.Set();
+        _completedFired = true;
+        ShowFailure(exitCode);
+    }
 
     private void OnProgress(ProgressRecord rec)
     {
@@ -427,25 +513,6 @@ public sealed class InstallForm : Form
         });
     }
 
-    private void OnCompleted(ResultRecord result)
-    {
-        _completedFired = true;
-        if (this.IsDisposed) return;
-        this.Invoke(() =>
-        {
-            if (result.Success)
-            {
-                ResultExitCode = SetupExitCodes.Success;
-                ShowSuccess(result);
-            }
-            else
-            {
-                ResultExitCode = SetupExitCodes.MapResultCategory(result.Category);
-                ShowFailure(ResultExitCode);
-            }
-        });
-    }
-
     private void ShowSuccess(ResultRecord result)
     {
         _progress.Visible = false;
@@ -457,16 +524,24 @@ public sealed class InstallForm : Form
         _buttons.Controls.Clear();
         _buttons.Controls.Add(_cancelButton);
 
-        string verdict = "PathVeer is installed and running.";
+        string verdict = $"PathVeer {_targetVersion} was installed successfully.";
         if (_scenario == InstallScenario.SupportedLegacyMigration)
         {
             verdict = "IranDirect was upgraded to PathVeer. Your configuration and state were preserved.";
         }
+        else if (_scenario == InstallScenario.SameVersion)
+        {
+            verdict = $"PathVeer {_targetVersion} was repaired successfully.";
+        }
+        else if (_scenario == InstallScenario.Upgrade)
+        {
+            verdict = $"PathVeer was upgraded to {_targetVersion} successfully.";
+        }
 
         _resultLabel.ForeColor = Color.Green;
         _resultLabel.Text = verdict +
-            " You can use the PathVeer Tray to control routing settings. " +
-            "Closing the Tray does not stop the PathVeer Service.";
+            " PathVeer is installed and running. You can use the PathVeer Tray to " +
+            "control routing settings. Closing the Tray does not stop the PathVeer Service.";
 
         if (_launchAfterCheck.Checked && (_scenario is InstallScenario.NotInstalled or
             InstallScenario.Upgrade or InstallScenario.SameVersion or
