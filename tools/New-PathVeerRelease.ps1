@@ -80,6 +80,19 @@ $ArchReleaseRoot      = Join-Path $VersionedReleaseRoot $RuntimeIdentifier
 $SetupExeName         = "PathVeerSetup-$Version-$RuntimeIdentifier.exe"
 $ZipName              = "PathVeer-$Version-$RuntimeIdentifier.zip"
 
+# --- Fail-closed overwrite guard (release-engineering safety) -------------
+# A frozen/certified release artifact (e.g. devsign.N, beta.1) must never be
+# silently deleted or overwritten by a later build of the same version. If the
+# target arch release root already exists, abort non-zero and change nothing.
+# There is intentionally NO -Force/-Overwrite bypass: an exceptional overwrite
+# mechanism is not required for this milestone. Use a NEW version for a changed
+# build.
+if (Test-Path -LiteralPath $ArchReleaseRoot) {
+    Write-Error ("Release output already exists and is treated as immutable: $ArchReleaseRoot`n" +
+                 "Aborting. Build a NEW version (do not overwrite a prior specimen).")
+    exit 1
+}
+
 function Write-Step([string]$Message) {
     Write-Host $Message -ForegroundColor Cyan
 }
