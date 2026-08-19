@@ -1,6 +1,6 @@
 # Architecture Reading Map
 
-The reading map connects concepts encountered in IranDirect to authoritative resources.
+The reading map connects concepts encountered in PathVeer (and its IranDirect predecessor) to authoritative resources.
 
 It is not a generic list of books or links.
 
@@ -10,7 +10,7 @@ Each entry should answer:
 2. Why is it relevant now?
 3. What should be understood before reading it?
 4. What should the reader look for?
-5. How does it relate to IranDirect?
+5. How does it relate to PathVeer or a specific historical IranDirect decision?
 6. What should be read next?
 
 ## Learning Tracks
@@ -23,3 +23,5 @@ Each entry should answer:
 - Reliability and observability
 - Distributed systems
 - Platform engineering
+
+Current task direction comes from `../AI/CURRENT.md`, not from the reading map.

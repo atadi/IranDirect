@@ -1,71 +1,56 @@
 # AI Workspace
 
-This directory contains durable collaboration and continuation documents.
+This directory contains the small set of durable documents used to continue PathVeer engineering across AI sessions.
 
 ## Required Reading
 
 1. repository root `AI-START-HERE.md`
 2. [CURRENT.md](CURRENT.md)
-3. the remaining task-relevant files listed by `AI-START-HERE.md`
+3. [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md)
 
-## Durable Current State
+Then read only task-relevant source, tests, ADRs, and documentation.
 
-`CURRENT.md` is the committed executive summary.
+Do not load the whole Architecture Knowledge Base by default.
 
-It contains:
+## Document Responsibilities
 
-- current mission;
-- current architecture;
-- implemented responsibilities;
-- architectural debt;
-- immediate next milestone;
-- non-negotiable invariants.
+### `CURRENT.md`
 
-Update it after architecturally significant milestones.
+The single committed authority for the current milestone, blocker, immediate scope, and current acceptance gates.
 
-## Local Runtime State
+Keep it concise. Move historical certification detail into `docs/release/`.
 
-Use the generated root file:
+### `SESSION-PROTOCOL.md`
 
-```text
-AI-LOCAL-STATE.md
-```
+Durable engineering collaboration/execution rules: evidence levels, investigation, implementation, testing, operator gates, Git safety, certification, and handoff.
 
-Generate it with:
+### `AI-LOCAL-STATE.md` (repository root, generated, Gitignored)
+
+Timestamped machine-specific evidence such as branch, HEAD, working tree, selected build/tests, and relevant Windows process/Service state.
+
+Generate with the current repository tool:
 
 ```powershell
 .\tools\update-ai-local-state.ps1
 ```
 
-Successful snapshots remain compact.
+### `AI-EVIDENCE/` (generated, Gitignored)
 
-Full evidence is written under:
-
-```text
-AI-EVIDENCE/
-```
-
-Both generated locations are ignored by Git.
+Detailed local diagnostic evidence when the snapshot generator uses it. It is supporting evidence, not a source of architectural ownership.
 
 ## Access Levels
 
-- A — Direct checkout and terminal
-- B — Repository plus uploaded AI-LOCAL-STATE.md
-- C — Public repository only
+- **A** — direct checkout and terminal;
+- **B** — repository plus fresh local snapshot/operator evidence;
+- **C** — repository only;
+- **D** — conversation/evidence only.
 
-Only level A independently verifies the local machine.
+See `SESSION-PROTOCOL.md` for claim limits and workflow at each level.
 
-Level B compares committed repository truth with the uploaded snapshot.
+## Rule
 
-Level C requests a fresh snapshot before implementation.
-## Session Protocol
+Only `CURRENT.md` answers:
 
-Read [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) for:
+> What are we working on right now?
 
-- human and AI responsibilities;
-- access levels;
-- session boot sequence;
-- architecture review gate;
-- implementation workflow;
-- completion gate;
-- end-of-session handoff.
+Historical phase documents, release records, timelines, and old chats must not compete with it as current-status authorities.

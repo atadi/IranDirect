@@ -1,5 +1,7 @@
 # Architecture Journal
 
+> **Historical note.** Journal entries are append-only and may correctly use IranDirect terminology for work completed before the PathVeer rename. Current product/milestone authority is `../AI/CURRENT.md`.
+
 This journal is chronological and append-only.
 
 Each entry captures a transferable architectural lesson discovered through real project work.
@@ -153,7 +155,7 @@ A single "reconcile and execute" step conflates five lifecycle stages:
 4. **Verify** post-conditions (route exists or is absent).
 5. **Record** ownership in durable inventory.
 
-### IranDirect Example
+### Project Example
 
 - `RuntimeChangeSetPlanner` decides what changes are needed.
 - `RuntimeExecutionPlan` (domain model) defines the ordered steps.
@@ -226,7 +228,7 @@ When each upstream artifact is independently valid and the composition contract 
 
 No status-specific branching, no duplicate validation, no re-derivation of invariants already enforced by the domain.
 
-### IranDirect Example
+### Project Example
 
 - `RuntimeDecisionBuilder` calls `IRuntimePlanCoordinator`, `IRuntimeReconciler`, `RuntimeExecutionPlanner`, and `TimeProvider` in sequence.
 - RuntimeDecision.Create validates the composed result — the builder neither duplicates this check nor branches on status.
@@ -280,7 +282,7 @@ The migration itself is small when preceded by good boundaries:
 3. `RuntimeCycleResult` had zero production consumers beyond the coordinator.
 4. No adapter was needed — no external consumer depended on `RuntimeCycleResult`.
 
-### IranDirect Example
+### Project Example
 
 - `RuntimeCycleResult` deleted (3 files changed: coordinator, tests, definition).
 - `RuntimeCycleCoordinator` now delegates entirely to `IRuntimeDecisionBuilder`.

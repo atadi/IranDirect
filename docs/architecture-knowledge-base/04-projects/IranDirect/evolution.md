@@ -1,5 +1,7 @@
 # IranDirect Architecture Evolution
 
+> **Historical architecture record.** This document describes the IranDirect-era evolution that led to PathVeer. It is not the current PathVeer milestone or current architecture summary. For current architecture see `../PathVeer/README.md`; for current engineering state see `../../AI/CURRENT.md`.
+
 ## Phase 1 — Command Utility
 
 ```text

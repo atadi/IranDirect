@@ -1,547 +1,449 @@
-# IranDirect AI Start Here
+# PathVeer AI Start Here
 
-This file is the canonical bootstrap document for AI assistants and new contributors continuing IranDirect development.
+This is the canonical bootstrap document for AI assistants and contributors working on PathVeer.
 
-Do not begin implementation until the repository state and required architecture documents have been reviewed.
+Keep this file durable. It defines project-wide rules, sources of truth, safety boundaries, and navigation. It must not become a changelog, machine-state snapshot, or current-milestone tracker.
 
----
+Current work belongs in:
 
-## 1. Repository Is the Source of Truth
+`docs/architecture-knowledge-base/AI/CURRENT.md`
 
-The checked-out repository is authoritative for the current implementation.
+Machine-specific evidence belongs in:
 
-Before making assumptions:
+`AI-LOCAL-STATE.md`
 
-1. Verify the active branch.
-2. Verify the current commit.
-3. Verify the working tree.
-4. Build the solution.
-5. Run the automated tests.
-6. Compare documentation with the current source.
+Execution workflow belongs in:
 
-If this document, an old chat, or another summary conflicts with the current repository:
-
-- use tested source code to determine what is currently implemented;
-- use accepted ADRs to determine the intended architectural direction;
-- report architecture or documentation drift explicitly;
-- do not silently reinterpret conflicting information.
+`docs/architecture-knowledge-base/AI/SESSION-PROTOCOL.md`
 
 ---
 
-## 2. Required Initial Commands
+## 1. Product Identity
 
-Run these commands from the repository root:
+PathVeer is the current product identity.
+
+IranDirect is the legacy predecessor. Some IranDirect names intentionally remain for migration, rollback, persisted-data compatibility, IPC compatibility, legacy Service compatibility, compatibility shims, and historical documentation.
+
+Do not rename an IranDirect identifier merely for cosmetic consistency. First classify it as:
+
+1. compatibility contract;
+2. persisted schema/data;
+3. migration or rollback contract;
+4. historical documentation;
+5. genuine stale branding.
+
+Only the last category is automatically a branding-cleanup candidate.
+
+---
+
+## 2. Sources of Truth
+
+Use different authorities for different questions.
+
+### Current implementation
+
+1. checked-out source;
+2. automated tests;
+3. fresh runtime/operator evidence;
+4. current committed documentation;
+5. historical summaries.
+
+### Current milestone
+
+1. `docs/architecture-knowledge-base/AI/CURRENT.md`;
+2. explicit current-session user instructions;
+3. current session handoff when present.
+
+### Architectural intent
+
+1. accepted ADRs;
+2. non-negotiable invariants;
+3. current architecture documentation;
+4. evolution/history;
+5. old chats and summaries.
+
+### Current machine/runtime state
+
+1. direct terminal evidence;
+2. fresh `AI-LOCAL-STATE.md`;
+3. operator logs/screenshots.
+
+A committed repository cannot prove current Windows runtime state.
+
+---
+
+## 3. Required Session Bootstrap
+
+Read, in order:
+
+1. `AI-START-HERE.md`
+2. `docs/architecture-knowledge-base/AI/CURRENT.md`
+3. `docs/architecture-knowledge-base/AI/SESSION-PROTOCOL.md`
+
+Then read only task-relevant source, tests, ADRs, and documentation.
+
+Do not recursively load the entire Architecture Knowledge Base.
+
+With direct checkout access, verify:
 
 ```powershell
 git branch --show-current
 git rev-parse HEAD
 git status --short
 git log -1 --oneline
-
-dotnet build
-dotnet test
+git branch -vv
+git rev-list --left-right --count HEAD...@{upstream}
 ```
 
-Do not proceed with implementation if:
-
-- the branch is unexpected;
-- the working tree contains unexplained changes;
-- the solution does not build;
-- tests fail.
-
-First summarize the repository condition and resolve or explicitly account for the discrepancy.
-
----
-
-## 3. Expected Development Branch
-
-The active development branch has historically been:
+The development branch has historically been:
 
 ```text
 development/service-authority
 ```
 
-This is not a permanent assumption.
+Always verify it; do not treat it as permanent.
 
-Always verify the current branch and its upstream before continuing:
+---
+
+## 4. Dirty Working Tree Safety
+
+A dirty working tree is evidence, not something to erase automatically.
+
+If changes exist:
+
+1. inspect them;
+2. identify their owner/purpose;
+3. preserve user and prior-agent work;
+4. do not overwrite unexplained changes;
+5. report conflicts that prevent safe implementation.
+
+Do not automatically use destructive `reset`, `clean`, `restore`, branch switching, rebase, or history rewriting.
+
+---
+
+## 5. Product Mission
+
+PathVeer is a Windows network control-plane application.
+
+Its routing purpose is to allow configured country IPv4 traffic to bypass a VPN through the physical ISP gateway while other traffic remains on the VPN path.
+
+The primary safety invariant is:
+
+> VPN endpoint connectivity has priority over direct-prefix routing.
+
+If PathVeer cannot safely determine or protect the VPN endpoint, direct-routing mutation must fail closed.
+
+---
+
+## 6. Core Authority Model
+
+The PathVeer Windows Service is the machine-authoritative routing controller.
+
+```text
+CLI ----\
+         \
+          -> IPC -> PathVeer Service -> observe -> plan -> reconcile -> execute
+         /
+Tray ---/
+```
+
+CLI and Tray are control surfaces, not independent route-mutation authorities.
+
+The installer is a lifecycle/deployment authority, not a routing authority.
+
+---
+
+## 7. Non-Negotiable Architecture Invariants
+
+1. The Windows Service is the only machine authority allowed to mutate managed routes.
+2. CLI and Tray express intent through defined IPC/service contracts.
+3. VPN endpoint reachability has priority over direct-prefix routing.
+4. PathVeer removes only resources it can identify as owned.
+5. Observation is read-only.
+6. Planning is deterministic and side-effect free.
+7. Reconciliation is idempotent.
+8. Unsafe or blocked plans do not mutate infrastructure.
+9. Configuration, requested state, effective state, observed runtime, desired runtime, and inventory are distinct concepts.
+10. Controllers/coordinators remain thin.
+11. Platform-specific behavior remains behind explicit adapters.
+12. Destructive mutation happens only after required validation.
+13. Fail closed when routing safety, package integrity, trust, or authority is uncertain.
+14. Changes remain small, reviewable, and testable.
+15. No broad rewrite without explicit architecture review and user approval.
+
+---
+
+## 8. Service / Tray Boundary
+
+The Service is machine-scoped and authoritative.
+
+The Tray is per-user UI/controller and should normally run non-elevated.
+
+Therefore:
+
+- closing Tray must not stop the Service;
+- repeated Tray launches must converge to one intended instance per interactive session;
+- installer/autorun/Start Menu launches must not create competing Tray instances;
+- Tray lifecycle must not determine routing authority;
+- unnecessary elevation of the Tray is a security/UX defect.
+
+---
+
+## 9. Legacy Compatibility
+
+Known compatibility-sensitive identities may include:
+
+```text
+IranDirect.Control.v1
+%ProgramData%\IranDirect
+iran-ipv4-prefixes.txt
+AddedByIranDirect
+irandirect.cmd
+legacy IranDirect Windows Service identity
+legacy migration/rollback state
+```
+
+Their existence is not itself technical debt.
+
+Before changing one, identify current readers/writers and evaluate persisted-data, upgrade, rollback, and mixed-version effects.
+
+---
+
+## 10. Installation / Migration Authority
+
+IranDirect -> PathVeer migration must preserve a single Service authority.
+
+Conceptually:
+
+```text
+legacy IranDirect authority
+-> stop/disable/verify
+-> stage and verify PathVeer
+-> start PathVeer
+-> readiness verification
+-> retire/reconcile legacy authority
+```
+
+Do not intentionally leave IranDirect and PathVeer operating as competing routing authorities.
+
+Installer state classification should distinguish fresh, PathVeer-present, IranDirect-only migration, and conflicting/partial states.
+
+---
+
+## 11. Release / Certification Invariants
+
+Unless explicitly changed by the user:
+
+- do not publish releases;
+- do not modify production release pointers;
+- do not modify `R2/latest.json`;
+- do not use production private signing keys for development certification;
+- keep development and production trust isolated;
+- do not overwrite an already-tested certification artifact;
+- use a new disposable version after each materially changed certification build;
+- do not claim Explorer/UAC/GUI/operator behavior as proven merely "by construction".
+
+Production metadata verification remains fail closed.
+
+---
+
+## 12. Frozen beta.1
+
+`1.0.0-beta.1` is frozen and must not be rebuilt, re-signed, overwritten, modified, or republished.
+
+Expected frozen SHA-256:
+
+```text
+7e5b4301756dfa617509c8a533aed3000e7025d2b3470150b0e6933361ffa24d
+```
+
+Any new candidate after a source/signing change uses a new version.
+
+---
+
+## 13. Git Safety
+
+Unless explicitly authorized:
+
+- no Git worktrees;
+- no rebase;
+- no force push;
+- no history rewriting;
+- no destructive reset;
+- no automatic branch switching;
+- no deleting unexplained files.
+
+For completed committed work, verify after push:
 
 ```powershell
-git branch --show-current
-git branch -vv
-git status
-```
-
-Never switch branches, reset changes, delete files, or rewrite history without explicit user approval.
-
----
-
-## 4. Required Reading Order
-
-Read the following documents in order.
-
-### Required for Every New Session
-Read the committed executive summary immediately after this file:
-
-1. `AI-START-HERE.md`
-2. `docs/architecture-knowledge-base/AI/CURRENT.md`
-
-Then continue with the remaining task-relevant documents below.
-
-1. `AI-START-HERE.md`
-2. `docs/architecture-knowledge-base/README.md`
-3. `docs/architecture-knowledge-base/04-projects/IranDirect/README.md`
-4. `docs/architecture-knowledge-base/04-projects/IranDirect/evolution.md`
-5. `docs/architecture-knowledge-base/05-reference/principles.md`
-6. `docs/architecture-knowledge-base/05-reference/checklists.md`
-
-### Read When Present
-
-The following AI workspace documents may be added under:
-
-```text
-docs/architecture-knowledge-base/AI/
-```
-
-Read them in this order:
-
-1. `collaboration-contract.md`
-2. `project-state.md`
-3. `session-handoff.md`
-4. `roadmap.md`
-5. `architecture-debt.md`
-6. `engineering-standards.md`
-7. `definition-of-done.md`
-
-### Task-Specific Reading
-
-Read only the ADRs, patterns, journal entries, source files, and tests relevant to the immediate milestone.
-
-Do not load the entire knowledge base without a reason. Prefer focused, task-relevant context.
-
----
-
-## 5. Authority and Precedence
-
-Use this precedence when information conflicts.
-
-### Current Implementation Facts
-
-1. Current checked-out source code
-2. Automated tests
-3. Current runtime evidence supplied by the user
-4. `project-state.md`
-5. `session-handoff.md`
-6. Roadmap and historical summaries
-
-### Architectural Intent
-
-1. Accepted ADRs
-2. Architecture principles and invariants
-3. Current project architecture documentation
-4. Patterns and mental models
-5. Architecture Journal
-6. Old chat summaries
-
-Code explains what currently exists.
-
-ADRs explain why an architectural direction was accepted.
-
-If current code conflicts with an accepted ADR, report:
-
-```text
-Architecture drift detected.
-```
-
-Then identify:
-
-- the conflicting implementation;
-- the accepted architectural decision;
-- whether the implementation should be corrected;
-- or whether the ADR should be superseded.
-
----
-
-## 6. Project Mission
-
-IranDirect is a Windows network control-plane application.
-
-Its primary purpose is:
-
-- bypass OpenVPN for Iranian IPv4 prefixes;
-- send Iranian traffic through the ISP gateway;
-- send other traffic through the VPN;
-- guarantee that VPN endpoint connectivity is never broken by IranDirect routing.
-
-VPN safety has absolute priority.
-
-If IranDirect cannot safely determine or protect the VPN endpoint, it must not install direct-routing prefixes.
-
----
-
-## 7. Current Architectural Direction
-
-IranDirect is evolving from imperative commands toward a declarative control loop.
-
-Current direction:
-
-```text
-DesiredConfiguration
-        |
-        v
-RuntimeCoordinator
-   |             |
-   v             v
-RuntimeObserver  RuntimePlanner
-   |             |
-   v             v
-ObservedRuntime  DesiredRuntime
-        \       /
-         \     /
-      RuntimePlanSnapshot
-              |
-              v
-     RuntimeReconciler
-              |
-              v
- Windows Networking Platform
-```
-
-`RuntimeReconciler` is the next major architectural responsibility unless the repository shows that it has already been implemented.
-
----
-
-## 8. Non-Negotiable Invariants
-
-Every implementation must preserve these invariants.
-
-1. The Windows Service is the only authority allowed to mutate routes.
-2. CLI and Tray express intent through IPC.
-3. VPN endpoint reachability has priority over prefix routing.
-4. IranDirect removes only routes it explicitly owns.
-5. Diagnostics are read-only.
-6. Observation reports facts and performs no planning.
-7. Planning is deterministic and side-effect free.
-8. Reconciliation is idempotent.
-9. Unsafe or blocked plans must not mutate infrastructure.
-10. Configuration, observation, desired runtime, actual runtime, and inventory are distinct concepts.
-11. Controllers and coordinators remain thin.
-12. Platform-specific behavior remains behind adapters.
-13. Changes are introduced in small, reviewable, testable milestones.
-14. No large rewrite is permitted without an explicit architecture review and user approval.
-
----
-
-## 9. Working Method
-
-Use this sequence for each milestone.
-
-### Before Implementation
-
-1. Verify repository state.
-2. State the immediate architectural goal.
-3. Identify the new or changing responsibility.
-4. Identify its owner.
-5. Identify the invariant being protected.
-6. Identify files likely to change.
-7. Identify behavior that must not change.
-8. Review relevant tests and ADRs.
-
-### During Implementation
-
-1. Keep the change small.
-2. Prefer pure domain logic before wiring side effects.
-3. Add or update automated tests.
-4. Avoid unrelated cleanup.
-5. Do not modify real routing during structural tests.
-6. Preserve a clean migration path from the current design.
-
-### After Implementation
-
-Run:
-
-```powershell
-dotnet clean
-dotnet build
-dotnet test
-git diff --check
 git status --short
-git diff --stat
+git rev-parse HEAD
+git rev-parse @{upstream}
+git rev-list --left-right --count HEAD...@{upstream}
 ```
 
-Then perform only the necessary runtime validation.
-
-Do not commit until:
-
-- the build succeeds;
-- tests pass;
-- runtime behavior is verified where required;
-- unexpected file changes are explained.
+Normally require clean tree and `0/0` ahead/behind.
 
 ---
 
-## 10. Definition of Done
+## 14. Investigation Before Modification
 
-A milestone is complete only when applicable items are satisfied.
+For a defect:
 
-### Product
+1. capture exact evidence;
+2. identify the failing boundary;
+3. identify producer and consumer;
+4. inspect the relevant source path;
+5. distinguish symptom from root cause;
+6. gather evidence that separates competing hypotheses;
+7. implement the smallest correct repair.
 
-- Code compiles.
-- Automated tests pass.
-- Existing behavior is preserved unless intentionally changed.
-- VPN safety is verified.
-- The change is idempotent where relevant.
-- No unrelated changes are included.
-
-### Architecture
-
-- Responsibility and ownership are clear.
-- New coupling is justified.
-- Contracts remain stable where practical.
-- Architectural debt is reduced or explicitly recorded.
-- The controller does not absorb new business logic.
-
-### Knowledge Base
-
-- Architecture Journal updated for transferable lessons.
-- ADR created or updated for significant decisions.
-- Pattern documented when reusable beyond IranDirect.
-- Project evolution updated for meaningful structural changes.
-- Reading map updated when a new concept is introduced.
-- Mental model added when it materially improves understanding.
-- Architecture debt updated when debt remains.
-
-Not every small code change requires every document.
-
-Only create durable knowledge artifacts for information expected to remain useful over time.
+Prefer direct evidence: exit codes, Event Log, process tree, service state, registry state, hashes, embedded manifests, artifact contents, source history, focused reproductions.
 
 ---
 
-## 11. Documentation Rules
+## 15. Verification Strategy
 
-Use the Architecture Knowledge Base for durable architectural knowledge.
+Use progressive verification.
 
-Do not use it for:
+During investigation, do not automatically run the largest test suite.
 
-- transient build errors;
-- typo fixes;
-- routine package updates;
-- temporary commands;
-- low-level implementation history already captured by Git.
+During implementation:
 
-Document:
+```text
+specific regression
+-> affected test class
+-> affected project
+-> relevant subsystem
+```
 
-- decisions;
-- context;
-- alternatives;
-- tradeoffs;
-- invariants;
-- reusable principles;
-- mental models;
-- architectural evolution.
+At milestone/release closure, run the broader suites required by `CURRENT.md` and the applicable certification harness.
 
-Apply the ten-year test:
+Do not run `dotnet clean` routinely. Use it when a clean/reproducible build is part of the actual gate or stale-output investigation.
 
-> Will this still be useful to an architect ten years from now?
-
-If not, it probably belongs in Git history, an issue, or a temporary session handoff—not the permanent AKB.
+Do not dismiss a test as flaky without identifying and reproducing it.
 
 ---
 
-## 12. Architecture Compass
+## 16. Artifact-Level Proof
 
-Evaluate significant proposals with these questions:
+Source tests do not prove all Windows installer behaviors.
 
-- Does this clarify ownership?
-- Does this increase cohesion?
-- Does this reduce coupling?
-- Does this improve testability?
-- Does this preserve stable contracts?
-- Does this simplify orchestration?
-- Does this isolate side effects?
-- Does this improve observability?
-- Does this preserve VPN safety?
-- Does this reduce architectural debt?
-- Is the abstraction earning its cost?
-- Will the design remain understandable as the project grows?
+Where applicable, certify the actual built artifact for:
 
-Do not accept a design merely because it is elegant or fashionable.
+- PE subsystem and manifest;
+- Explorer/UAC startup;
+- Authenticode;
+- package integrity;
+- service installation/readiness;
+- Start Menu and Apps & Features;
+- PATH changes;
+- Tray process/elevation behavior;
+- repair/upgrade/uninstall;
+- terminal UI result;
+- reboot persistence.
 
-Prefer the smallest architecture that can evolve safely.
-
----
-
-## 13. Mentorship and Collaboration Contract
-
-The collaboration has two simultaneous goals:
-
-1. Build IranDirect to production quality.
-2. Develop transferable architectural judgment.
-
-When proposing architecture:
-
-- explain why;
-- explain tradeoffs;
-- explain when the approach should not be used;
-- relate it to IranDirect;
-- distinguish principle from implementation;
-- invite architectural challenge and disagreement.
-
-Do not teach pattern memorization.
-
-Derive architecture from:
-
-- responsibilities;
-- ownership;
-- invariants;
-- sources of truth;
-- expected change;
-- failure modes;
-- operational constraints.
-
-The goal is not dependency on the assistant.
-
-The goal is for the developer to independently recognize and design appropriate system boundaries.
+Distinguish `source-inspected`, `unit-tested`, `integration-tested`, `artifact-tested`, `operator-tested`, and `runtime-proven`.
 
 ---
 
-## 14. New-Session Bootstrap Response
+## 17. Package Integrity and Signing
 
-After reading the required files and verifying the repository, begin with a concise grounded summary containing:
+Internal package hashes describe final distributed bytes.
+
+Release ordering must preserve the equivalent of:
+
+```text
+build
+-> finalize contents
+-> Authenticode-sign applicable binaries
+-> regenerate/verify internal hashes over signed bytes
+-> assemble distribution
+-> generate outer checksums
+-> generate/sign release metadata
+```
+
+Installer verification must reject missing files, hash mismatches, rooted paths, traversal, malformed records, and unsafe path resolution.
+
+---
+
+## 18. Long-Running Lifecycle Rule
+
+Every long-running workflow must define producer lifetime, consumer lifetime, progress, completion signal, success, failure, cancellation, timeout, cleanup, and final result.
+
+Do not permit:
+
+```text
+backend completed + UI remains Working
+producer exited + consumer has no completion signal
+operation failed + process reports Success
+```
+
+A defensive timeout must not accidentally become normal lifecycle control.
+
+---
+
+## 19. Documentation Boundaries
+
+Use:
+
+```text
+AI-START-HERE.md
+    durable rules and navigation
+
+AI/CURRENT.md
+    current milestone/blocker
+
+AI/SESSION-PROTOCOL.md
+    durable engineering workflow
+
+AI-LOCAL-STATE.md
+    ephemeral machine evidence
+
+ADRs
+    accepted architecture decisions
+
+project evolution/history
+    historical progression
+
+docs/release/
+    release architecture and immutable certification evidence
+```
+
+Historical documents preserve the terminology and truth of their time. Current navigation/status documents use PathVeer and current truth.
+
+---
+
+## 20. New-Session Response
+
+After bootstrap and repository verification, summarize:
 
 ### Verified Repository State
-
 - branch;
-- commit;
-- working-tree status;
-- build result;
-- test result.
+- HEAD;
+- upstream;
+- ahead/behind;
+- working-tree condition.
 
-### Current Architecture
+### Current Work
+- milestone;
+- immediate blocker/goal;
+- affected subsystem.
 
-- current control flow;
-- implemented responsibilities;
-- remaining responsibility still located in the wrong component.
+### Architectural Boundary
+- responsibility;
+- owner;
+- source of truth;
+- invariant;
+- explicitly untouched behavior.
 
-### Immediate Next Milestone
-
-- goal;
-- proposed scope;
-- files or components likely affected;
-- what will explicitly remain unchanged.
-
-### Risks or Drift
-
-- documentation drift;
-- ADR conflicts;
-- uncommitted work;
-- unsafe runtime assumptions;
-- missing tests.
-
-Do not begin implementation until this summary is grounded in the repository.
+### Risks / Drift
+Only actual findings: documentation drift, ADR conflict, uncommitted work, baseline failures, unsafe assumptions, or missing acceptance evidence.
 
 ---
 
-## 15. Current Expected Next Direction
+## 21. First Principle
 
-At the time this bootstrap file was introduced, the expected next direction was:
+When uncertain, ask:
 
-```text
-Introduce RuntimeReconciler.
-```
-
-The reconciler should consume `RuntimePlanSnapshot`, compare desired and observed runtime, and apply minimal verified changes.
-
-The long-term target is a controller that reads approximately as:
-
-```csharp
-RuntimePlanSnapshot plan =
-    await coordinator.BuildPlanAsync(cancellationToken);
-
-RuntimeReconciliationResult result =
-    await reconciler.ReconcileAsync(
-        plan,
-        cancellationToken);
-```
-
-The controller should not own:
-
-- profile validation;
-- endpoint planning;
-- route calculations;
-- route differences;
-- Windows command construction;
-- inventory decisions;
-- diagnostics rules.
-
-Verify the repository before assuming this work remains outstanding.
-
-- Reliability audit (Phase 34.1) + selected slice: `docs/reliability/phase-34.1-production-risk-audit.md`
-- Crash-consistent route reconciliation (Phase 34.2, committed): `docs/reliability/phase-34.2-crash-consistent-route-reconciliation.md`
-- Cross-store crash consistency (Phase 34.3, analysis + tests; no prod change): `docs/reliability/phase-34.3-cross-store-recovery.md` (decision: no general transaction mechanism needed)
-- DesiredConfiguration missing/corrupt load contract (Phase 34.4): `docs/reliability/phase-34.4-desired-configuration-load-safety.md` (fail closed; missing/corrupt distinguished from a saved disabled config)
-- Country-agnostic routing audit (Phase 35.1): `docs/globalization/phase-35.1-country-routing-audit.md` (engine is geography-neutral; only the prefix source binds IR; roadmap Phase 35.2–35.7; brand rename deferred to Phase 36)
-- Country identity/configuration contract (Phase 35.2): `docs/globalization/phase-35.2-country-configuration.md` (`DirectCountryCode` ISO alpha-2 value object; legacy→IR; non-IR temporary safety gate in worker; source still IR-only until 35.3)
-- Generic country prefix source & persistence (Phase 35.3): `docs/globalization/phase-35.3-country-prefix-source.md` (RIPEstat global source; `ICountryPrefixSource`/`OfficialCountryPrefixSource`/`CountryPrefixStore`; per-country cache+metadata+history; legacy-IR migration; removed worker gate; IR/IQ/RO switch)
-- Country switching & offline-state acceptance (Phase 35.4): `docs/globalization/phase-35.4-country-switching-validation.md` (requested/effective model; IR→IQ/IQ→RO/RO→IR online; offline/last-known-good/no-cache/wrong-country/empty-cache fail-closed; restart + crash-journal recovery; endpoint/custom/external preservation; metadata isolation; race/stale-response; idempotency; 19 new acceptance tests; no production change)
-- Country selection UX & refresh trigger (Phase 35.5): `docs/globalization/phase-35.5-country-selection-ux.md` (CLI `country get/set/list`; Tray dropdown from centralized ISO catalog; reused IPC `SetConfigurationDirectCountry`; set→prefix-refresh trigger; fail-closed partial set; preserve Enabled/ProfilePath; no implicit enable; no new telemetry dimensions; 58 new tests)
-- Legacy upgrade & compatibility validation (Phase 35.6): `docs/globalization/phase-35.6-legacy-upgrade-validation.md` (legacy reference 93e2d87; legacy config→IR; legacy IR prefix/metadata/history migration idempotent & IR-only; inventory/endpoint/journal have no country field; offline upgrade; corrupt-data fail-closed; mixed-version IPC; JSON fwd/back compat; synchronous refresh bounded ~30s; NO production code changes; 23 new acceptance tests)
-- Global country-routing end-to-end acceptance (Phase 35.7): `docs/globalization/phase-35.7-global-routing-acceptance.md` (clean install / legacy upgrade / country matrix IR,IQ,RO,US,BR,JP,ZA,AU / switch matrix / offline / restart / crash-recovery / endpoint+ custom+external preservation / persistence isolation / US 70K large-country / aggregation audit / requested-vs-effective semantics / refresh & RIPEstat sign-off / IPv4 & single-country boundaries / remaining Iran-semantic refs; NO production code changes; 43 new acceptance tests; verdict YES WITH NON-BLOCKING LIMITATIONS)
-- Prefix aggregation & large-country route scalability (Phase 35.7A): `docs/globalization/phase-35.7a-prefix-aggregation-scalability.md` (lossless CIDR aggregator built & oracle-verified; real RIR country data is overwhelmingly disjoint so aggregation yields only ~10-20% reduction — insufficient to fix 70K-scale; decision B DO NOT IMPLEMENT in v1; retain raw canonical validated prefixes; document route-count limitation; 22 new tests; Phase 36 gate YES WITH DOCUMENTED COUNTRY-SCALE LIMITATION)
-- PathVeer brand rename & compatibility audit (Phase 36.1): `docs/branding/phase-36.1-pathveer-rename-audit.md` (ANALYSIS ONLY; full IranDirect→PathVeer identifier inventory + A–J classification; state-root `%ProgramData%\IranDirect`→`%ProgramData%\PathVeer` copy-migration; Service single-authority upgrade sequence; pipe dual-listen compat; telemetry Option B retain `irandirect_*`; no installer exists today; rollback floor = final globalized build; slices 36.2–36.8; decision DO NOT rename yet)
-- Source / namespace / project / assembly rename to PathVeer (Phase 36.2): `docs/branding/phase-36.2-source-project-rename.md` (RENAME DONE: slnx + 8 projects + assemblies + root namespaces `IranDirect.*`→`PathVeer.*`; runtime identifiers FROZEN unchanged — `%ProgramData%\IranDirect`, `IranDirect.Control.v1`, service name `IranDirect`/`IranDirect Service`, telemetry `IranDirect.Core`, `irandirect_*`, `iran-ipv4-prefixes.txt`; full suite green at baseline counts: Core 2365, Service 50, Stress 12, Benchmark clean; historical `IranDirect*` type/file names retained cosmetically)
-- Persistent state-root migration to PathVeer (Phase 36.3): `docs/branding/phase-36.3-pathveer-state-root-migration.md` (ACTIVE ROOT `%ProgramData%\\IranDirect`→`%ProgramData%\\PathVeer` via crash-safe copy/verify/publish (atomic Directory.Move of `PathVeer.migrating-<guid>`); `StateRootResolver`+`StateRootMigrator` added; single-authority, idempotent, legacy retained for rollback; 25 migration tests A–Z; frozen identifiers unchanged; full suite green: Core 2365 / Service 50 / Stress 12 / Benchmark clean / focused 599)
-- Windows Service + IPC identity migration to PathVeer (Phase 36.4): `docs/branding/phase-36.4-service-ipc-migration.md` (Service identity `IranDirect`/`IranDirect Service`→`PathVeer`/`PathVeer Service`; dual-listen pipes `PathVeer.Control.v1` (primary) + `IranDirect.Control.v1` (legacy compat) → ONE coordinator; client safe fallback primary→legacy at connect-time only (no replay after ambiguous send); `ServiceIdentityMigration` single-authority state machine (stop legacy → verify stopped → start PathVeer → guard) with rollback; `PathVeerPipeNames`/`PathVeerServiceNames`/`LegacyServiceNames` added; renamed away `IranDirectPipeNames`/`IranDirectServiceNames`/`NamedPipeClientFactory`; `Install-IranDirectService.ps1`→`Install-PathVeerService.ps1` (stops legacy during install, no delete); telemetry `IranDirect.Core`/`service.name=IranDirect.Service`/`irandirect_*` FROZEN; 28 new tests; focused 68 green; Core 2390 / Service 50 / globalization 245 / Stress 12 / Benchmark clean)
-- CLI/Tray/user-facing rebrand to PathVeer (Phase 36.5): `docs/branding/phase-36.5-cli-tray-user-rebrand.md` (CLI help/usage/errors → `PathVeer`/`PathVeer.Cli`; Tray tooltip/menu/dialogs/status → `PathVeer`; support bundle `IranDirect-Support-*.zip`→`PathVeer-Support-*.zip` + temp dir `%TEMP%\PathVeer\SupportBundles`; diagnostics heading `PathVeer Diagnostics`; source-level type renames `IranDirectServiceClient`→`PathVeerServiceClient`, `IranDirectCommand`→`PathVeerCommand` (wire-safe: JsonStringEnumConverter serializes member names), `IranDirectStatus`→`PathVeerStatus`; dropped user-facing `IranDirect` from CLI/Tray quoted strings (verified by BrandingTests source scan); telemetry `IranDirect.Core`/`service.name=IranDirect.Service`/`irandirect_*`/`IranDirectTelemetry` STILL FROZEN for 36.6; legacy literals `IranDirect.Control.v1`/`%ProgramData%\IranDirect`/`iran-ipv4-prefixes.txt` retained; new BrandingTests + updated branding assertions; full Core 2418 (1 transient env flake, re-passes isolated) / Service 50 / Stress 12 / Benchmark clean / focused 717)
-- Telemetry & observability rebrand to PathVeer (Phase 36.6): `docs/branding/phase-36.6-telemetry-observability-rebrand.md` (HARD CUTOVER, no dual telemetry: ActivitySource/Meter `IranDirect.Core`→`PathVeer.Core`, `service.name` `IranDirect.Service`→`PathVeer.Service`, all 31 instruments `irandirect.*`→`pathveer.*`, Prometheus series `pathveer_*`, recording rules `irandirect:`→`pathveer:`; types `IranDirectTelemetry`/`MetricNames`/`ActivityNames`/`TagNames`/`TagValues`→`PathVeer*` + `AddIranDirectObservability`→`AddPathVeerObservability`; 5 branded root spans renamed, 24 neutral semantic spans UNCHANGED; tag keys/values + privacy/cardinality contract UNCHANGED; Grafana folder/titles/UIDs `irandirect-*`→`pathveer-*` (old bookmarks break — documented) + datasource UIDs `pathveer-prometheus`/`pathveer-tempo`; 19 alerts rebranded, thresholds/for/severity/inhibition untouched; rule files + dashboards `git mv`'d; compose project/network/container names rebranded but Docker VOLUMES keep legacy `irandirect-*-data` names for data continuity; old `irandirect_*` series/traces remain historical only; promtool 20/15/4 rules valid, config valid, 5 dashboards valid; service/pipe/state-root contracts FROZEN)
-- Installer / upgrader / runtime-layout migration to PathVeer (Phase 36.7): `docs/branding/phase-36.7-installer-upgrade-migration.md` (REAL INSTALL BOUNDARY: canonical root `%ProgramFiles%\PathVeer\{Service,Cli,Tray}`; no install path under the dev checkout — old `Install-PathVeerService.ps1` pointed SCM at `C:\codespace\PathVeer\artifacts\...` and is now a deprecated shim; `PathVeer.Core.Installation` (InstallOrchestrator/InstallLayout/InstallManifest/PathEnvironmentEditor/ProductIdentity + fakes) unit-tested (61 tests): single-authority upgrade state machine (stop legacy → disable → stage/verify/swap → repoint service → start → readiness probe NOT just SCM Running → FINAL guard → retire legacy; rollback target = stopped+disabled legacy retained); package model `New-PathVeerPackage.ps1` (FDD Release win-x64 + SHA-256 manifest, integrity only) consumed by `Install-PathVeer.ps1` (install/uninstall/status, idempotent, offline, PATH idempotent, `irandirect.cmd` deprecation shim); User-Agent `IranDirect/1.0`→`PathVeer/<version>`; `%TEMP%\IranDirect`→`%TEMP%\PathVeer`; `launchSettings` profile `IranDirect.Service`→`PathVeer.Service`; `AddedByIranDirect` persisted schema field KEPT with `[JsonPropertyName]` pin (renaming would orphan managed routes); UserSecretsId had no IranDirect — retained; observability `docker-compose.yml` declares the 4 `irandirect-*-data` volumes `external: true` so the `pathveer-observability` project reuses them by name (removes the stale `C:\codespace\irandirect` bind dependency) — stack recreated live, 4 volumes preserved, `pathveer_*` rule groups load healthy; LIVE `pathveer_*` metric/trace emission deferred to 36.8 real-machine acceptance; no signing yet — documented as release prerequisite; Core 2428 / Service 50 / Stress 12 / Benchmarks clean / Installation 61)
-
----
-
-## 16. First Principle
-
-When uncertain, return to this question:
-
-> What responsibility is entering the system, who should own it, and what invariant must never break?
-
-That question takes precedence over framework conventions and design-pattern labels.
----
-
-## Local-State Snapshot
-
-A public or connected repository cannot prove the developer's current checkout
-or Windows runtime state.
-
-Before implementation, obtain one of:
-
-1. direct terminal access to the checked-out repository; or
-2. a freshly generated `AI-LOCAL-STATE.md`.
-
-Generate it from the repository root:
-
-```powershell
-.\tools\update-ai-local-state.ps1 `
-    -CurrentMilestone "M5.5 Runtime Reconciliation" `
-    -NextMilestone "Introduce RuntimeReconciler"
-```
-
-`AI-LOCAL-STATE.md` is intentionally ignored by Git because it contains
-machine-specific and time-sensitive evidence.
-
-Use separate authorities:
-
-- committed repository: implementation and architectural knowledge;
-- `AI-LOCAL-STATE.md`: current checkout, build, tests, services, and runtime;
-- accepted ADRs: architectural intent.
-
-Do not ask the user to paste many individual command outputs when a recent
-local-state snapshot is available.
----
-
-## Session Protocol
-
-After reading `AI/CURRENT.md`, read:
-
-`docs/architecture-knowledge-base/AI/SESSION-PROTOCOL.md`
-
-This protocol defines access levels, human/AI responsibilities, architecture
-review gates, implementation steps, verification, and milestone completion.
+> What responsibility is changing, who owns it, what is the source of truth, what terminates its lifecycle, and what invariant must never break?

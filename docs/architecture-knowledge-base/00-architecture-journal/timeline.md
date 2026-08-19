@@ -74,7 +74,7 @@
 - Coordinator tests rewritten: 10 focused tests prove null rejection, delegation, token forwarding, reference preservation, cancellation/exception propagation, and absence of lifecycle logic.
 - No interface added to RuntimeCycleCoordinator — no consumer yet exists, and sealing the class allows future interface extraction if a use-case boundary proves valuable.
 
-## Next
+## Historical Next Step at This Point
 
 - Implement RuntimeExecutor for platform operations.
 - Reduce the controller to orchestration.
