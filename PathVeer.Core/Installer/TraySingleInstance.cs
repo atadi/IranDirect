@@ -58,8 +58,10 @@ public sealed class TraySingleInstance : IDisposable
             // ownership to us. OpenExisting returns the (now ours) handle.
             try
             {
+#pragma warning disable CA1416 // OpenExisting is Windows-only; guarded below + Windows-exclusive Tray.
                 m = Mutex.OpenExisting(guard._mutexName);
                 created = true;
+#pragma warning restore CA1416
             }
             catch
             {

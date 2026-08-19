@@ -32,9 +32,33 @@ public static class Program
         "--purge-state", "--install-tray", "--help", "-h",
     ];
 
+    // WinExe bootstrapper: when launched from Explorer there is no console, and
+    // writing to Console.Out/Console.Error throws IOException ("The handle is
+    // invalid"). These helpers succeed when a console/redirection IS present
+    // (so /quiet diagnostics still work from a real console) and otherwise
+    // silently no-op — they never allocate a console and never throw.
+    private static void SafeWriteLine(string? message = null)
+    {
+        if (message is null) return;
+        try { Console.WriteLine(message); }
+        catch (IOException) { /* no console attached */ }
+        catch (ObjectDisposedException) { /* stream closed */ }
+    }
+
+    private static void SafeWriteError(string message)
+    {
+        try { Console.Error.WriteLine(message); }
+        catch (IOException) { /* no console attached */ }
+        catch (ObjectDisposedException) { /* stream closed */ }
+    }
+
     public static int Main(string[] args)
     {
-        Console.Title = "PathVeer Setup";
+        // NOTE: do NOT set Console.Title here. This is a Windows GUI (WinExe)
+        // bootstrapper; when launched from Explorer there is no console handle,
+        // and Console.Title throws IOException ("The handle is invalid"),
+        // crashing Main before --help / elevation / UI (devsign.8 regression).
+        // The interactive form carries the product title instead.
 
         bool quiet = args.Any(a =>
             string.Equals(a, "/quiet", StringComparison.OrdinalIgnoreCase) ||
@@ -67,7 +91,7 @@ public static class Program
         using var singleInstance = SetupSingleInstance.TryAcquire();
         if (singleInstance is null)
         {
-            Console.Error.WriteLine(
+            SafeWriteError(
                 "ERROR: another instance of PathVeer Setup is already running.");
             return SetupExitCodes.InvalidArguments;
         }
@@ -75,7 +99,7 @@ public static class Program
         string? packageDirectory = ResolvePackageDirectory(args);
         if (packageDirectory is null)
         {
-            Console.Error.WriteLine(
+            SafeWriteError(
                 "ERROR: could not locate the PathVeer package directory " +
                 "(expected a sibling 'PathVeer-<version>' folder).");
             return SetupExitCodes.PackageDirectoryNotFound;
@@ -84,7 +108,7 @@ public static class Program
         string? scriptPath = ExtractScript();
         if (scriptPath is null)
         {
-            Console.Error.WriteLine(
+            SafeWriteError(
                 "ERROR: embedded deployment script was not found in this " +
                 "executable. The installer is corrupt.");
             return SetupExitCodes.ScriptResourceMissing;
@@ -95,15 +119,15 @@ public static class Program
         string fullVersion = ThisVersion();
         string friendlyVersion = SetupVersion.Friendly(fullVersion);
 
-        Console.WriteLine($"PathVeer Setup {fullVersion}");
-        Console.WriteLine($"Package: {packageDirectory}");
-        Console.WriteLine();
+        SafeWriteLine($"PathVeer Setup {fullVersion}");
+        SafeWriteLine($"Package: {packageDirectory}");
+        SafeWriteLine();
 
         // Phase 37.2 mandatory: the hosted components are framework-dependent.
         var runtime = RuntimePrerequisite.Check();
         if (!runtime.Satisfied)
         {
-            Console.Error.WriteLine("ERROR: " + runtime.Message);
+            SafeWriteError("ERROR: " + runtime.Message);
             if (!quiet)
             {
                 MessageBox.Show(
@@ -159,7 +183,7 @@ public static class Program
             exit = controller.RunInstall(options);
         }
 
-        Console.WriteLine(
+        SafeWriteLine(
             exit == SetupExitCodes.Success ? "SUCCESS" : "FAILED:" + exit);
         return exit;
     }
@@ -229,10 +253,10 @@ public static class Program
 
     private static int RelaunchElevated(string[] args, bool quiet)
     {
-        Console.WriteLine(
+        SafeWriteLine(
             "PathVeer Setup requires administrator privileges to install the " +
             "Windows Service and write to Program Files.");
-        Console.WriteLine("Requesting elevation...");
+        SafeWriteLine("Requesting elevation...");
 
         var startInfo = new ProcessStartInfo
         {
@@ -258,7 +282,7 @@ public static class Program
         {
             // runas UAC prompt was dismissed / denied. This is an explicit,
             // stable denial — NOT a generic argument error or relaunch failure.
-            Console.Error.WriteLine(
+            SafeWriteError(
                 "Elevation was cancelled by the user. Installation aborted.");
             return SetupExitCodes.FromElevationDenied();
         }
@@ -281,22 +305,22 @@ public static class Program
 
     private static void PrintUsage()
     {
-        Console.WriteLine("PathVeer Setup — Windows installation bootstrapper");
-        Console.WriteLine();
-        Console.WriteLine("Usage:");
-        Console.WriteLine("  PathVeerSetup.exe [options]");
-        Console.WriteLine();
-        Console.WriteLine("Options:");
-        Console.WriteLine("  (no args)  Interactive install / upgrade");
-        Console.WriteLine("  /quiet     Unattended mode (uses --install/--uninstall)");
-        Console.WriteLine("  --uninstall            Remove the Service and binaries,");
-        Console.WriteLine("                            preserve %ProgramData%\\PathVeer");
-        Console.WriteLine("  --purge-state           Also delete %ProgramData%\\PathVeer");
-        Console.WriteLine("  --install-tray          Register per-user Tray startup");
-        Console.WriteLine("  --no-tray               Do not register Tray startup (quiet)");
-        Console.WriteLine("  --status                Report installation state and exit");
-        Console.WriteLine();
-        Console.WriteLine("All install/migration logic is delegated to the embedded");
-        Console.WriteLine("Install-PathVeer.ps1 deployment script.");
+        SafeWriteLine("PathVeer Setup — Windows installation bootstrapper");
+        SafeWriteLine();
+        SafeWriteLine("Usage:");
+        SafeWriteLine("  PathVeerSetup.exe [options]");
+        SafeWriteLine();
+        SafeWriteLine("Options:");
+        SafeWriteLine("  (no args)  Interactive install / upgrade");
+        SafeWriteLine("  /quiet     Unattended mode (uses --install/--uninstall)");
+        SafeWriteLine("  --uninstall            Remove the Service and binaries,");
+        SafeWriteLine("                            preserve %ProgramData%\\PathVeer");
+        SafeWriteLine("  --purge-state           Also delete %ProgramData%\\PathVeer");
+        SafeWriteLine("  --install-tray          Register per-user Tray startup");
+        SafeWriteLine("  --no-tray               Do not register Tray startup (quiet)");
+        SafeWriteLine("  --status                Report installation state and exit");
+        SafeWriteLine();
+        SafeWriteLine("All install/migration logic is delegated to the embedded");
+        SafeWriteLine("Install-PathVeer.ps1 deployment script.");
     }
 }
