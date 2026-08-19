@@ -1,5 +1,6 @@
 using PathVeer.Core;
 using PathVeer.Core.Configuration;
+using PathVeer.Core.Installer;
 using PathVeer.Core.Ipc;
 using PathVeer.Core.ServiceLifecycle;
 using PathVeer.Core.Update;
@@ -49,6 +50,13 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _countryItem;
 
     private readonly System.Windows.Forms.Timer _timer;
+
+    // Cross-thread bridge so the "show existing" waiter thread can marshal UI
+    // work (NotifyIcon is a UI control) onto the WinForms thread.
+    private readonly Control _uiBridge = new Control();
+    private EventWaitHandle? _showEvent;
+    private Thread? _showWaiter;
+    private volatile bool _disposed;
 
     private readonly IPrefixUpdateNotificationTracker
         _prefixUpdateNotificationTracker;
@@ -275,6 +283,50 @@ public sealed class TrayApplicationContext :
         _timer.Start();
 
         _ = PollAsync();
+
+        // Begin listening for duplicate-launch "show existing" signals. The
+        // primary Tray owns the session-scoped event; duplicates set it.
+        _uiBridge.CreateControl();
+        _showEvent = TraySingleInstance.OpenOrCreateShowEvent();
+        if (_showEvent is not null)
+        {
+            _showWaiter = new Thread(WaitForShowSignal) { IsBackground = true };
+            _showWaiter.Start();
+        }
+    }
+
+    // Background waiter: a duplicate PathVeer.Tray launch sets the event; we
+    // surface the existing Tray (balloon) on the UI thread.
+    private void WaitForShowSignal()
+    {
+        var evt = _showEvent;
+        if (evt is null) return;
+        try
+        {
+            while (!_disposed)
+            {
+                if (evt.WaitOne(1000))
+                {
+                    ShowExisting();
+                }
+            }
+        }
+        catch (ObjectDisposedException) { }
+        catch (AbandonedMutexException) { }
+    }
+
+    // Surfaces the running Tray when a duplicate launch requests it.
+    private void ShowExisting()
+    {
+        if (_uiBridge.InvokeRequired)
+        {
+            _uiBridge.Invoke((Action)ShowExisting);
+            return;
+        }
+
+        _notifyIcon.Visible = true;
+        _notifyIcon.ShowBalloonTip(
+            3000, "PathVeer", "PathVeer is already running.", ToolTipIcon.Info);
     }
 
     private async Task PollAsync()
@@ -1132,11 +1184,18 @@ finally
 
     private void ExitApplication()
     {
+        _disposed = true;
+        _showEvent?.Set(); // wake the waiter so it observes _disposed
+        _showWaiter?.Join(TimeSpan.FromSeconds(2));
+
         _timer.Stop();
         _timer.Dispose();
 
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+
+        _showEvent?.Dispose();
+        _uiBridge.Dispose();
 
         ExitThread();
     }
