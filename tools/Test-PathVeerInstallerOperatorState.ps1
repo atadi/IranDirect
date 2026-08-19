@@ -8,8 +8,8 @@
     Reports (does NOT change):
       * PathVeer Service Status / StartType
       * Running Tray process count
-      * Canonical installed Tray paths
-      * Tray parent PID / StartTime / Elevated flag
+      * Per-Tray: PID, Parent PID, executable path, StartTime, canonical flag,
+        and the real TokenElevation (when process-open access permits).
       * Any active Setup processes
       * Recent devsign-specific Event Log entries (1000/1026/72)
 
@@ -20,6 +20,11 @@
       * mutates routes,
       * changes install state.
 
+    TokenElevation is obtained via the same Win32 technique used in the live
+    operator proof (OpenProcessToken + GetTokenInformation(TokenElevation)).
+    When the current process lacks open rights on a Tray (e.g. a protected
+    owner), the value is reported as 'n/a' — read-only, never mutated.
+
 .EXAMPLE
     .\tools\Test-PathVeerInstallerOperatorState.ps1
 #>
@@ -27,6 +32,66 @@
 param()
 
 $ErrorActionPreference = 'Continue'
+
+# Real token-elevation read via Win32, exactly the technique the operator used
+# manually. Returns $true (elevated), $false (not elevated), or $null (access
+# denied / not openable). This is a read-only query; no mutation occurs.
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class TokenInfo
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool OpenProcessToken(IntPtr hProcess, uint dwDesiredAccess, out IntPtr hToken);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetTokenInformation(IntPtr hToken, int tokenInformationClass, IntPtr pTokenInformation, int tokenInformationLength, out int returnLength);
+
+    public static bool? IsElevated(int pid)
+    {
+        const int PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+        const uint TOKEN_QUERY = 0x0008;
+        const int TokenElevation = 20;
+
+        IntPtr hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (hProc == IntPtr.Zero) return null;
+
+        try
+        {
+            if (!OpenProcessToken(hProc, TOKEN_QUERY, out IntPtr hToken)) return null;
+            try
+            {
+                int elevation = 0;
+                int outLen;
+                IntPtr p = Marshal.AllocHGlobal(4);
+                try
+                {
+                    if (!GetTokenInformation(hToken, TokenElevation, p, 4, out outLen)) return null;
+                    elevation = Marshal.ReadInt32(p);
+                }
+                finally { Marshal.FreeHGlobal(p); }
+                return elevation != 0;
+            }
+            finally { CloseHandle(hToken); }
+        }
+        finally { CloseHandle(hProc); }
+    }
+}
+'@
+
+function Get-Elevation([int]$Pid) {
+    try { return [TokenInfo]::IsElevated($Pid) } catch { return $null }
+}
 
 function Safe($block) {
     try { return & $block } catch { return $null }
@@ -43,45 +108,35 @@ if ($svc) {
     Write-Host "Service Status   : (not installed)" -ForegroundColor Yellow
 }
 
-# --- Tray processes -------------------------------------------------------
+# --- Tray processes ------------------------------------------------------
 $trays = @(Get-CimInstance Win32_Process -Filter "Name = 'PathVeer.Tray.exe'" -ErrorAction SilentlyContinue)
 Write-Host ("`nTray process count: {0}" -f $trays.Count)
 
 $canonicalDir = Join-Path $env:ProgramFiles 'PathVeer\Tray'
+$canonicalExe = Join-Path $canonicalDir 'PathVeer.Tray.exe'
+try { $canonicalResolved = (Resolve-Path -LiteralPath $canonicalExe -ErrorAction SilentlyContinue).Path } catch { $canonicalResolved = $null }
+
 foreach ($t in $trays) {
     $exe = $t.ExecutablePath
     $isCanonical = $false
-    try { $isCanonical = ((Resolve-Path -LiteralPath $exe -ErrorAction SilentlyContinue).Path -eq (Resolve-Path -LiteralPath (Join-Path $canonicalDir 'PathVeer.Tray.exe') -ErrorAction SilentlyContinue).Path) } catch { }
-    $elevated = 'n/a'
     try {
-        $token = Get-CimInstance Win32_Process -Filter "ProcessId = $($t.ProcessId)" -ErrorAction SilentlyContinue |
-            Invoke-CimMethod -MethodName GetOwnerSid -ErrorAction SilentlyContinue
+        $resolved = (Resolve-Path -LiteralPath $exe -ErrorAction SilentlyContinue).Path
+        if ($resolved -and $canonicalResolved) {
+            $isCanonical = ([string]::Equals($resolved, $canonicalResolved, [System.StringComparison]::OrdinalIgnoreCase))
+        }
     } catch { }
-    # Elevated detection: a process whose token includes admin AND whose parent
-    # is not Explorer-style is suspicious. Use the simple heuristic: compare the
-    # process token elevation via the running-user check is non-trivial here, so
-    # report the parent + a best-effort elevation flag from the process handle.
+
     $parent = Safe { (Get-CimInstance Win32_Process -Filter "ProcessId = $($t.ProcessId)").ParentProcessId }
     $start = Safe { (Get-CimInstance Win32_Process -Filter "ProcessId = $($t.ProcessId)").CreationDate }
+    $elevated = Get-Elevation ([int]$t.ProcessId)
+    if ($null -eq $elevated) { $elevatedStr = 'n/a (access denied)' } else { $elevatedStr = $elevated.ToString() }
 
     Write-Host ("  PID         : {0}" -f $t.ProcessId)
     Write-Host ("  Path        : {0}{1}" -f $exe, $(if ($isCanonical) { '' } else { '  (NON-CANONICAL)' }))
     Write-Host ("  Canonical   : {0}" -f $isCanonical)
     Write-Host ("  Parent PID  : {0}" -f $parent)
     Write-Host ("  StartTime   : {0}" -f $start)
-    Write-Host ("  Elevated    : see ElevatedToken column below"
-}
-
-# Best-effort: report elevation per Tray via a tiny WhoAmI-style check is not
-# reliable remotely; operator should confirm Elevated=False in Task Manager.
-# We still surface a heuristic: a Tray launched by an elevated Setup would have
-# an elevated token. Provide the flag from the process's IntegrityLevel if
-# available.
-foreach ($t in $trays) {
-    $il = Safe {
-        $p = Get-Process -Id $t.ProcessId -ErrorAction SilentlyContinue
-        if ($p) { $p.MainModule.FileName } else { $null }
-    }
+    Write-Host ("  Elevated    : {0}" -f $elevatedStr)
 }
 
 # --- Active Setup processes ---------------------------------------------
@@ -98,7 +153,7 @@ try {
     if (-not $entries) {
         # Fall back to a broad scan for setup-related events.
         $entries = Get-EventLog -LogName Application -Newest 200 -ErrorAction SilentlyContinue |
-            Where-Object { $_.Message -match 'PathVeer|Setup' -and ($_.InstanceId -in @(1000,1026,72)) }
+            Where-Object { $_.Message -match 'PathVeer|Setup' -and ($_.InstanceId -in @(1000, 1026, 72)) }
     }
     if ($entries) {
         foreach ($e in $entries) {

@@ -1,6 +1,6 @@
 # PathVeer — DEVSIGN.10 Installer Hardening Certification Proof
 
-Status: **AUTOMATED PROOF COMPLETE. OPERATOR LIVE ACCEPTANCE PENDING.**
+Status: **AUTOMATED PROOF COMPLETE. OPERATOR LIVE ACCEPTANCE RECORDED. See §11.**
 
 This document records the automated evidence produced by the DEVSIGN.10 source
 fixes and their test/lint/artifact gates. It does **NOT** claim that the live
@@ -163,9 +163,20 @@ preserved and pass.
     concurrency race. **Passes in isolation** (848 ms, no exception). Not caused
     by this task (JsonStore/Persistence untouched).
   - 1 failure = `NewPathVeerPackage_Produces_Canonical_Layout_And_Hashes`
-    integration test (runs `tools/New-PathVeerPackage.ps1`, full package build)
-    times out at 600 s in this environment. Integration test; not a unit test
-    for these changes.
+    (`PackageBuilderIntegrationTests`, `ReleasePackagingTests.cs`,
+    `[Fact(Timeout = 600000)]`) — runs `tools/New-PathVeerPackage.ps1` (a real
+    component package build: dotnet publishes Service/Cli/Tray/...). In the
+    **full-suite** run it exceeded the 600 s xUnit timeout due to resource
+    contention with ~2700 parallel tests in the same session. **Run in
+    isolation** it completes and passes (see closure report for elapsed time).
+    It is an integration test of the release packaging pipeline, not a unit test
+    of the Blocker A–E changes.
+
+**Clarification (closure):** the phrase "all 5 pass" in the pre-operator report
+was inaccurate. The accurate state is: product/unit tests GREEN; one KNOWN
+integration test (`NewPathVeerPackage...`) was unresolved in the full-suite
+context (timeout) and is separately proven passing in isolation. Full suite is
+NOT reported green.
 - **PathVeer.Core.Tests/Installation/TrayQuiescenceTests.ps1:** all 6 checks
   (A/B/C/D/E/G) pass.
 - **git diff --check:** clean for all task source files (only CRLF normalization
@@ -182,18 +193,125 @@ Built with:
 (Exact gate numbers recorded by the build tooling output and verified against
 devsign.9 baselines in the operator acceptance section.)
 
-## 11. Remaining live gates (operator-only, NOT claimed as passed)
+## 11. LIVE OPERATOR ACCEPTANCE — RECORDED EVIDENCE (closure)
 
-1. Normal Explorer Repair/Upgrade -> Service Running/Automatic, Tray count 1,
-   `Elevated=False`, no ANSI, Finish.
-2. Same-version Repair while Tray running -> installer quiesces Tray, no
-   `Accessibility.dll` AccessDenied, binary swap succeeds, Tray count 1
-   `Elevated=False`.
-3. 10x Tray launches -> count stays 1.
-4. Tray restart (kill -> 0, launch -> 1, `Elevated=False`).
-5. Direct Run-as-admin Setup -> Tray NOT launched elevated (acceptable: Tray
-   count 0 with Start-Menu guidance, or count 1 `Elevated=False` via reviewed
-   mechanism). `Elevated=True` is UNACCEPTABLE.
+Status header updated: **AUTOMATED PROOF COMPLETE. OPERATOR LIVE ACCEPTANCE
+RECORDED.** The operator ran `devsign.10`
+(`PathVeerSetup-1.0.0-devsign.10-win-x64.exe`) on Windows and reported the
+following. These are OPERATOR-OBSERVED facts, not automated-test results.
 
-These require the operator to run `devsign.10` on Windows and inspect with
-`tools/Test-PathVeerInstallerOperatorState.ps1`.
+### TEST 1 — Normal Explorer / UAC install
+- Starting Tray count = 0.
+- Operator normal-double-clicked devsign.10 from Explorer.
+- Setup completed with green success state and Finish.
+- Post-install: Tray PID 48748 at `C:\Program Files\PathVeer\Tray\PathVeer.Tray.exe`,
+  **Elevated=False**.
+- Service: Name=PathVeer, Status=Running, StartType=Automatic.
+- No active Setup processes after Finish.
+- Application Event Log since test start: no .NET Runtime 1026, no Application
+  Error 1000, no SideBySide 72.
+- Proves the devsign.9 privilege defect is fixed for the real normal
+  Explorer/UAC path: non-elevated launcher -> elevated Setup -> successful
+  install -> non-elevated Tray.
+
+### TEST 2 — Same-version Repair with Tray running
+- Operator did NOT manually stop the Tray.
+- Before Repair: Tray PID 48748 (StartTime 2026-08-19 19:30:24, Elevated=False).
+- After Repair: old PID 48748 exists = **False**; new Tray PID **23700**
+  (StartTime 2026-08-19 19:38:36) at canonical path, **Elevated=False**;
+  Tray count = 1; Service Running/Automatic.
+- Live process evidence proves: running installed Tray -> installer quiesced old
+  process -> old PID disappeared -> Repair completed sufficiently to restart Tray
+  -> exactly one fresh Tray launched -> fresh Tray non-elevated.
+- Directly closes the devsign.9 `Accessibility.dll` locking defect.
+
+### TEST 3 — 10x direct Tray launch
+- Before: count=1, PID=23700. Operator launched the Tray exe 10 times.
+- After: count=1, PID=23700, Elevated=False. Intrinsic single-instance guard
+  passed under the real installed binary; no replacement process appeared.
+
+### TEST 4 — Forced Tray termination / restart
+- Original Tray PID 23700 force-terminated -> count=0.
+- Operator then launched Tray from an ADMINISTRATOR PowerShell. That produced
+  PID 40296, **Elevated=True** — explained because the launching PowerShell
+  itself was verified `CURRENT_POWERSHELL_ELEVATED=True`, so the child correctly
+  inherited the elevated parent's token. **Not a product defect.**
+- Operator stopped 40296, confirmed count=0, then launched Tray normally through
+  Windows UI -> PID 41592 at canonical path, **Elevated=False**.
+- Proves: forced-owner loss recovers; a new owner can start; normal Windows user
+  launch is non-elevated; the temporary elevated Tray was solely an artifact of
+  launching from an elevated PowerShell.
+
+### TEST 5 — Direct Run as administrator Setup
+- Starting Tray count = 0. Operator right-clicked Setup -> Run as administrator
+  -> Repair.
+- After: `TEST5_TRAY_COUNT=0`; Service Running/Automatic; no .NET Runtime 1026,
+  no Application Error 1000, no SideBySide 72.
+- Preferred fail-safe direct-admin result: the already-elevated Setup did NOT
+  launch PathVeer.Tray.exe elevated. Security invariant passed.
+
+### ANSI / logging precision
+- Automated/source proof: Install-PathVeer.ps1 sets
+  `$PSStyle.OutputRendering='PlainText'` and drops `-ForegroundColor`, so the
+  GUI captures plain text (covered by AnsiAndFailureUiTests).
+- Operator explicitly reported green success/Finish for the first run. The
+  operator did NOT separately provide a textual attestation for every possible
+  ANSI sequence on every run. Automated source/ANSI proof stands; explicit
+  operator visual proof of every sequence is NOT claimed.
+
+### Certification closure result
+- Normal Explorer install: PASS (Tray count 1, Elevated=False, Service
+  Running/Automatic).
+- Same-version Repair while Tray running: PASS (old PID 48748 removed, new PID
+  23700, Elevated=False). Accessibility.dll / loaded-binary lifecycle defect:
+  CLOSED by live Repair evidence.
+- 10x Tray launch: PASS (same PID / count 1).
+- Forced Tray owner loss/restart: PASS (Elevated=False on normal UI launch).
+- Direct Run-as-admin Setup: PASS / fail-safe (Tray count 0).
+- No live recurrence of .NET Runtime 1026 / Application Error 1000 /
+  SideBySide 72.
+
+## 12. Operator-state helper defect and fix (post-artifact)
+
+The newly committed read-only helper
+`tools/Test-PathVeerInstallerOperatorState.ps1` shipped with a real parser
+defect: line 72 `Write-Host ("  Elevated    : see ElevatedToken column below"`
+was missing its closing parenthesis (PowerShell `MissingEndParenthesisInExpression`).
+The operator had to perform elevation checks manually.
+
+Fix (separate post-artifact commit, does NOT touch the certified binary):
+- Corrected the malformed `Write-Host` line.
+- Replaced the non-functional/heuristic "Elevated" section with a real
+  Win32-backed token-elevation read
+  (`OpenProcessToken` + `GetTokenInformation(TokenElevation)`), the same
+  technique the operator used manually. Reports `$true`/`$false`/`n/a`
+  (access-denied) per Tray; remains strictly read-only.
+- Added `tools/Test-PathVeerInstallerOperatorState.SyntaxGate.ps1`: a
+  syntax + read-only-execution gate that parses the helper with
+  `[System.Management.Automation.Language.Parser]::ParseFile` and asserts
+  parser-error count == 0, then executes it read-only and asserts the expected
+  markers. Exits non-zero on failure. This prevents a committed helper from
+  again shipping a parser error.
+
+Certified artifact provenance remains
+`1.0.0-devsign.10+aea0e8c1151327920ef1b0f1bd67ea2acec4b243`. The helper/docs
+fixes are post-artifact certification tooling only; the devsign.10 binary was
+NOT rebuilt.
+
+## 13. Direct-admin user guidance audit
+
+Source already contains explicit guidance that direct-admin Setup does NOT
+auto-launch an elevated Tray and the user opens the Tray from the Start Menu /
+next sign-in:
+- `PathVeer.Setup/Program.cs` (direct-elevated branch): "We leave the request
+  unconsumed (or delete it) so no elevated Tray is ever produced; the user opens
+  the Tray from the Start Menu / next sign-in. This is the certified safe v1
+  behavior."
+- `PathVeer.Setup/InstallForm.cs` non-fatal launch fallbacks: "the user can
+  launch the Tray from the Start Menu."
+
+This is a documented design decision (source guidance present). There is no
+mandatory release-acceptance requirement for a user-visible "Tray not launched"
+dialog in the direct-admin path. Classification: design guidance present in
+source; a user-visible success-screen note is a minor UX follow-up, NOT a
+security/correctness blocker. devsign.10 is NOT rebuilt for this.
