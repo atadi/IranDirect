@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using PathVeer.Core.Installation;
 
@@ -418,6 +419,18 @@ public sealed class PackageBuilderIntegrationTests
         }
 
         using var proc = Process.Start(psi)!;
+        // The package script emits enough output to fill the OS pipe buffer
+        // (~64 KiB). Because stdout/stderr are redirected, the child blocks on
+        // write until the parent drains them — so we must consume both streams
+        // concurrently, otherwise WaitForExit() deadlocks until the test's own
+        // 600 s timeout fires (the real build completes in seconds). Read the
+        // streams asynchronously and let the process exit naturally.
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+        proc.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
+        proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
         proc.WaitForExit();
         return proc.ExitCode;
     }
