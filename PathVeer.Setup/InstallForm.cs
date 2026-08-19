@@ -586,9 +586,18 @@ public sealed class InstallForm : Form
                 "PathVeer", "Tray", "PathVeer.Tray.exe");
             if (File.Exists(trayExe))
             {
+                // The installer runs elevated (self-elevation gate). A plain
+                // Process.Start with UseShellExecute=true from an elevated
+                // process inherits the elevated (high-IL) token, which would
+                // make the per-user Tray UI run as administrator — wrong for a
+                // user-facing controller and a certification stop condition.
+                // Launching through the desktop explorer.exe (which runs at
+                // medium IL) drops elevation so the Tray runs as the normal
+                // interactive user, regardless of installer elevation.
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = trayExe,
+                    FileName = "explorer.exe",
+                    Arguments = "\"" + trayExe + "\"",
                     UseShellExecute = true,
                 });
             }
