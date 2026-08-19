@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using PathVeer.Core.Installer;
 
 namespace PathVeer.Setup;
@@ -247,8 +249,14 @@ public sealed class InstallController
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
 
-            // Stream progress records as the script appends them.
-            var reader = Task.Run(() => StreamProgress(progressFile, ct));
+            // Stream progress records as the script appends them. The tailer is
+            // terminated by CHILD PROCESS EXIT (see progressCts below), not by a
+            // fixed timeout: once proc.WaitForExit returns, we cancel the tailer
+            // and drain any final records deterministically, then read the
+            // result. This prevents the previous 600s post-exit hang.
+            var tailer = new ProgressTailer(progressFile, rec => Progress?.Invoke(rec));
+            var progressCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var reader = Task.Run(() => tailer.RunLoop(progressCts.Token));
 
             try
             {
@@ -256,7 +264,18 @@ public sealed class InstallController
             }
             finally
             {
-                try { reader.Wait(ct); } catch { /* ignore */ }
+                // Child has exited: stop the tailer, then drain the final
+                // records (the script writes the "Finished" progress line and
+                // result.json immediately before exiting, so both are fully
+                // flushed by the time WaitForExit returns). Cancelling first and
+                // waiting for the reader to stop avoids racing the final write;
+                // the drain then observes any records the loop had not yet seen.
+                progressCts.Cancel();
+                try { reader.Wait(TimeSpan.FromSeconds(2)); }
+                catch { /* ignore */ }
+
+                try { tailer.Drain(); }
+                catch { /* ignore */ }
             }
 
             ResultRecord? result = ReadResult(resultFile);
@@ -280,36 +299,63 @@ public sealed class InstallController
         }
     }
 
-    private void StreamProgress(string progressFile, CancellationToken ct)
+    // Tailers the deployment progress file. The looping variant (RunLoop) is
+    // terminated by child-process exit / caller cancellation, NEVER by a fixed
+    // timeout (the 600s cap is only a defensive backstop). Drain() performs one
+    // final read to EOF so the last record (e.g. "Finished") and result.json are
+    // always observed after the child exits. The shared position guarantees each
+    // record is raised exactly once across loop and drain.
+    private sealed class ProgressTailer
     {
-        long position = 0;
-        var sw = new Stopwatch();
-        sw.Start();
-        while (sw.Elapsed.TotalSeconds < 600)
-        {
-            if (File.Exists(progressFile))
-            {
-                using var fs = new FileStream(
-                    progressFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                fs.Seek(position, SeekOrigin.Begin);
-                using var reader = new StreamReader(fs, Encoding.UTF8);
-                string? line;
-                while ((line = reader.ReadLine()) is not null)
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    try
-                    {
-                        var rec = JsonSerializer.Deserialize<ProgressRecord>(line);
-                        if (rec is not null) Progress?.Invoke(rec);
-                    }
-                    catch { /* ignore malformed line */ }
-                }
+        private long _position;
+        private readonly string _file;
+        private readonly Action<ProgressRecord> _onRecord;
 
-                position = fs.Position;
+        public ProgressTailer(string file, Action<ProgressRecord> onRecord)
+        {
+            _file = file;
+            _onRecord = onRecord;
+        }
+
+        public void RunLoop(CancellationToken ct)
+        {
+            // Defensive maximum only; normal termination is signal-driven.
+            var sw = Stopwatch.StartNew();
+            while (!ct.IsCancellationRequested && sw.Elapsed.TotalSeconds < 600)
+            {
+                PumpOnce();
+                if (ct.IsCancellationRequested) break;
+                Thread.Sleep(150);
+            }
+        }
+
+        // Final read to EOF after the child process has exited. Guarantees the
+        // last progress record (Finished) is observed without racing the cancel.
+        public void Drain() => PumpOnce();
+
+        private void PumpOnce()
+        {
+            if (!File.Exists(_file)) return;
+            using var fs = new FileStream(
+                _file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            fs.Seek(_position, SeekOrigin.Begin);
+            using var reader = new StreamReader(fs, Encoding.UTF8);
+            string? line;
+            while ((line = reader.ReadLine()) is not null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    var rec = JsonSerializer.Deserialize<ProgressRecord>(line, JsonOptions);
+                    if (rec is not null) _onRecord(rec);
+                }
+                catch
+                {
+                    // ignore malformed line; later valid records still processed
+                }
             }
 
-            if (ct.IsCancellationRequested) return;
-            Thread.Sleep(150);
+            _position = fs.Position;
         }
     }
 
@@ -319,13 +365,28 @@ public sealed class InstallController
         try
         {
             string json = File.ReadAllText(resultFile);
-            return JsonSerializer.Deserialize<ResultRecord>(json);
+            return JsonSerializer.Deserialize<ResultRecord>(json, JsonOptions);
         }
         catch
         {
             return null;
         }
     }
+
+    /// <summary>
+    /// The deployment script (Install-PathVeer.ps1) emits progress/result records
+    /// with LOWERCASE JSON keys (PowerShell's ConvertTo-Json default), while the
+    /// C# record types use PascalCase properties. System.Text.Json is
+    /// case-sensitive by default, so without this option every record would
+    /// deserialize with default (empty/false) values — making the controller
+    /// report a failed install on a successful backend. Both pwsh.exe and
+    /// Windows PowerShell 5.1 emit lowercase keys, so case-insensitive matching
+    /// is the correct contract for the real script and for the tests.
+    /// </summary>
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     private static int MapCategory(string category)
         => SetupExitCodes.MapResultCategory(category);
