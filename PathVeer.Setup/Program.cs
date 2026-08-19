@@ -80,6 +80,11 @@ public static class Program
         // the elevated copy and (when the child returns) exits without ever
         // holding the installer lock. Only the elevated process that actually
         // mutates the system owns the single-instance claim.
+        //
+        // devsign.10 — the NON-elevated parent is the SOLE Tray-launch owner. It
+        // mints an invocation id and hands it to the elevated child so the Tray
+        // launch request the child records is invocation-scoped and only THIS
+        // parent consumes it (no global-sentinel race, no stale request).
         if (!ProcessPrivileges.IsAdministrator())
         {
             return RelaunchElevated(args, quiet);
@@ -148,21 +153,55 @@ public static class Program
         }
 
         ApplicationConfiguration.Initialize();
-        using var form = new InstallForm(controller, friendlyVersion);
+        using var form = new InstallForm(controller, friendlyVersion, launchOperationId: ParseLaunchOperationId(args));
         Application.Run(form);
 
-        // In the normal (UAC) flow this is reached only by the elevated child;
-        // the sentinel is instead consumed by the non-elevated parent after the
-        // child exits, so the Tray is never elevated. This call covers the rare
-        // case where Setup was launched already-elevated (Run as administrator):
-        // it consumes the sentinel here, launching the Tray from this process.
-        // The parent path is the certified non-elevated route.
-        InstallForm.ConsumeLaunchTraySentinel();
+        // DIRECT-ELEVATED case (Setup opened via "Run as administrator"): there
+        // is no ordinary non-elevated parent to own the Tray launch. The Tray
+        // MUST NOT be launched elevated (devsign.10 fail-safe). The elevated
+        // child recorded a request tagged with this same id, but we deliberately
+        // do NOT consume it here — consuming would spawn an elevated Tray.
+        // We leave the request unconsumed (or delete it) so no elevated Tray is
+        // ever produced; the user opens the Tray from the Start Menu / next
+        // sign-in. This is the certified safe v1 behavior.
+        CleanupLaunchRequest(EnsureOperationId(null));
 
         // The form carries the authoritative operation result. The explicit
         // contract prevents a closed failure window from being silently reported
         // as success (NEW ISSUE #2). Closing before mutation == user cancel.
         return form.ResultExitCode;
+    }
+
+    // Generates a stable per-invocation id. When the caller already provided
+    // one (the non-elevated parent hands its id to the elevated child), it is
+    // returned unchanged so parent and child agree on the same request scope.
+    private static string EnsureOperationId(string? provided)
+    {
+        if (!string.IsNullOrWhiteSpace(provided))
+        {
+            return provided!;
+        }
+
+        return "op-" + Guid.NewGuid().ToString("N");
+    }
+
+    // In the direct-elevated (Run as administrator) flow the Elevated=True
+    // Setup is the authority and there is no ordinary parent to launch the
+    // Tray. We must NOT launch the Tray elevated, so we only discard any
+    // request this process recorded and never spawn the Tray.
+    private static void CleanupLaunchRequest(string operationId)
+    {
+        try
+        {
+            string file = Path.Combine(
+                InstallForm.LaunchRequestDirectory(operationId),
+                "launch-tray.request");
+            if (File.Exists(file)) File.Delete(file);
+        }
+        catch
+        {
+            // Best-effort; Start Menu remains the fallback for the user.
+        }
     }
 
     private static int RunQuiet(InstallController controller, string[] args)
@@ -194,6 +233,25 @@ public static class Program
         SafeWriteLine(
             exit == SetupExitCodes.Success ? "SUCCESS" : "FAILED:" + exit);
         return exit;
+    }
+
+    private static string? ParseLaunchOperationId(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(
+                    args[i], "--launch-operation-id",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                string value = args[i + 1];
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? ResolvePackageDirectory(string[] args)
@@ -266,12 +324,22 @@ public static class Program
             "Windows Service and write to Program Files.");
         SafeWriteLine("Requesting elevation...");
 
+        // devsign.10 — this non-elevated parent is the SOLE Tray-launch owner.
+        // Mint one invocation id and hand it to the elevated child so the Tray
+        // launch request it records is scoped to THIS invocation. After the
+        // child returns, only a request carrying this exact id is consumed, and
+        // exactly once, under the ordinary user token.
+        string operationId = "op-" + Guid.NewGuid().ToString("N");
+
         var startInfo = new ProcessStartInfo
         {
             FileName = Environment.ProcessPath ?? AppContext.BaseDirectory,
             UseShellExecute = true,
             Verb = "runas",
         };
+
+        startInfo.ArgumentList.Add("--launch-operation-id");
+        startInfo.ArgumentList.Add(operationId);
 
         if (quiet) startInfo.ArgumentList.Add("/quiet");
         foreach (string a in args)
@@ -284,11 +352,30 @@ public static class Program
             using var process = Process.Start(startInfo);
             if (process is null) return SetupExitCodes.RelaunchFailed;
             process.WaitForExit();
-            // The elevated child may have requested the Tray to launch. We are
-            // the NON-elevated parent (Explorer-launched), so consuming the
-            // sentinel here spawns the Tray under the ordinary user token —
-            // never elevated (certification requirement).
-            InstallForm.ConsumeLaunchTraySentinel();
+
+            // The elevated child wrote an invocation-scoped Tray launch request
+            // (tagged with operationId) on success. We are the NON-elevated
+            // parent (Explorer-launched), so consuming it spawns the Tray under
+            // the ordinary user token — never elevated (certification
+            // requirement). A failed child (non-zero exit) does NOT launch.
+            if (process.ExitCode == SetupExitCodes.Success)
+            {
+                InstallForm.ConsumeLaunchTrayRequest(operationId);
+            }
+            else
+            {
+                // Child failed: never launch the Tray, and discard the request
+                // so a stale marker cannot be consumed by a later invocation.
+                try
+                {
+                    string file = Path.Combine(
+                        InstallForm.LaunchRequestDirectory(operationId),
+                        "launch-tray.request");
+                    if (File.Exists(file)) File.Delete(file);
+                }
+                catch { /* ignore */ }
+            }
+
             return process.ExitCode;
         }
         catch (System.ComponentModel.Win32Exception)

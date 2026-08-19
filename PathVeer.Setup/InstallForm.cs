@@ -23,6 +23,11 @@ public sealed class InstallForm : Form
     private InstallScenario _scenario;
     private InstallState _state = new();
 
+    // devsign.10: the operation id supplied by the non-elevated parent so the
+    // Tray-launch request this elevated child records is invocation-scoped and
+    // only the matching parent can consume it.
+    private readonly string _launchOperationId;
+
     private TableLayoutPanel _root = null!;
     private Label _titleLabel = null!;
     private Label _subtitleLabel = null!;
@@ -81,12 +86,21 @@ public sealed class InstallForm : Form
         if (this.IsDisposed) return;
         TerminalShowFailure(SetupExitCodes.ContractViolation);
     }
+
+    // DEBUG test seam: records an invocation-scoped Tray launch request using
+    // the same production code path (WriteLaunchTrayRequest) so unit tests can
+    // drive the request/write-consume contract without a live operation.
+    public void DebugWriteLaunchTrayRequest(string operationId)
+    {
+        WriteLaunchTrayRequest(operationId);
+    }
 #endif
 
-    public InstallForm(InstallController controller, string targetVersion)
+    public InstallForm(InstallController controller, string targetVersion, string? launchOperationId = null)
     {
         _controller = controller;
         _targetVersion = targetVersion;
+        _launchOperationId = launchOperationId ?? string.Empty;
         InitializeComponent();
         ApplyHighDpi();
         LoadProductIcon();
@@ -544,11 +558,17 @@ public sealed class InstallForm : Form
             " PathVeer is installed and running. You can use the PathVeer Tray to " +
             "control routing settings. Closing the Tray does not stop the PathVeer Service.";
 
+        // devsign.10 contract: the ELEVATED child NEVER launches the Tray. The
+        // non-elevated parent launches it after the child exits (see
+        // Program.Main / RelaunchElevated). Here we only RECORD an
+        // invocation-scoped request the parent consumes exactly once. Launching
+        // directly from this elevated process would inherit admin and was the
+        // proven devsign.9 defect (Tray Elevated=True).
         if (_launchAfterCheck.Checked && (_scenario is InstallScenario.NotInstalled or
             InstallScenario.Upgrade or InstallScenario.SameVersion or
             InstallScenario.PartialOrBroken or InstallScenario.SupportedLegacyMigration))
         {
-            LaunchTray();
+            WriteLaunchTrayRequest(_launchOperationId);
         }
     }
 
@@ -578,18 +598,46 @@ public sealed class InstallForm : Form
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "PathVeer", "Logs", "Setup");
 
-    // The Tray is a per-user UI/controller and MUST NOT run elevated. The
-    // installer runs elevated (self-elevation gate), so launching the Tray
-    // directly from here would inherit the elevated token. Instead, this writes
-    // a sentinel the NON-elevated parent process consumes after the elevated
-    // child returns (see Program.Main / RelaunchElevated), guaranteeing the Tray
-    // is spawned by the ordinary user token. This is verifiable by construction:
-    // the parent is the un-elevated Explorer-launched Setup.
-    private void LaunchTray()
+    // devsign.10 — INVOCATION-SCOPED Tray launch contract.
+    //
+    // The installer (this process) runs ELEVATED (self-elevation gate). A Tray
+    // launched directly from here would inherit the admin token — the proven
+    // devsign.9 defect (live Tray Elevated=True). Instead:
+    //   1. The ELEVATED child records an invocation-scoped launch REQUEST that is
+    //      tagged with the parent's operation id (passed on the command line).
+    //   2. The NON-elevated parent, after the elevated child exits with success,
+    //      consumes exactly that request once and launches the Tray under the
+    //      ordinary user token (see Program.Main / RelaunchElevated).
+    //
+    // Requests are path-scoped to a per-invocation temp directory
+    // (PathVeer.Setup.<operationId>) so a stale request from a previous
+    // invocation can never be consumed, and the parent only consumes a request
+    // carrying its own id. This removes the global-sentinel race entirely.
+    public static string LaunchRequestDirectory(string operationId)
+        => Path.Combine(
+            Path.GetTempPath(),
+            "PathVeer.Setup." + (string.IsNullOrWhiteSpace(operationId)
+                ? "anonymous"
+                : operationId));
+
+    private static string LaunchRequestFile(string operationId)
+        => Path.Combine(LaunchRequestDirectory(operationId), "launch-tray.request");
+
+    private void WriteLaunchTrayRequest(string operationId)
     {
         try
         {
-            WriteLaunchTraySentinel();
+            string dir = LaunchRequestDirectory(operationId);
+            Directory.CreateDirectory(dir);
+            using var fs = new FileStream(
+                LaunchRequestFile(operationId),
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.Delete);
+            using var w = new StreamWriter(fs);
+            w.WriteLine("launch=1");
+            w.WriteLine("operationId=" + operationId);
+            w.Flush();
         }
         catch
         {
@@ -597,31 +645,20 @@ public sealed class InstallForm : Form
         }
     }
 
-    public static void WriteLaunchTraySentinel()
-    {
-        try
-        {
-            string sentinel = Path.Combine(
-                Path.GetTempPath(), "PathVeer.Setup.LaunchTray.sentinel");
-            File.WriteAllText(sentinel, "1");
-        }
-        catch
-        {
-            // Best-effort; Start Menu remains a fallback.
-        }
-    }
-
-    // Consumed by the non-elevated parent: if the sentinel exists, launch the
-    // Tray as the ordinary (non-elevated) user and remove the sentinel. Called
-    // from Program after the elevated child exits, so the Tray never inherits
+    // Consumed ONLY by the non-elevated parent, and ONLY for a request that
+    // carries the parent's own operationId. Returns true if a matching request
+    // was found and consumed (and the Tray was launched). A request for a
+    // different invocation id is left untouched (stale, ignored). Called from
+    // Program after the elevated child exits, so the Tray never inherits
     // installer elevation.
-    public static void ConsumeLaunchTraySentinel()
+    public static bool ConsumeLaunchTrayRequest(string operationId)
     {
-        string sentinel = Path.Combine(
-            Path.GetTempPath(), "PathVeer.Setup.LaunchTray.sentinel");
-        if (!File.Exists(sentinel)) return;
+        string file = LaunchRequestFile(operationId);
+        if (!File.Exists(file)) return false;
 
-        try { File.Delete(sentinel); } catch { /* ignore */ }
+        // Consume at most once: delete the marker before launching so a second
+        // call in any process cannot re-launch the Tray from this request.
+        try { File.Delete(file); } catch { /* ignore */ }
 
         string trayExe = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
@@ -635,12 +672,15 @@ public sealed class InstallForm : Form
                     FileName = trayExe,
                     UseShellExecute = true,
                 });
+                return true;
             }
             catch
             {
                 // Non-fatal: the user can launch the Tray from the Start Menu.
             }
         }
+
+        return false;
     }
 
     private static string HumanizeStage(string stage) => stage switch
