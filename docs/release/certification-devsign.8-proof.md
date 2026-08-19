@@ -1,5 +1,9 @@
 # PathVeer Installer Certification — devsign.8 (service-authority slice)
 
+> ## Post-certification correction
+>
+> devsign.8 is **not** a passing certification artifact. Live Explorer/UAC execution reached deployment `Finished`/`SUCCESS`, but the Setup GUI remained in `Working...` with no Finish transition. Runtime process evidence proved the PowerShell producer had exited; source inspection proved `InstallController` then waited on a progress reader that had no producer-complete signal and could poll for up to 600 seconds before `ReadResult()`/`Completed`. Any claims below that Repair/Finish/Tray token acceptance was fully completed are superseded by this later operator evidence. Preserve devsign.8 as an immutable regression specimen.
+
 Built from committed HEAD `c87dc36` on branch `development/service-authority`.
 Predecessors: devsign.7 (commit `2881029`), devsign.6 (commit `61acb03`).
 devsign.6 / devsign.7 were NOT modified or rebuilt (frozen regression specimens).

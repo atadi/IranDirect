@@ -1,5 +1,8 @@
 # PathVeer Certification — Merge-Readiness / Integration Audit
 
+> **Historical merge-readiness snapshot.** Do not use this document to determine current branch/HEAD, current certification status, or release readiness. Use `../architecture-knowledge-base/AI/CURRENT.md` for current engineering state.
+
+
 **Source branch:** `hermes/hermes-07ff3473`
 **Source HEAD:** `eac195a` (docs(certification): consolidate current PathVeer beta.1 certification status)
 **Target branch:** `development/service-authority`

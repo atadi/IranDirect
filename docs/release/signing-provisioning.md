@@ -1,130 +1,170 @@
 # PathVeer — Production Signing & Trust Provisioning Contract
 
-Phase 37.6 release-closure. This document records the **exact external inputs** the
-builder needs to complete production trust, and the recommended defaults. It does
-NOT invent any legal name, certificate, key, or credential.
+This document defines the durable provisioning boundaries for PathVeer production signing. It does not own current blocker status and does not authorize publication.
 
-## 1. Publisher / legal identity (BLOCKER A — root dependency)
+For current certification/release state see:
 
-The repository already defines the **display** identity in `Directory.Build.props`:
+`../architecture-knowledge-base/AI/CURRENT.md`
 
-```xml
-<Authors>PathVeer</Authors>
-<Company>PathVeer</Company>
-<Product>PathVeer</Product>
+---
+
+## 1. Separate Trust Domains
+
+PathVeer uses separate trust mechanisms for separate purposes:
+
+1. **Windows Authenticode** — PE publisher/code-signing trust.
+2. **Release metadata ES256** — authenticity of update/release metadata.
+
+Do not reuse a private key across these domains merely for convenience.
+
+---
+
+## 2. Publisher / Legal Identity
+
+Assembly display metadata (for example `Authors`, `Company`, `Product`) is not a substitute for a verified legal code-signing identity.
+
+Production Authenticode enrollment must use the actual legal subject accepted by the chosen certificate/signing provider.
+
+Do not guess or fabricate the legal subject.
+
+Required business input when production enrollment is needed:
+
+- exact legal individual/organization;
+- jurisdiction/identity documentation required by provider;
+- approved signing provider/account.
+
+---
+
+## 3. Authenticode Provisioning
+
+Current signing tooling supports the provider/backend contracts implemented in `tools/Sign-PathVeerArtifacts.ps1`. Inspect current source before provisioning.
+
+Applicable release PE targets generally include:
+
+```text
+PathVeer Setup
+PathVeer.Service.exe
+PathVeer.Cli.exe
+PathVeer.Tray.exe
 ```
 
-This flows into every assembly (auto-imported, no csproj overrides) and is what
-appears in Apps & Features / file properties. What is **NOT** established is the
-**verifiable legal entity** behind the code-signing certificate — CAs require a
-real legal name (registered company or individual) to issue.
+Production requirements should include:
 
-**Required input (from user/business):** the exact legal subject for the cert.
-Options already surfaced to the user:
-1. Registered company "PathVeer" (LLC/Inc/equivalent) + jurisdiction.
-2. Individual (personal legal name).
-3. Another existing company/entity.
-4. Formalize later (blocks real enrollment now).
+- SHA-256 signing;
+- RFC3161 timestamp according to current policy;
+- private key held only in an approved secure provider/store;
+- no private key/PFX committed to Git;
+- post-sign verification;
+- package hashes generated over final signed bytes.
 
-**Recommended default if user defers:** keep `<Company>PathVeer</Company>` as the
-display string, but treat it as UNVERIFIED until the legal subject is supplied.
-Do not enroll any certificate under a guessed identity.
+Development/private certification may use a separate development signing identity. That identity is not production authority.
 
-## 2. Production Authenticode (BLOCKER B)
+---
 
-**Pipeline is ready — no code change needed.** `tools/Sign-PathVeerArtifacts.ps1`
-supports three backends, selected by environment:
-- `AzureSignTool` (env `AZURE_KEY_VAULT_URI/CLIENT_ID/TENANT_ID/CLIENT_SECRET`) — **recommended**: managed, non-exportable, no PFX on disk.
-- `Pfx` (env `PATHVEER_SIGN_PFX` + `PATHVEER_SIGN_PASSWORD`).
-- `Thumbprint` (env `PATHVEER_SIGN_THUMBPRINT`, cert in store).
+## 4. Production ES256 Metadata Trust
 
-RFC3161 timestamp `timestamp.digicert.com` is already wired.
+Production update verification is built into the client.
 
-**Recommended provider (current authoritative options, 2026):**
-- **Azure Artifact/Trusted Signing** — ~$9.99/mo; managed/non-exportable; integrates GitHub Actions/Azure DevOps; availability USA/Canada/EU/UK (orgs), USA/Canada (individuals). Reputation builds over time (initial SmartScreen warnings expected for new certs).
-- **OV code-signing cert from a CA (DigiCert/Sectigo)** — $150–300/yr; worldwide; traditional.
+Current production identity:
 
-**Required input:** (a) the §1 legal identity, (b) provider choice, (c) the cert
-material in CI/secret store (no commit). Azure Trusted Signing needs an Azure
-subscription + Trusted Signing account in a supported region matching the identity.
+```text
+pv-meta-prod-2026-01
+```
 
-**PE targets to sign:** `PathVeerSetup.exe`, `PathVeer.Service.exe`, `PathVeer.Cli.exe`, `PathVeer.Tray.exe`.
+Production verifier contract:
 
-## 3. Production ES256 metadata key (BLOCKER C)
+```text
+ReleaseSignatureVerifier.ForProduction()
+-> built-in committed public trust anchors only
+-> allowUnsigned = false
+```
 
-Authenticode key is independent from the metadata key (separate rotation/compromise boundary).
+`PATHVEER_TRUSTED_META_KEYS` is a **development/test/staging** mechanism and must not be merged into `ForProduction()`.
 
-Current `tools/Sign-ReleaseManifest.ps1` supports **two** signer paths:
-- **Default local path:** reads the raw 96-byte EC P-256 private key from
-  `PATHVEER_META_SIGN_KEY` (X||Y||D). Works unchanged; suitable for CI-secret PEM.
-- **Managed/non-exportable path (IMPLEMENTED, `ae29d3c`):** `-SignerCommand <cmd>`
-  writes the canonical payload to a temp file and invokes `<cmd> <payloadFile>`;
-  the command must emit ONLY the base64 ES256 signature on STDOUT. This signs
-  **without exporting the private key** into the environment — a KMS/HSM/Key Vault
-  wrapper drops in with no script change. Verified by real execution (managed path
-  produced a valid envelope with no private key in env; C# `ReleaseSignatureVerifier`
-  remains the authoritative verifier).
+The shipped client needs only public verification material. Production private signing material must remain outside the repository.
 
-The production client loads trusted **public** keys from `PATHVEER_TRUSTED_META_KEYS`
-(64-byte `Q.X||Q.Y`) and rejects unsigned manifests when any key is present
-(§6 hard gate satisfied architecturally).
+See `production-metadata-trust.md` for the current public-anchor and recovery design.
 
-**§8 concern resolved architecturally:** production signing can request a signature
-from a managed provider without placing raw key material in `PATHVEER_META_SIGN_KEY`.
-The local raw-key path is retained for deterministic tests / CI-secret PEM.
+---
 
-**Required input:** (a) chosen key-storage model (managed KMS vs CI-secret PEM —
-both now supported), (b) the production public key injected via
-`PATHVEER_TRUSTED_META_KEYS` in the release pipeline, (c) final `keyId`.
-The public key is the only material the shipped client needs.
+## 5. Metadata Private-Key Storage / Recovery
 
-## 4. Disposable VM (BLOCKER D)
+Production metadata signing should use the storage model implemented and documented by current release tooling, with these invariants:
 
-Hyper-V is **Enabled**, 0 VMs provisioned. `tools/certification/New-PathVeerCertificationVm.ps1`
-scaffolds a Gen2 VM + checkpoint slot (guarded by `-Confirm`; does NOT download an ISO).
-**Required input:** a Windows 11 x64 ISO (official evaluation image or licensed media).
-Then GATE-1..12 execute per `tools/certification/README.md`.
+- private key never committed;
+- private key not printed to logs;
+- access restricted to intended release operator/provider;
+- recoverable backup exists where policy requires it;
+- backup round-trip verifies the expected public-key fingerprint;
+- rotation uses a new key ID and overlap rather than overwriting an existing identity.
 
-## 5. Supported IranDirect legacy artifact (BLOCKER E)
+A managed/KMS signer is acceptable when supported by the current signing contract and does not export raw private key material.
 
-The supported upgrade floor is the **final globalized IranDirect build** = commit
-`e4847b9` (globalization test commit; floor documented in phase-36.1 §27/§28).
-No built installer/package artifact exists anywhere reachable in this environment.
-**Required input:** the actual final IranDirect installer binary users would upgrade from
-(or an explicit decision that legacy migration is out of scope for v1).
+---
 
-## 6. Staging HTTPS host / DNS / object storage (BLOCKER F)
+## 6. Development / Staging Separation
 
-`releases.pathveer.com` does not resolve; no storage creds configured.
-`Publish-PathVeerRelease.ps1` supports only a `Local` backend today (the origin a
-CDN/object store syncs from). **Required input:** a static immutable origin
-(Cloudflare R2 + domain, S3 + CloudFront, Azure Blob/Front Door, or equivalent)
-+ DNS control for `releases.pathveer.com`. The app consumes `https://releases.pathveer.com/...`
-from signed manifests, so the URL contract must be preserved.
+Development/staging metadata keys must not be accepted by production verification simply because an environment variable is set.
 
-## 7. RIPEstat commercial terms (BLOCKER H)
+Development Authenticode certificates must not be confused with a public production publisher identity.
 
-Authoritative RIPE NCC RIPEstat Terms (Article 3): **commercial use** — providing
-paid services/products/derivatives based on RIPEstat data, or packaging RIPEstat
-data with other sources as a commercial product — **requires written permission
-from RIPE NCC.** Non-commercial/internal use is permitted.
+A Development/Signed artifact is certification evidence, not automatically a production release candidate.
 
-**Engineering status:** no code change required; this is a business/legal disposition.
-**Required input:** written RIPE NCC permission request (or explicit acceptance of
-the non-commercial limitation for v1).
+---
 
-## 8. Summary — inputs still required from the user
+## 7. Distribution Infrastructure
 
-| # | Input | Blocks |
-|---|-------|--------|
-| 1 | Legal publisher identity (§1) | Authenticode enrollment (B) |
-| 2 | Signing provider choice (§2) | B |
-| 3 | Metadata key-storage model + public key (§3) | C |
-| 4 | Windows 11 ISO (§4) | VM GATE-1..12 |
-| 5 | Final IranDirect installer (§5) | GATE-1, GATE-7 |
-| 6 | Staging host + DNS + storage (§6) | GATE-11, GATE-12 |
-| 7 | RIPEstat written permission / acceptance (§7) | Business release prerequisite |
+Distribution configuration (for example R2/S3-compatible storage, DNS, and `releases.pathveer.com`) is separate from signing-key provisioning.
 
-Once these are supplied, the certification matrix executes against frozen RC bytes
-(installer `8871c9b7…ad7670`, package `cd94f2a7…f1e65`, manifest `ccd9651d…6daa8`)
-and re-certifies. No broad engineering phase is required — only execution.
+Production credentials must remain outside the repository and outside disposable certification guests unless explicitly required and protected.
+
+The publish pipeline should enforce immutable versioned objects and update channel pointers last.
+
+---
+
+## 8. Disposable VM / Certification Guests
+
+Certification VMs need public artifacts and public trust anchors only.
+
+Do not copy into disposable guests unless a specific gate requires it:
+
+- production ES256 private key;
+- production Authenticode private key/PFX;
+- R2/S3 secret access keys;
+- password vaults;
+- unrelated production credentials.
+
+---
+
+## 9. IranDirect Legacy Artifact
+
+Some migration gates require an authentic historical IranDirect artifact.
+
+Do not synthesize a historical build and claim it represents a previously distributed product unless the gate explicitly permits source-reconstructed fixtures.
+
+If an authentic artifact is unavailable, classify that gate honestly rather than weakening the migration test.
+
+---
+
+## 10. External Data / Legal Inputs
+
+Business/legal review for third-party data services is separate from cryptographic signing readiness.
+
+Record such prerequisites in the current release-status document rather than changing trust architecture to bypass them.
+
+---
+
+## 11. Provisioning Checklist
+
+Before production publication confirm:
+
+- legal publisher identity approved;
+- Authenticode provider/material available and verified;
+- production ES256 key/recovery capability healthy;
+- client contains intended production public anchor;
+- production verifier rejects unsigned/staging metadata;
+- publication credentials are provisioned securely;
+- current release artifact passes artifact/runtime certification;
+- explicit operator publication authorization exists.
+
+No item in this document itself authorizes publication.

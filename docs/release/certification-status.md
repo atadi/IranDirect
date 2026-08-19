@@ -1,7 +1,20 @@
-# PathVeer Certification — Current State (Consolidated Status)
+# PathVeer Certification Status — Historical beta.1 Snapshot
+
+> **Historical snapshot — not current engineering status.**
+>
+> This document records an earlier beta.1/JEA certification state. Later installer
+> certification discovered additional real product defects (including WinExe startup
+> and progress-reader lifecycle failures). Do not use the conclusions below to decide
+> current release readiness.
+>
+> Current engineering state: `../architecture-knowledge-base/AI/CURRENT.md`
+>
+> Current release publication remains separately authorized and is never implied by
+> this historical record.
+
 
 **Authoritative as of commit `953edd3`** on branch `hermes/hermes-07ff3473`.
-This is the single live certification-status artifact. Phase docs
+This was the consolidated certification-status artifact at the time of this snapshot. Phase docs
 (`phase-37.5-release-certification.md`, `phase-37.6-release-closure.md`,
 `phase-37.8-vm-certification.md`, `cloudflare-r2-certification.md`) are
 historical closeouts; this file supersedes their gate matrices by reference.
@@ -81,7 +94,7 @@ BLOCK is the absence of a signing cert, not a product defect.
   object compared to string `'Running'` → fixed at `953edd3` (normalize via
   shared `Get-EnumString`, retain raw + normalized evidence).
 
-No unresolved REAL PRODUCT defect. No unresolved HARNESS defect.
+At the time of this snapshot, no unresolved REAL PRODUCT or HARNESS defect was known. Later artifact-level testing superseded that conclusion.
 
 ## 6. JEA / CLI invariants (verified from source + tests)
 
@@ -120,7 +133,7 @@ rerun merely to reconfirm expected blockers.
 
 ## 10. Phase-closure recommendation
 
-**CLOSE WITH EXTERNAL BLOCKERS.**
+**Historical conclusion at this snapshot: CLOSE WITH EXTERNAL BLOCKERS.**
 
 All runnable core gates pass; no unresolved harness or product defects remain.
 The only open items require genuinely unavailable historical artifacts (GATE-1/7),

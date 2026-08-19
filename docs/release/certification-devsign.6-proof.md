@@ -1,5 +1,9 @@
 # PathVeer Installer Certification — devsign.6 (service-authority slice)
 
+> ## Post-certification correction
+>
+> devsign.6 is not a passing final installer specimen. Later runtime evidence proved the terminal-state protection added in this artifact covered only the case where the controller operation returned but the terminal callback was lost. A separate controller defect could prevent the operation from returning at all: the progress reader continued polling after the PowerShell producer exited. devsign.6 also shared the WinExe `Console.Title` startup crash later proven by Event 1026. Preserve the original proof below as historical evidence, but do not use it as current certification status.
+
 Built from committed HEAD `61acb03` on branch `development/service-authority`.
 Predecessor: devsign.5 (commit `02aa4ed`). devsign.5 was NOT modified or rebuilt.
 

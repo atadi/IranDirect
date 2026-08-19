@@ -1,5 +1,8 @@
 # Phase 37.8 — Disposable VM Certification (reconciliation & host audit)
 
+> **Documentation archive note.** This historical file references `phase-37.9-vm-execution.md`. That file was not present in the supplied docs archive used for the 2026-08-19 documentation review. Verify the live repository before relying on that cross-reference. Current engineering state is maintained in `../architecture-knowledge-base/AI/CURRENT.md`.
+
+
 Date: 2026-08-11 (superseded 2026-08-12 by `phase-37.9-vm-execution.md`)
 Branch: `development/service-authority`
 Starting HEAD: `375a9f7`

@@ -134,10 +134,14 @@ Generation tool: `tools/New-PathVeerMetadataKey.ps1`. Backup tool:
 prints the key or the passphrase, ACL-restricts the output, and fails if the
 round-trip fingerprint does not match).
 
-## Remaining release blockers (unchanged by this slice)
+## Current release status
 
-* Production Windows **Authenticode** — the installer may still be unsigned.
-* Disposable **VM certification** matrix (GATE-1..10, GATE-13..).
-* **IranDirect** legacy artifact for GATE-7/§10.
+This document is authoritative for the production ES256 metadata-trust architecture only.
 
-Decision remains **CONDITIONALLY CERTIFIED** until those close.
+It must not maintain a changing release-blocker list.
+
+For current installer/certification/release blockers see:
+
+`../architecture-knowledge-base/AI/CURRENT.md`
+
+No release publication is authorized by this trust document.

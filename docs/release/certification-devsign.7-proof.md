@@ -1,5 +1,9 @@
 # PathVeer Installer Certification — devsign.7 (service-authority slice)
 
+> ## Post-certification correction
+>
+> devsign.7 is not a passing final installer specimen. The Tray single-instance work remains useful historical evidence, but this artifact shared the WinExe `Console.Title` startup crash and inherited the incomplete terminal-operation contract later exposed by devsign.8. Its artifact provenance also predates the later `bdc30cd` certification-record commit. Preserve the original proof below as historical evidence.
+
 Built from committed HEAD `2881029` on branch `development/service-authority`.
 Predecessor: devsign.6 (commit `61acb03`). devsign.6 was NOT modified or rebuilt.
 

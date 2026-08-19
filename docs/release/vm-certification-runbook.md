@@ -10,7 +10,7 @@ time** (see §0 of phase-37.8). That conclusion was **subsequently withdrawn**: 
 `Win32_Processor.VirtualizationFirmwareEnabled = False` signal is not authoritative
 under active Hyper-V/VBS, and a real Generation-2 VM (`PathVeer-Certification`) was
 built and booted on this same host. The runbook below is therefore **executable
-as-is** against the already-provisioned certification VM. See `phase-37.9-vm-execution.md`.
+as-is** against the already-provisioned certification VM. The supplied documentation archive does not contain `phase-37.9-vm-execution.md`; treat any reference to it as historical until the repository confirms that file exists. Current certification status is in `../architecture-knowledge-base/AI/CURRENT.md`.
 
 > **Correction (2026-08-12).** The certification VM **does exist and is operational**:
 > `PathVeer-Certification` (Gen2, vTPM, Secure Boot On, 4 vCPU / 8 GiB, Default
@@ -72,13 +72,13 @@ then run the scenario, then capture evidence with:
 
 | Gate | Scenario | Checkpoint after |
 |------|----------|------------------|
-| GATE-5 fresh install | Run `PathVeerSetup-*.exe` interactive; note Unknown Publisher (unsigned) UX | VM-PATHVEER-FRESH-INSTALLED |
+| GATE-5 fresh install | Run the selected certification `PathVeerSetup-*.exe` interactively; record the actual signer/publisher UX for that artifact | VM-PATHVEER-FRESH-INSTALLED |
 | GATE-6 upgrade | Install older beta, then newer Setup; verify upgrade + state survival | VM-PATHVEER-UPGRADE-BASE |
 | GATE-4 purge→reinstall | Purge state, reinstall, verify preserved-state recognition | — |
 | GATE-8 uninstall/reinstall | Apps&Features uninstall → verify removal; reinstall → verify preserved state | — |
 | GATE-2 route mutation/recovery | Before/after route table; capture journal; validate rollback | — |
 | GATE-3 reboot persistence | Reboot VM only; verify Service startup + policy + routing post-reboot | — |
-| GATE-9 update handoff | Update check → ES256 verify → download → hash verify → Setup handoff (past unsigned warning, operator-approved) | — |
+| GATE-9 update handoff | Update check → ES256 verify → download → hash verify → Setup handoff; record actual Authenticode/publisher state of the selected artifact | — |
 | GATE-10 tamper | Tampered installer → rejected → Setup not launched (reuse R2 fixture) | — |
 | GATE-1 / GATE-7 | IranDirect→PathVeer migration — **BLOCKED** (no authentic legacy artifact; see phase-37.8 §4) | — |
 
@@ -98,11 +98,16 @@ policy, routing ownership, Tray behavior, IPC availability, persisted config. Co
 
 ## 6. Authenticode position
 
-The installer is **unsigned** (production Authenticode externally blocked — see
-`authenticode-provider-feasibility.md`). Expected UX: `Unknown publisher` /
-SmartScreen reputation warning. Do **not** disable Windows signature enforcement.
-Where a gate needs to continue past the warning, operator-approved continuation
-**inside the disposable VM** is acceptable and must be documented as such.
+Do not hard-code the runbook to an unsigned installer. Certification artifacts may be unsigned, development-signed, or production-signed depending on the current gate.
+
+Before each run, record:
+
+- artifact version and SHA-256;
+- `Get-AuthenticodeSignature` status;
+- signer subject when present;
+- whether the certificate is development/private or production-public trust.
+
+Do **not** disable Windows signature enforcement. If a deliberately unsigned/private-development artifact must be exercised inside the disposable VM, operator-approved continuation must be documented and must not be reported as production Authenticode proof.
 
 ## 7. Secrets / safety
 
