@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using PathVeer.Core.Installer;
@@ -577,34 +578,68 @@ public sealed class InstallForm : Form
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "PathVeer", "Logs", "Setup");
 
+    // The Tray is a per-user UI/controller and MUST NOT run elevated. The
+    // installer runs elevated (self-elevation gate), so launching the Tray
+    // directly from here would inherit the elevated token. Instead, this writes
+    // a sentinel the NON-elevated parent process consumes after the elevated
+    // child returns (see Program.Main / RelaunchElevated), guaranteeing the Tray
+    // is spawned by the ordinary user token. This is verifiable by construction:
+    // the parent is the un-elevated Explorer-launched Setup.
     private void LaunchTray()
     {
         try
         {
-            string trayExe = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                "PathVeer", "Tray", "PathVeer.Tray.exe");
-            if (File.Exists(trayExe))
-            {
-                // The installer runs elevated (self-elevation gate). A plain
-                // Process.Start with UseShellExecute=true from an elevated
-                // process inherits the elevated (high-IL) token, which would
-                // make the per-user Tray UI run as administrator — wrong for a
-                // user-facing controller and a certification stop condition.
-                // Launching through the desktop explorer.exe (which runs at
-                // medium IL) drops elevation so the Tray runs as the normal
-                // interactive user, regardless of installer elevation.
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = "\"" + trayExe + "\"",
-                    UseShellExecute = true,
-                });
-            }
+            WriteLaunchTraySentinel();
         }
         catch
         {
             // Non-fatal: the user can launch the Tray from the Start Menu.
+        }
+    }
+
+    public static void WriteLaunchTraySentinel()
+    {
+        try
+        {
+            string sentinel = Path.Combine(
+                Path.GetTempPath(), "PathVeer.Setup.LaunchTray.sentinel");
+            File.WriteAllText(sentinel, "1");
+        }
+        catch
+        {
+            // Best-effort; Start Menu remains a fallback.
+        }
+    }
+
+    // Consumed by the non-elevated parent: if the sentinel exists, launch the
+    // Tray as the ordinary (non-elevated) user and remove the sentinel. Called
+    // from Program after the elevated child exits, so the Tray never inherits
+    // installer elevation.
+    public static void ConsumeLaunchTraySentinel()
+    {
+        string sentinel = Path.Combine(
+            Path.GetTempPath(), "PathVeer.Setup.LaunchTray.sentinel");
+        if (!File.Exists(sentinel)) return;
+
+        try { File.Delete(sentinel); } catch { /* ignore */ }
+
+        string trayExe = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "PathVeer", "Tray", "PathVeer.Tray.exe");
+        if (File.Exists(trayExe))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = trayExe,
+                    UseShellExecute = true,
+                });
+            }
+            catch
+            {
+                // Non-fatal: the user can launch the Tray from the Start Menu.
+            }
         }
     }
 

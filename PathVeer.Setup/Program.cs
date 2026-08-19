@@ -151,6 +151,14 @@ public static class Program
         using var form = new InstallForm(controller, friendlyVersion);
         Application.Run(form);
 
+        // In the normal (UAC) flow this is reached only by the elevated child;
+        // the sentinel is instead consumed by the non-elevated parent after the
+        // child exits, so the Tray is never elevated. This call covers the rare
+        // case where Setup was launched already-elevated (Run as administrator):
+        // it consumes the sentinel here, launching the Tray from this process.
+        // The parent path is the certified non-elevated route.
+        InstallForm.ConsumeLaunchTraySentinel();
+
         // The form carries the authoritative operation result. The explicit
         // contract prevents a closed failure window from being silently reported
         // as success (NEW ISSUE #2). Closing before mutation == user cancel.
@@ -276,6 +284,11 @@ public static class Program
             using var process = Process.Start(startInfo);
             if (process is null) return SetupExitCodes.RelaunchFailed;
             process.WaitForExit();
+            // The elevated child may have requested the Tray to launch. We are
+            // the NON-elevated parent (Explorer-launched), so consuming the
+            // sentinel here spawns the Tray under the ordinary user token —
+            // never elevated (certification requirement).
+            InstallForm.ConsumeLaunchTraySentinel();
             return process.ExitCode;
         }
         catch (System.ComponentModel.Win32Exception)
