@@ -19,27 +19,36 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
+# Simulate repeated repair: each repair (re)registers the tray autorun.
 for ($i = 0; $i -lt $RepairCount; $i++) {
     Set-TrayStartupEntry
 }
 
 $props = Get-ItemProperty -Path $RunKey -ErrorAction SilentlyContinue
-$pathVeer = if ($props) { $props.'PathVeer Tray' } else { $null }
-$legacy = if ($props) { $props.'IranDirect Tray' } else { $null }
+$pathVeer = $null; $legacy = $null
+if ($props) {
+    if (Get-Member -InputObject $props -Name 'PathVeer Tray' -MemberType NoteProperty) {
+        $pathVeer = $props.'PathVeer Tray'
+    }
+    if (Get-Member -InputObject $props -Name 'IranDirect Tray' -MemberType NoteProperty) {
+        $legacy = $props.'IranDirect Tray'
+    }
+}
 
 Write-Host "PathVeer Tray value present: $($null -ne $pathVeer)"
 Write-Host "Legacy IranDirect Tray value present: $($null -ne $legacy)"
 
-# Reconcile (simulate repair reconciliation that removes legacy).
-Remove-TrayStartupEntry
-$props2 = Get-ItemProperty -Path $RunKey -ErrorAction SilentlyContinue
-$legacyAfter = if ($props2) { $props2.'IranDirect Tray' } else { $null }
-Write-Host "After Remove-TrayStartupEntry legacy IranDirect Tray present: $($null -ne $legacyAfter)"
+# Count how many values named 'PathVeer Tray' exist (idempotency: must be 1).
+$pvCount = 0
+if ($props) {
+    if (Get-Member -InputObject $props -Name 'PathVeer Tray' -MemberType NoteProperty) { $pvCount++ }
+}
+Write-Host "PathVeer Tray value count: $pvCount (expect 1)"
 
-$ok = ($null -ne $pathVeer) -and ($null -eq $legacy)
+$ok = ($pvCount -eq 1) -and ($null -eq $legacy)
 if (-not $ok) {
-    Write-Error "AUTORUN PROOF FAILED: PathVeer='$pathVeer' legacyBefore='$legacy'"
+    Write-Error "AUTORUN PROOF FAILED: PathVeerCount=$pvCount legacyPresent=$($null -ne $legacy)"
     exit 1
 }
-Write-Host "AUTORUN PASS: one 'PathVeer Tray' value, no legacy 'IranDirect Tray'."
+Write-Host "AUTORUN PASS: exactly one 'PathVeer Tray' value, no legacy 'IranDirect Tray' after $RepairCount repairs."
 exit 0
