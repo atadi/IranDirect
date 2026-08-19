@@ -88,7 +88,7 @@ public static class SetupExitCodes
         PowerShellUnavailable => "PowerShell could not be started to run the installer.",
         RelaunchFailed => "Setup could not restart with administrator privileges.",
         RuntimePrerequisiteMissing => "The required .NET runtime is not installed. PathVeer cannot run until it is present.",
-        ContractViolation => "The installer finished without a final result. The operation may be incomplete; no changes are assumed. Re-run Setup to verify the installation state.",
+        ContractViolation => "The installation did not complete successfully. Some installation changes may have been applied. Re-run Setup to repair the installation.",
         _ => "Setup finished with an unexpected error.",
     };
 }

@@ -69,7 +69,7 @@ exit 0
         return PsHeader + @"
 WriteProgress 'VerifyingPackage' 'verifying'
 WriteProgress 'Finished' 'failed'
-WriteResult $false 'PackageVerificationFailed' 'bad'
+WriteResult $false 'PackageVerificationFail' 'bad'
 exit 1
 ";
     }
@@ -247,5 +247,58 @@ exit 0
         Assert.True(sw.Elapsed.TotalSeconds < 15,
             $"Operation should return shortly after process exit, took {sw.Elapsed.TotalSeconds:F1}s");
         File.Delete(script);
+    }
+
+    // --- Section 14: PowerShell emits LOWERCASE JSON keys (ConvertTo-Json
+    // default). System.Text.Json is case-SENSITIVE by default, so the
+    // controller MUST use PropertyNameCaseInsensitive=true or every record would
+    // deserialize with default/empty values and report a false failure. This
+    // test pins the lowercase-key contract end to end through the REAL
+    // controller + a script that emits exactly what Install-PathVeer.ps1 emits.
+
+    [Fact]
+    public void LowercasePowerShellJson_MapsToCSharpRecords()
+    {
+        // The shared PsHeader already writes lowercase keys
+        // (stage/message/timestamp, success/category/message/version/timestamp)
+        // via ConvertTo-Json. If the controller ignored case, result.Success and
+        // result.Category would be the defaults (false / "Success") and the
+        // exit code would be non-zero. Assert the REAL mapping succeeds.
+        string script = WriteFakeScript(FakeSuccessScript());
+        try
+        {
+            var (exitCode, completedCount, _, _) = Run(
+                script, new InstallOptions { InstallTray = false, LaunchTrayAfterInstall = false });
+
+            Assert.Equal(0, exitCode); // success mapped despite lowercase keys
+            Assert.Equal(1, completedCount);
+        }
+        finally
+        {
+            File.Delete(script);
+        }
+    }
+
+    [Fact]
+    public void LowercaseFailureJson_MapsCategory()
+    {
+        string script = WriteFakeScript(FakeFailureScript());
+        try
+        {
+            var (exitCode, _, _, _) = Run(
+                script, new InstallOptions { InstallTray = false, LaunchTrayAfterInstall = false });
+
+            // FakeFailureScript writes category 'PackageVerificationFailed' in
+            // lowercase JSON; the controller must map it to the stable code.
+            // NOTE: the REAL Install-PathVeer.ps1 emits the category token
+            // 'PackageVerificationFail' (no trailing 'ed') which the controller
+            // maps to PackageVerificationFailed (104). This test asserts the
+            // lowercase-JSON -> C# record -> exit-code mapping end to end.
+            Assert.Equal(SetupExitCodes.PackageVerificationFailed, exitCode);
+        }
+        finally
+        {
+            File.Delete(script);
+        }
     }
 }

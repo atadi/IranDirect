@@ -268,14 +268,42 @@ public sealed class InstallController
                 // records (the script writes the "Finished" progress line and
                 // result.json immediately before exiting, so both are fully
                 // flushed by the time WaitForExit returns). Cancelling first and
-                // waiting for the reader to stop avoids racing the final write;
-                // the drain then observes any records the loop had not yet seen.
+                // waiting for the reader to STOP before draining avoids racing
+                // the final write; the drain then observes any records the loop
+                // had not yet seen.
+                //
+                // devsign.10 / section 13 invariant: exactly ONE actor may touch
+                // the tailer's read position at a time. Task.Wait(TimeSpan)
+                // returns a Boolean — we MUST honor it. If it returns false the
+                // reader task is still alive (e.g. mid-sleep) and calling Drain()
+                // would race RunLoop/PumpOnce. We therefore only Drain() once the
+                // task is confirmed complete (Wait returned true). The 2s budget
+                // vastly exceeds the 150ms loop sleep, so in practice Wait
+                // returns true quickly; the second wait is a safety net that
+                // keeps waiting while cancellation is already signaled, never
+                // proceeding to Drain until the reader is gone.
                 progressCts.Cancel();
-                try { reader.Wait(TimeSpan.FromSeconds(2)); }
-                catch { /* ignore */ }
+                bool readerStopped = reader.Wait(TimeSpan.FromSeconds(2));
+                if (!readerStopped)
+                {
+                    // Cancellation is already set, so RunLoop will exit on its
+                    // next check. Give it a bounded second chance rather than
+                    // racing it with Drain().
+                    readerStopped = reader.Wait(TimeSpan.FromSeconds(2));
+                }
 
-                try { tailer.Drain(); }
-                catch { /* ignore */ }
+                if (readerStopped)
+                {
+                    try { tailer.Drain(); }
+                    catch { /* ignore */ }
+                }
+                else
+                {
+                    // Defensive: the reader did not stop within the bounded
+                    // window. Do NOT Drain() (would race). The controller still
+                    // reads result.json below, which is written before exit and
+                    // fully flushed.
+                }
             }
 
             ResultRecord? result = ReadResult(resultFile);
