@@ -86,6 +86,19 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# devsign.10 — Blockers C: render installer output as PLAIN TEXT.
+#
+# In PowerShell 7 the host-style cmdlets (Write-Host -ForegroundColor, etc.)
+# emit VT/ANSI escape sequences when stdout is NOT a real console (as when the
+# Setup GUI captures the process output: redirected to a pipe). Those raw ESC
+# sequences then appear literally in the WinForms log ([31;1m, [36;1m, [0m),
+# the proven devsign.9 Repair defect. Setting OutputRendering to PlainText makes
+# PowerShell suppress all ANSI rendering, so the GUI log receives clean text
+# while a real console still gets colored output (when run interactively).
+if ($PSStyle) {
+    $PSStyle.OutputRendering = 'PlainText'
+}
+
 # --- identity constants (must match PathVeer.Core) -------------------------
 $ServiceName        = 'PathVeer'
 $ServiceDisplayName = 'PathVeer Service'
@@ -111,9 +124,9 @@ $StatusTimeout = [TimeSpan]::FromSeconds(30)
 
 # --- helpers ---------------------------------------------------------------
 
-function Write-Step   { param([string]$m) Write-Host $m -ForegroundColor Cyan }
-function Write-Detail { param([string]$m) Write-Host "  $m" -ForegroundColor DarkGray }
-function Write-Ok     { param([string]$m) Write-Host $m -ForegroundColor Green }
+function Write-Step   { param([string]$m) Write-Host $m }
+function Write-Detail { param([string]$m) Write-Host "  $m" }
+function Write-Ok     { param([string]$m) Write-Host $m }
 
 function Assert-Administrator {
     $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -222,6 +235,122 @@ function Test-PackageIntegrity {
     }
 
     Write-Detail "$checked files verified against the package integrity manifest."
+}
+
+function Stop-InstalledTrayIfRunning {
+    # devsign.10 — TRAY QUIESCENCE LIFECYCLE.
+    #
+    # The installed Tray lives in %ProgramFiles%\PathVeer\Tray. When Repair /
+    # Upgrade / Uninstall runs, that directory's files (e.g. Accessibility.dll)
+    # are still memory-mapped by a RUNNING installed Tray, so any attempt to
+    # replace/remove them fails with AccessDenied / sharing violation — the
+    # proven devsign.9 Repair breakdown.
+    #
+    # We therefore quiesce every running process whose EXECUTABLE PATH resolves
+    # to the canonical installed Tray EXE before we mutate shared binaries.
+    #
+    # Policy (v1, multi-session aware):
+    #   * Identify by FULL executable path, not by process name. A developer
+    #     build running from C:\codespace\PathVeer\... must NEVER be killed.
+    #   * Machine-shared Program Files binaries may be held by Trays in OTHER
+    #     Windows sessions too; all such processes must be quiesced.
+    #   * Prefer a graceful, product-owned shutdown (the Tray responds to a
+    #     duplicate-launch "show existing" signal only for display, so here we
+    #     request exit via the Tray's own named event and a short wait).
+    #   * If graceful exit is not observed within a bounded window, terminate
+    #     the path-scoped process (Tray is not machine authority; the Service
+    #     keeps running). This is deterministic and path-scoped, NOT a blanket
+    #     kill of every PathVeer.Tray process by name.
+    #   * If any canonical-installed Tray remains after all stop attempts, fail
+    #     BEFORE destructive binary swap with a clear category + non-zero exit.
+
+    $trayExe = Join-Path $TrayDir 'PathVeer.Tray.exe'
+    if (-not (Test-Path $trayExe)) {
+        return # not yet installed; nothing to quiesce
+    }
+
+    $canonicalPath = (Resolve-Path -LiteralPath $trayExe -ErrorAction SilentlyContinue).Path
+    if (-not $canonicalPath) { return }
+
+    $running = Get-CimInstance Win32_Process -Filter "Name = 'PathVeer.Tray.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $p = $_.ExecutablePath
+            if ([string]::IsNullOrWhiteSpace($p)) { return $false }
+            try {
+                $resolved = (Resolve-Path -LiteralPath $p -ErrorAction SilentlyContinue).Path
+            } catch { return $false }
+            return $resolved -and ($resolved -eq $canonicalPath)
+        }
+
+    if (-not $running -or ($running.Count -eq 0)) {
+        return # no installed Tray running; proceed
+    }
+
+    Write-Step "Quiescing installed PathVeer Tray ($(@($running).Count) process(es))..."
+
+    # Bounded graceful wait: ask each to exit via its named event, then poll.
+    $graceSeconds = 8
+    $deadline = [DateTime]::UtcNow.AddSeconds($graceSeconds)
+
+    foreach ($proc in $running) {
+        try {
+            $pidNum = [int]$proc.ProcessId
+            $evt = $null
+            try {
+                $evt = [System.Threading.EventWaitHandle]::OpenExisting(
+                    'Local\PathVeer.Tray.Exit')
+            } catch { $evt = $null }
+
+            if ($evt) {
+                try { $evt.Set() } finally { $evt.Dispose() }
+            }
+        } catch { # ignore; fall through to termination path
+        }
+    }
+
+    # Poll for the installed Tray processes to exit (bounded).
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $stillRunning = Get-CimInstance Win32_Process -Filter "Name = 'PathVeer.Tray.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $p = $_.ExecutablePath
+                if ([string]::IsNullOrWhiteSpace($p)) { return $false }
+                try {
+                    $resolved = (Resolve-Path -LiteralPath $p -ErrorAction SilentlyContinue).Path
+                } catch { return $false }
+                return $resolved -and ($resolved -eq $canonicalPath)
+            }
+        if (-not $stillRunning -or (@($stillRunning).Count -eq 0)) {
+            return # graceful exit observed; safe to mutate
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    # Bounded fallback: terminate only the path-scoped installed Tray processes.
+    Write-Detail "Graceful Tray exit not observed; terminating path-scoped processes."
+    foreach ($proc in $running) {
+        try {
+            $pidNum = [int]$proc.ProcessId
+            $procObj = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+            if ($procObj) { $procObj.Kill() }
+        } catch {
+            Write-Detail "Could not terminate Tray pid $($proc.ProcessId): $_"
+        }
+    }
+
+    # Final verification before destructive swap.
+    Start-Sleep -Seconds 1
+    $stillRunning = Get-CimInstance Win32_Process -Filter "Name = 'PathVeer.Tray.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $p = $_.ExecutablePath
+            if ([string]::IsNullOrWhiteSpace($p)) { return $false }
+            try {
+                $resolved = (Resolve-Path -LiteralPath $p -ErrorAction SilentlyContinue).Path
+            } catch { return $false }
+            return $resolved -and ($resolved -eq $canonicalPath)
+        }
+    if ($stillRunning -and (@($stillRunning).Count -gt 0)) {
+        throw "Could not stop the installed PathVeer Tray ($(@($stillRunning).Count) still running). Aborting before replacing shared Tray binaries so no partial install is left behind."
+    }
 }
 
 function Install-Payload {
@@ -716,6 +845,7 @@ function Invoke-Install {
 
     # 4. Replace binaries.
     Write-ProgressRecord -Stage 'Installing' -Message 'Installing PathVeer binaries...'
+    Stop-InstalledTrayIfRunning
     Install-Payload $PackageDirectory
 
     # 5. Point SCM at the canonical install root (never a dev checkout).
@@ -841,6 +971,11 @@ function Invoke-Uninstall {
 
     Remove-TrayStartupEntry
 
+    # devsign.10 — quiesce any running installed Tray BEFORE deleting its
+    # binaries; otherwise Remove-Item would fail mid-delete or strand a process
+    # still holding the now-missing files.
+    Stop-InstalledTrayIfRunning
+
     if (Test-Path $InstallRoot) {
         Remove-Item $InstallRoot -Recurse -Force -ErrorAction SilentlyContinue
         Write-Detail "Installed binaries removed from $InstallRoot."
@@ -948,6 +1083,14 @@ function Invoke-StateJson {
         [Console]::Out.Write($json)
     }
 }
+
+# --- devsign.10 test seam ------------------------------------------------
+# When PATHVEER_INSTALL_TEST is set (only by the quiescence unit test), the
+# script defines all functions and returns BEFORE dispatching an action, so a
+# test harness can dot-source it and call Stop-InstalledTrayIfRunning / other
+# helpers directly with injected test state. This env var is NEVER set in
+# production, so production behavior is unchanged.
+if ($env:PATHVEER_INSTALL_TEST) { return }
 
 switch ($Action) {
     'install'   { Invoke-Install }

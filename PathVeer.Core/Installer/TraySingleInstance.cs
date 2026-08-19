@@ -95,6 +95,45 @@ public sealed class TraySingleInstance : IDisposable
     }
 
     /// <summary>
+    /// Session-scoped event an external caller (e.g. the installer during Tray
+    /// quiescence, or a controlled shutdown) sets to ask the primary Tray to
+    /// exit gracefully. Auto-reset, session-local so it targets only this user's
+    /// Tray. The Tray wires a waiter thread that calls its normal
+    /// <c>ExitApplication</c> path when signalled.
+    /// </summary>
+    public const string ExitEventName = @"Local\PathVeer.Tray.Exit";
+
+    /// <summary>Opens (or creates) the graceful-exit event.</summary>
+    public static EventWaitHandle? OpenOrCreateExitEvent()
+    {
+        try
+        {
+            return new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName, out _);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Signals the running primary Tray to exit gracefully. Best-effort: if no
+    /// primary has created the event yet, this is a harmless no-op.
+    /// </summary>
+    public static void SignalExit()
+    {
+        try
+        {
+            using var evt = EventWaitHandle.OpenExisting(ExitEventName);
+            evt.Set();
+        }
+        catch
+        {
+            // Primary not ready or already gone; nothing to signal.
+        }
+    }
+
+    /// <summary>
     /// Signals a running primary instance to surface itself. Best-effort: if no
     /// primary has created the event yet, this is a harmless no-op.
     /// </summary>

@@ -55,7 +55,9 @@ public sealed class TrayApplicationContext :
     // work (NotifyIcon is a UI control) onto the WinForms thread.
     private readonly Control _uiBridge = new Control();
     private EventWaitHandle? _showEvent;
+    private EventWaitHandle? _exitEvent;
     private Thread? _showWaiter;
+    private Thread? _exitWaiter;
     private volatile bool _disposed;
 
     private readonly IPrefixUpdateNotificationTracker
@@ -293,6 +295,16 @@ public sealed class TrayApplicationContext :
             _showWaiter = new Thread(WaitForShowSignal) { IsBackground = true };
             _showWaiter.Start();
         }
+
+        // devsign.10 — graceful exit signal for installer quiescence. An
+        // external caller (the installer) sets the session-scoped exit event to
+        // ask THIS Tray to exit cleanly so shared binaries can be replaced.
+        _exitEvent = TraySingleInstance.OpenOrCreateExitEvent();
+        if (_exitEvent is not null)
+        {
+            _exitWaiter = new Thread(WaitForExitSignal) { IsBackground = true };
+            _exitWaiter.Start();
+        }
     }
 
     // Background waiter: a duplicate PathVeer.Tray launch sets the event; we
@@ -308,6 +320,35 @@ public sealed class TrayApplicationContext :
                 if (evt.WaitOne(1000))
                 {
                     ShowExisting();
+                }
+            }
+        }
+        catch (ObjectDisposedException) { }
+        catch (AbandonedMutexException) { }
+    }
+
+    // Background waiter: the installer (or a controlled shutdown) sets the
+    // session-scoped exit event; we run the normal ExitApplication path on the
+    // UI thread so the Tray releases its single-instance mutex and resources.
+    private void WaitForExitSignal()
+    {
+        var evt = _exitEvent;
+        if (evt is null) return;
+        try
+        {
+            while (!_disposed)
+            {
+                if (evt.WaitOne(1000))
+                {
+                    if (_uiBridge.InvokeRequired)
+                    {
+                        _uiBridge.Invoke((Action)ExitApplication);
+                    }
+                    else
+                    {
+                        ExitApplication();
+                    }
+                    return;
                 }
             }
         }
