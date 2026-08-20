@@ -91,6 +91,17 @@ if ($Backend -eq $null) {
 
 Write-Step "Signing backend: $Backend"
 
+# --- Resolve signtool deterministically (prefer x64 SDK on win-x64) ---------
+$signtool = $null
+try {
+    $signtool = & "$PSScriptRoot/Find-PathVeerSignTool.ps1"
+} catch {
+    # Missing signtool is a hard error only when signing was actually requested.
+    if ($FailIfUnavailable) { throw "signtool.exe not available: $_" }
+    Write-Step "signtool.exe not found. Artifacts remain UNSIGNED (developer mode)."
+    exit 0
+}
+
 # --- Collect files -----------------------------------------------------------
 $targets = New-Object System.Collections.Generic.List[string]
 foreach ($pattern in $FilesToSign) {
@@ -134,13 +145,13 @@ foreach ($file in $targets) {
             if (-not (Test-Path $env:PATHVEER_SIGN_PFX)) {
                 throw "PATHVEER_SIGN_PFX points to a missing file: $($env:PATHVEER_SIGN_PFX)"
             }
-            & signtool sign /fd sha256 /tr $TimestampUrl /td sha256 `
+            & $signtool sign /fd sha256 /tr $TimestampUrl /td sha256 `
                 /f $env:PATHVEER_SIGN_PFX /p $env:PATHVEER_SIGN_PASSWORD `
                 $file
             if ($LASTEXITCODE -ne 0) { throw "signtool failed for $file." }
         }
         'Thumbprint' {
-            & signtool sign /fd sha256 /tr $TimestampUrl /td sha256 `
+            & $signtool sign /fd sha256 /tr $TimestampUrl /td sha256 `
                 /sha1 $env:PATHVEER_SIGN_THUMBPRINT $file
             if ($LASTEXITCODE -ne 0) { throw "signtool failed for $file." }
         }
@@ -149,7 +160,7 @@ foreach ($file in $targets) {
             # public CA (a self-signed chain has no trusted timestamp authority),
             # and NEVER used for production publication — Publish-PathVeerRelease
             # hard-fails if dev signing is combined with a production environment.
-            & signtool sign /fd sha256 `
+            & $signtool sign /fd sha256 `
                 /sha1 $env:PATHVEER_DEV_CODESIGN_THUMBPRINT $file
             if ($LASTEXITCODE -ne 0) { throw "signtool failed for $file (dev certificate). Check PATHVEER_DEV_CODESIGN_THUMBPRINT and that the dev root is trusted." }
         }

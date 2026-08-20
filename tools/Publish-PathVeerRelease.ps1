@@ -64,6 +64,10 @@
 .EXAMPLE
     .\tools\Publish-PathVeerRelease.ps1 -ReleaseDirectory artifacts/releases/1.0.0/win-x64 -Channel stable -Environment staging -Backend Local -PublishRoot ./dist-out -PublicBaseUrl https://releases.pathveer.com -TrustedKeyBase64 "pv-meta-2026:<pub>" -WhatIf
 #>
+# PowerShell 7+ is required: this tool relies on AWS.Tools.S3 module behaviour
+# and PowerShell 7 syntax that are not available in Windows PowerShell 5.1.
+# Fail early with a clear message instead of a confusing later module error.
+#requires -Version 7
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]

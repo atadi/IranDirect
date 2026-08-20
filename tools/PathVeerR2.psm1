@@ -28,6 +28,10 @@
       * ETag is NOT treated as a content hash anywhere in this module.
         PathVeer's own SHA-256 is always authoritative.
 #>
+# PowerShell 7+ is required: this module relies on AWS.Tools.S3 and PowerShell 7
+# syntax. The #requires directive fails closed on Windows PowerShell 5.1 with a
+# clear message instead of a confusing module/syntax error.
+#requires -Version 7
 
 Set-StrictMode -Version Latest
 

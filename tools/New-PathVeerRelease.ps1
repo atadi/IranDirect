@@ -59,7 +59,17 @@ param(
     [string]$BaseUrl = 'https://releases.pathveer.com',
 
     [Parameter(Mandatory = $false)]
-    [string]$MetadataKeyId = 'pv-meta-prod-2026-01'
+    [string]$MetadataKeyId = 'pv-meta-prod-2026-01',
+
+    # Secure DPAPI-backed production metadata signing key store (produced by
+    # New-PathVeerMetadataKey.ps1). When set, Release/Signed reads the protected
+    # key blob (e.g. metadata-signing-pv-meta-prod-2026-01.xml) in-process and
+    # passes it directly to the signer; it is never placed in an environment
+    # variable or written to disk. Defaults to the documented PathVeer secrets
+    # directory. Development/Signed uses its own dev key and must NOT consume
+    # this production material.
+    [Parameter(Mandatory = $false)]
+    [string]$ProductionKeyStore = (Join-Path $env:LOCALAPPDATA 'PathVeer\Secrets')
 )
 
 Set-StrictMode -Version Latest
@@ -298,6 +308,7 @@ if ($SignedMode) {
     & pwsh -NoLogo -NoProfile -File $SignManifestStep `
         -ManifestPath $ManifestPath `
         -KeyId $MetadataKeyId `
+        -ProductionKeyStore $ProductionKeyStore `
         -FailIfUnavailable:$true
     if ($LASTEXITCODE -ne 0) { throw "Manifest signing failed (Release/Signed requires a metadata signing key)." }
 }

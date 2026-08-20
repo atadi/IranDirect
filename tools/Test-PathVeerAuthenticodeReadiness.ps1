@@ -79,12 +79,15 @@ elseif ($Pfx) {
     $PrivateKeyAccessible = 'loaded in-process at sign time'
 }
 
-# --- signtool detection -----------------------------------------------------
+# --- signtool detection (deterministic: prefer x64 SDK) --------------------
 $SigntoolPath = $null
-$st = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-if ($st) { $SigntoolPath = $st.FullName }
-elseif (Get-Command signtool -ErrorAction SilentlyContinue) { $SigntoolPath = 'on PATH' }
+try {
+    $SigntoolPath = & "$PSScriptRoot/Find-PathVeerSignTool.ps1"
+} catch {
+    if (Get-Command signtool -ErrorAction SilentlyContinue) {
+        $SigntoolPath = 'on PATH'
+    }
+}
 
 # --- Timestamp service ------------------------------------------------------
 $TimestampUrl = 'http://timestamp.digicert.com'   # RFC3161, SHA-256
