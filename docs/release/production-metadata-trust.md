@@ -61,7 +61,13 @@ variable to trust updates:
 
 Signing uses `Sign-ReleaseManifest.ps1` with `-ProductionKeyStore
 %LOCALAPPDATA%\PathVeer\Secrets`; `PATHVEER_META_SIGN_KEY` is not required and is
-not the recommended production path.
+not the recommended production path. `New-PathVeerRelease.ps1` now passes
+`-ProductionKeyStore` automatically for `Release/Signed` (Gap B closure), so the
+release pipeline reads the DPAPI-protected key in-process without an env var.
+
+The expected production publisher identity for installer Authenticode is owned
+solely by `PathVeer.Core.Update.ProductionSigningPolicy` (single authoritative
+source; not the manifest or R2). See `phase-B-production-release-readiness.md`.
 
 ## Staging vs production separation
 

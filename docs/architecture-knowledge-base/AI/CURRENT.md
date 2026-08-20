@@ -238,6 +238,76 @@ Detailed evidence belongs under `docs/release/`; do not duplicate it here.
 
 ---
 
+## Phase B — Production Release / Update Trust Hardening (engineering gaps CLOSED)
+
+The installer-certification slice is closed (devsign.10 CERTIFIED). Phase B
+closed the remaining **engineering** gaps required before an operator could
+build `1.0.0-rc.1` as the first production-trust release candidate. This is
+engineering readiness only — it does **NOT** authorize publication (see
+external blockers below).
+
+### What changed
+
+- **Gap A — update-apply pipeline is now real (not architecture-only).**
+  `PathVeer.Core.Update.UpdateApplyCoordinator` orchestrates the previously
+  document-only chain: manifest (already ES256-verified by `UpdateChecker`)
+  → bounded streaming download to a `.partial` file (never fully buffered in
+  RAM, size-bounded) → verify expected size + installer SHA-256 + production
+  Authenticode + expected publisher → atomic promote `.partial` → final →
+  re-verify final (TOCTOU closure). A failed verification never promotes and
+  never returns an executable path. The Tray now offers explicit, user-initiated
+  "Download and Install" and launches Setup via `UseShellExecute=true` (Setup's
+  own normal UAC flow); it never calls `Process.Start` on an unverified file.
+- **Production publisher policy has one authoritative home.**
+  `PathVeer.Core.Update.ProductionSigningPolicy` is the ONLY source of the
+  expected production publisher identity. It is NOT derived from the manifest,
+  R2, or any remote/env source. While `CurrentPublisher` is
+  `UNPROVISIONED`, every production installer signature check fails closed.
+  Provisioning = change one non-secret constant once the real certificate exists.
+- **Gap B — production ES256 DPAPI store is wired through the release
+  orchestrator.** `New-PathVeerRelease.ps1` now accepts `-ProductionKeyStore`
+  (default `%LOCALAPPDATA%\PathVeer\Secrets`) and passes it to
+  `Sign-ReleaseManifest.ps1` for `Release/Signed`, so signing reads the
+  protected DPAPI key blob in-process instead of requiring `PATHVEER_META_SIGN_KEY`.
+  Development keys remain strictly isolated.
+- **Gap C — signtool discovery is deterministic.** `tools/Find-PathVeerSignTool.ps1`
+  prefers the x64 SDK binary on a win-x64 host (never silently choosing arm64
+  due to enumeration order), honors an explicit `-ToolPath`, and fails cleanly
+  when absent. Wired into both `Sign-PathVeerArtifacts.ps1` and
+  `Test-PathVeerAuthenticodeReadiness.ps1`.
+- **PowerShell 7 prerequisite is explicit.** `Publish-PathVeerRelease.ps1` and
+  `PathVeerR2.psm1` now carry `#requires -Version 7` so AWS.Tools.S3 /
+  pwsh-7 syntax fails early on Windows PowerShell 5.1 instead of with a confusing
+  later error.
+
+### Readiness matrix
+
+```text
+R2 distribution                     READY (immutable, idempotent, channel-last)
+production ES256                   READY (pv-meta-prod-2026-01, built-in trust)
+release DPAPI integration          READY (wired through New-PathVeerRelease)
+update download/staging pipeline   READY (UpdateApplyCoordinator, verified)
+Authenticode enforcement (apply)   READY architecturally (UNPROVISIONED = fail-closed)
+production Authenticode cert       EXTERNAL BLOCKER (no cert provisioned)
+production publisher identity      WAITING ON REAL CERT / operator confirmation
+RIPEstat commercial terms          EXTERNAL BUSINESS/LEGAL BLOCKER
+rc.1 build                         NOT AUTHORIZED (do not build until cert ready)
+```
+
+### Security invariants (unchanged)
+
+- `ReleaseSignatureVerifier.ForProduction()` — built-in trust only, `allowUnsigned=false`.
+- `PATHVEER_TRUSTED_META_KEYS` never merged into production trust.
+- Production Windows update apply requires ALL: valid signed manifest, known
+  production ES256 key, expected installer size, installer SHA-256, valid
+  Authenticode trust chain, expected publisher policy. HTTPS/R2 is transport,
+  not the final trust authority.
+- No signing secrets in repo / logs / manifest / R2 / tests / CLI output.
+
+Detailed evidence: `docs/release/phase-B-production-release-readiness.md`.
+
+---
+
 ## Next Decision (awaiting explicit authorization)
 
 Installer certification is closed. The next action is **NOT automatically
