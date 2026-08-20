@@ -1,18 +1,32 @@
 <#
 .SYNOPSIS
-    Focused fail-closed test for production metadata DPAPI key-store wiring (Gap B).
+    Focused fail-closed test for production metadata DPAPI key-store wiring (Gap B)
+    AND metadata signing key-domain isolation.
 
 .DESCRIPTION
     Verifies New-PathVeerRelease.ps1 / Sign-ReleaseManifest.ps1 consume the
     secure DPAPI-backed production key store (metadata-signing-<KeyId>.xml)
-    instead of requiring PATHVEER_META_SIGN_KEY. Uses DISPOSABLE keys only; the
-    real production private key is never touched.
+    instead of requiring PATHVEER_META_SIGN_KEY, and that development and
+    production metadata keys are strictly isolated (no cross-trust-domain
+    fallback). Uses DISPOSABLE keys only; the real production/private keys are
+    never touched, printed, or referenced.
 
     A. disposable production key store present -> manifest signs successfully
        via the DPAPI store (no env var needed).
     B. missing store/key -> signing fails closed (no silent fallback to env).
-    C. dev keyId cannot consume a production store region (kept separate).
-    D. production keyId stays pv-meta-prod-2026-01 on the real pipeline.
+    C. DEVELOPMENT signing (KeyId pv-meta-dev-2026-01) CANNOT consume a
+       PRODUCTION key: a store containing ONLY a production-key-named file must
+       fail closed (never relabel the prod key as dev, never sign with prod
+       material).
+    D. PRODUCTION signing (KeyId pv-meta-prod-2026-01) CANNOT consume a
+       DEVELOPMENT key: a store containing ONLY a dev-key-named file must fail
+       closed (never fall back across trust domains).
+    E. the release orchestrator's production default remains pv-meta-prod-2026-01.
+
+    NOTE: the CRYPTO-layer isolation (a production verifier rejecting a
+    dev-signed manifest and vice versa) is covered by the C# tests
+    DevelopmentMetadataTrustTests / ProductionTrustTests; this script proves the
+    SIGNING-KEY-STORE selection layer.
 
 .EXAMPLE
     pwsh -NoProfile -File tools/Test-PathVeerReleaseKeyStore.ps1
@@ -50,43 +64,77 @@ function New-TestManifest {
 }
 
 $temp = Join-Path $env:TEMP ('PathVeer.KeyStoreTest.' + [guid]::NewGuid().ToString('N'))
-$store = Join-Path $temp 'secrets'
-New-Item -ItemType Directory -Force -Path $store | Out-Null
-$manifest = Join-Path $temp 'release-manifest.json'
-
 function Cleanup { if (Test-Path $temp) { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue } }
 Cleanup
-New-Item -ItemType Directory -Force -Path $store | Out-Null
+New-Item -ItemType Directory -Force -Path $temp | Out-Null
+
+# Ensure NO real or stray signing env keys leak into the test (fail-closed proof).
+$prevProd = $env:PATHVEER_META_SIGN_KEY
+$prevDev  = $env:PATHVEER_DEV_META_SIGN_KEY
+$env:PATHVEER_META_SIGN_KEY = $null
+$env:PATHVEER_DEV_META_SIGN_KEY = $null
 
 $ok = $true
 try {
     # --- A: disposable production key store signs successfully ----------------
+    $storeA = Join-Path $temp 'storeA'
+    New-Item -ItemType Directory -Force -Path $storeA | Out-Null
     $prodKeyId = 'pv-meta-prod-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-    Make-DisposableKeyXml -StoreDir $store -KeyId $prodKeyId | Out-Null
+    Make-DisposableKeyXml -StoreDir $storeA -KeyId $prodKeyId | Out-Null
+    $manifest = Join-Path $temp 'm-A.json'
     New-TestManifest -Path $manifest
-    # Ensure no prod env key is set so we prove the store path is used.
-    $prev = $env:PATHVEER_META_SIGN_KEY
-    try { $env:PATHVEER_META_SIGN_KEY = $null
-        & pwsh -NoLogo -NoProfile -File $SignScript -ManifestPath $manifest -KeyId $prodKeyId -ProductionKeyStore $store -FailIfUnavailable 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Error "FAIL A: signing via DPAPI store failed (exit $LASTEXITCODE)."; $ok = $false }
-        else { Write-Host "PASS A: manifest signed via disposable DPAPI production key store." -ForegroundColor Green }
-    } finally { $env:PATHVEER_META_SIGN_KEY = $prev }
+    & pwsh -NoLogo -NoProfile -File $SignScript -ManifestPath $manifest -KeyId $prodKeyId -ProductionKeyStore $storeA -FailIfUnavailable 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Error "FAIL A: signing via DPAPI store failed (exit $LASTEXITCODE)."; $ok = $false }
+    else { Write-Host "PASS A: manifest signed via disposable DPAPI production key store." -ForegroundColor Green }
 
     # --- B: missing store/key fails closed -----------------------------------
     $missing = Join-Path $temp 'empty-store'
     New-Item -ItemType Directory -Force -Path $missing | Out-Null
+    $manifest = Join-Path $temp 'm-B.json'
     New-TestManifest -Path $manifest
     & pwsh -NoLogo -NoProfile -File $SignScript -ManifestPath $manifest -KeyId 'pv-meta-prod-absent' -ProductionKeyStore $missing -FailIfUnavailable 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) { Write-Error "FAIL B: missing store did not fail closed (exit 0)."; $ok = $false }
     else { Write-Host "PASS B: missing production key store fails closed." -ForegroundColor Green }
 
-    # --- D: real production keyId constant referenced by the release tool -----
+    # --- C: dev KeyId CANNOT consume a PRODUCTION-only store ------------------
+    $storeC = Join-Path $temp 'storeC-prodOnly'
+    New-Item -ItemType Directory -Force -Path $storeC | Out-Null
+    # Store contains ONLY a production-key-named file.
+    Make-DisposableKeyXml -StoreDir $storeC -KeyId 'pv-meta-prod-2026-01' | Out-Null
+    $manifest = Join-Path $temp 'm-C.json'
+    New-TestManifest -Path $manifest
+    & pwsh -NoLogo -NoProfile -File $SignScript -ManifestPath $manifest -KeyId 'pv-meta-dev-2026-01' -ProductionKeyStore $storeC -FailIfUnavailable 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Error "FAIL C: development signing consumed a production key (exit 0)."
+        $ok = $false
+    } else { Write-Host "PASS C: development signing cannot consume production key material." -ForegroundColor Green }
+
+    # --- D: prod KeyId CANNOT consume a DEVELOPMENT-only store ----------------
+    $storeD = Join-Path $temp 'storeD-devOnly'
+    New-Item -ItemType Directory -Force -Path $storeD | Out-Null
+    # Store contains ONLY a dev-key-named file.
+    Make-DisposableKeyXml -StoreDir $storeD -KeyId 'pv-meta-dev-2026-01' | Out-Null
+    $manifest = Join-Path $temp 'm-D.json'
+    New-TestManifest -Path $manifest
+    & pwsh -NoLogo -NoProfile -File $SignScript -ManifestPath $manifest -KeyId 'pv-meta-prod-2026-01' -ProductionKeyStore $storeD -FailIfUnavailable 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Error "FAIL D: production signing consumed a development key (exit 0)."
+        $ok = $false
+    } else { Write-Host "PASS D: production signing cannot consume development key material." -ForegroundColor Green }
+
+    # --- E: release orchestrator production default unchanged -----------------
     $relScript = Join-Path $RepoRoot 'tools\New-PathVeerRelease.ps1'
     $content = Get-Content -Raw -LiteralPath $relScript
-    if ($content -notmatch 'pv-meta-prod-2026-01') { Write-Error "FAIL D: production keyId pv-meta-prod-2026-01 not referenced by release tool."; $ok = $false }
-    else { Write-Host "PASS D: release tool targets production keyId pv-meta-prod-2026-01." -ForegroundColor Green }
+    if ($content -notmatch 'pv-meta-prod-2026-01') {
+        Write-Error "FAIL E: production keyId pv-meta-prod-2026-01 not referenced by release tool."
+        $ok = $false
+    } else { Write-Host "PASS E: release production keyId remains pv-meta-prod-2026-01." -ForegroundColor Green }
 }
-finally { Cleanup }
+finally {
+    $env:PATHVEER_META_SIGN_KEY = $prevProd
+    $env:PATHVEER_DEV_META_SIGN_KEY = $prevDev
+    Cleanup
+}
 
 if (-not $ok) { exit 1 }
 Write-Host "ALL KEY-STORE TESTS PASSED." -ForegroundColor Green
