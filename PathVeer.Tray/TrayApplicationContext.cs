@@ -6,9 +6,11 @@ using PathVeer.Core.ServiceLifecycle;
 using PathVeer.Core.Update;
 using PathVeer.Core.Updates;
 using PathVeer.Core.Prefixes;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Security.Principal;
 using System.ServiceProcess;
 
@@ -676,6 +678,24 @@ finally
             var checker = new UpdateChecker(source, verifier, installed);
 
             var result = await checker.CheckAsync(UpdateChannel.Stable);
+
+            if (result.State == UpdateCheckState.UpdateAvailable && result.Manifest is not null)
+            {
+                // Explicit, user-initiated update flow. No background auto-install.
+                var offer = MessageBox.Show(
+                    "PathVeer " + result.Manifest.Version + " is available (you have " +
+                    (result.InstalledVersion?.ToString() ?? "unknown") + ").\n\n" +
+                    "Download and install now?",
+                    "PathVeer — app update",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (offer == DialogResult.Yes)
+                {
+                    await ApplyAppUpdateAsync(result.Manifest, result.Manifest.Version);
+                }
+                return;
+            }
+
             MessageBox.Show(
                 FormatAppUpdateResult(result),
                 "PathVeer — app update check",
@@ -698,6 +718,73 @@ finally
             SetBusy(false);
         }
     }
+
+    private async Task ApplyAppUpdateAsync(ReleaseManifest manifest, string version)
+    {
+        // Non-fatal: an update failure must never affect routing or crash the Tray.
+        try
+        {
+            SetBusy(true);
+
+            var staging = new UpdateStagingPaths();
+            var verifier = ProductionSigningPolicy.CreateInstallerVerifier();
+            var coordinator = new UpdateApplyCoordinator(UpdateHttpClient, staging, verifier);
+
+            var progress = new Progress<long>(_ => { });
+
+            var apply = await coordinator.ApplyAsync(manifest, progress);
+            if (!apply.Succeeded || apply.StagedInstallerPath is null)
+            {
+                MessageBox.Show(
+                    "The update could not be downloaded or verified: " + (apply.Error ?? "unknown error") +
+                    ".\n\nNo changes were made.",
+                    "PathVeer — app update",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Publisher policy is UNPROVISIONED until a real production Authenticode
+            // certificate exists, so the verifier above already failed closed. This
+            // branch is reachable only once a production publisher is provisioned.
+            // We still guard explicitly: never launch an unstaged file.
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = apply.StagedInstallerPath,
+                UseShellExecute = true
+                // Setup performs its own normal UAC elevation flow.
+            };
+            try
+            {
+                Process.Start(startInfo);
+            }
+            catch (Win32Exception ex)
+            {
+                MessageBox.Show(
+                    "The installer could not be started: " + ex.Message,
+                    "PathVeer — app update",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                "Unable to apply update: " + exception.Message,
+                "PathVeer — app update",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    // Shared, lazily-created HTTP client for update download.
+    private static HttpClient? _updateHttpClient;
+    private static HttpClient UpdateHttpClient =>
+        _updateHttpClient ??= new HttpClient { Timeout = TimeSpan.FromMinutes(15) };
 
     private static ReleaseSignatureVerifier BuildReleaseVerifier()
     {
