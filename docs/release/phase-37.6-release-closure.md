@@ -1,5 +1,7 @@
 # Phase 37.6 — Release Closure / Production Trust Provisioning / Disposable-VM Certification Execution
 
+> **Historical record.** This document captures the project state at the time of Phase 37.6. It is not the current PathVeer engineering-status authority. See `docs/architecture-knowledge-base/AI/CURRENT.md` for current state; see `certified-artifacts.md` for the artifact/freeze registry.
+
 **Date:** 2026-08-10
 **Starting boundary:** `44715b5` (Phase 37.5 closeout, branch `development/service-authority`)
 **Phase 37.5 decision:** CONDITIONALLY CERTIFIED — local non-destructive pipeline proven; VM GATE-1..12, real staging, production trust all outstanding.

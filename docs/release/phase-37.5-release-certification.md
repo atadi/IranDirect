@@ -1,5 +1,7 @@
 # Phase 37.5 — Release Certification / Production Trust / Disposable-VM Readiness
 
+> **Historical record.** This document captures the project state at the time of Phase 37.5. It is not the current PathVeer engineering-status authority. See `docs/architecture-knowledge-base/AI/CURRENT.md` for current state; see `certified-artifacts.md` for the artifact/freeze registry.
+
 **Date:** 2026-08-10
 **Starting boundary:** `de86cea` (Phase 37.4 closeout, branch `development/service-authority`)
 **Phase 37.4 decision:** CONDITIONAL PASS — implementation complete; production trust + hosting outstanding.

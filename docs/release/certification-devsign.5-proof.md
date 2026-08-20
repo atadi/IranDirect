@@ -1,5 +1,14 @@
 # PathVeer Installer Certification — devsign.5 (service-authority slice)
 
+> **Historical certification record.**
+>
+> This document captures the project state at the time of the devsign.5
+> certification slice. It is preserved as durable historical evidence for the
+> installer-certification lineage. It is not the current PathVeer
+> engineering-status authority. See
+> `docs/architecture-knowledge-base/AI/CURRENT.md` for current state. Freeze
+> status for the devsign series is tracked in `certified-artifacts.md`.
+
 Built from clean committed HEAD `67ca14c` on branch `development/service-authority`.
 
 Scope: tightly scoped PathVeer.Setup correctness slice. OUT OF SCOPE (untouched):

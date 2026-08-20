@@ -1,5 +1,16 @@
 # PathVeer Installer Certification — devsign.9 (service-authority slice)
 
+> **FROZEN FAILED REGRESSION SPECIMEN.**
+>
+> devsign.9 closed the progress-reader defect, but live operator testing
+> subsequently found: the Tray launched `Elevated=True` (the elevated Setup
+> child launched it), and same-version Repair failed while the old installed
+> Tray locked `Accessibility.dll`. Both defects were later closed in
+> devsign.10 (FROZEN regression specimen -> CERTIFIED Development/Signed).
+> The detailed evidence below is preserved as historical record; do not rewrite
+> the original findings. Current engineering state:
+> `docs/architecture-knowledge-base/AI/CURRENT.md`.
+
 Built from committed HEAD `ca3031f` on branch `development/service-authority`.
 Predecessors: devsign.8 (commit `c87dc36`, FROZEN regression specimen), devsign.7
 (`2881029`), devsign.6 (`61acb03`). devsign.6/7/8 were NOT modified or rebuilt.
