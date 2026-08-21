@@ -49,6 +49,7 @@ public sealed class TrayApplicationContext :
     private readonly ToolStripMenuItem _diagnosticsItem;
     private readonly ToolStripMenuItem _supportBundleItem;
     private readonly ToolStripMenuItem _logsItem;
+    private readonly ToolStripMenuItem _cloudItem;
     private readonly ToolStripMenuItem _countryItem;
 
     private readonly System.Windows.Forms.Timer _timer;
@@ -132,6 +133,8 @@ public sealed class TrayApplicationContext :
             SupportBundleMenuPolicy.MenuItemText);
         _logsItem = new ToolStripMenuItem(
             "Open Event Viewer");
+        _cloudItem = new ToolStripMenuItem(
+            "PathVeer Cloud...");
 
         _countryItem = new ToolStripMenuItem(
             "Direct country: Iran (IR)");
@@ -229,6 +232,9 @@ public sealed class TrayApplicationContext :
 
         _logsItem.Click += (_, _) => OpenEventViewer();
 
+        _cloudItem.Click += async (_, _) =>
+            await ShowCloudDialogAsync();
+
         exitItem.Click += (_, _) => ExitApplication();
 
         ContextMenuStrip menu = new();
@@ -256,6 +262,7 @@ public sealed class TrayApplicationContext :
         menu.Items.Add(_executionPreviewItem);
         menu.Items.Add(_diagnosticsItem);
         menu.Items.Add(_supportBundleItem);
+        menu.Items.Add(_cloudItem);
         menu.Items.Add(_logsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -311,6 +318,13 @@ public sealed class TrayApplicationContext :
 
     // Background waiter: a duplicate PathVeer.Tray launch sets the event; we
     // surface the existing Tray (balloon) on the UI thread.
+    private async Task ShowCloudDialogAsync()
+    {
+        using CloudDialog dialog = new();
+        dialog.ShowDialog();
+        await PollAsync();
+    }
+
     private void WaitForShowSignal()
     {
         var evt = _showEvent;
