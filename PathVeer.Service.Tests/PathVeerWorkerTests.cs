@@ -411,6 +411,7 @@ public sealed class IranDirectWorkerTests : IDisposable
                 null!, // DiagnosticCommandHandler
                 null!, // ExecutionPreviewCommandHandler
                 null!, // SupportBundleCommandHandler
+                null!, // CloudCommandHandler
                 NullLogger<NamedPipeCommandServer>.Instance)
         {
         }

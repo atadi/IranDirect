@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\PathVeer.Service\PathVeer.Service.csproj" />
     <ProjectReference Include="..\PathVeer.Core\PathVeer.Core.csproj" />
+    <ProjectReference Include="..\PathVeer.TestSupport\PathVeer.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

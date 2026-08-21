@@ -32,6 +32,7 @@ public class NamedPipeCommandServer
         _executionPreviewHandler;
     private readonly SupportBundleCommandHandler
         _supportBundleHandler;
+    private readonly CloudCommandHandler _cloud;
     private readonly ILogger<NamedPipeCommandServer> _logger;
 
     public NamedPipeCommandServer(
@@ -47,6 +48,7 @@ public class NamedPipeCommandServer
         DiagnosticCommandHandler diagnosticsHandler,
         ExecutionPreviewCommandHandler executionPreviewHandler,
         SupportBundleCommandHandler supportBundleHandler,
+        CloudCommandHandler cloud,
         ILogger<NamedPipeCommandServer> logger)
     {
         _controller = controller;
@@ -61,6 +63,7 @@ public class NamedPipeCommandServer
         _diagnosticsHandler = diagnosticsHandler;
         _executionPreviewHandler = executionPreviewHandler;
         _supportBundleHandler = supportBundleHandler;
+        _cloud = cloud;
         _logger = logger;
     }
 
@@ -376,6 +379,19 @@ public class NamedPipeCommandServer
                 _supportBundleHandler.ExportAsync(
                     request.Value ?? string.Empty,
                     cancellationToken),
+
+            PathVeerCommand.CloudEnroll =>
+                _cloud.EnrollAsync(
+                    request.Value,
+                    request.Description,
+                    force: request.Force,
+                    cancellationToken),
+
+            PathVeerCommand.CloudStatus =>
+                _cloud.StatusAsync(cancellationToken),
+
+            PathVeerCommand.CloudReset =>
+                _cloud.ResetAsync(cancellationToken),
 
             _ => Task.FromResult(
                 Failure(

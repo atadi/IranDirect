@@ -259,6 +259,7 @@ public sealed class PrefixUpdateCliRunnerTests
             PathVeerCommand command,
             string? value = null,
             string? description = null,
+            bool force = false,
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(

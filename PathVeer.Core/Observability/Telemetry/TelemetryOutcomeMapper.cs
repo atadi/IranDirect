@@ -146,6 +146,12 @@ public static class TelemetryOutcomeMapper
             nameof(PathVeerCommand.ExecutionPreview),
         PathVeerCommand.SupportBundleExport =>
             nameof(PathVeerCommand.SupportBundleExport),
+        PathVeerCommand.CloudEnroll =>
+            nameof(PathVeerCommand.CloudEnroll),
+        PathVeerCommand.CloudStatus =>
+            nameof(PathVeerCommand.CloudStatus),
+        PathVeerCommand.CloudReset =>
+            nameof(PathVeerCommand.CloudReset),
         _ => PathVeerTagValues.OutcomeUnknown,
     };
 }

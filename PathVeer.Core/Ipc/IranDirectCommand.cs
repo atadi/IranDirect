@@ -28,5 +28,8 @@ public enum PathVeerCommand
     RuntimeSnapshot,
     PrefixUpdateCheckNow,
     ExecutionPreview,
-    SupportBundleExport
+    SupportBundleExport,
+    CloudEnroll,
+    CloudStatus,
+    CloudReset
 }

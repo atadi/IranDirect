@@ -140,6 +140,7 @@ public sealed class ExecutionPreviewDialogTests
             PathVeerCommand command,
             string? value = null,
             string? description = null,
+            bool force = false,
             CancellationToken cancellationToken = default)
         {
             Commands.Add(command);

@@ -14,5 +14,6 @@ public enum FaultInjectionPoint
     RouteCreate,
     RouteDelete,
     SnapshotCapture,
-    DiagnosticsRun
+    DiagnosticsRun,
+    CloudHttp
 }

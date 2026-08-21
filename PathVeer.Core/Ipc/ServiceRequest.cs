@@ -10,4 +10,10 @@ public sealed record ServiceRequest
     public string? Value { get; init; }
 
     public string? Description { get; init; }
+
+    /// <summary>
+    /// Explicit operator intent flag. Used by Cloud re-enrollment to replace
+    /// an existing registration (conservative, never implicit).
+    /// </summary>
+    public bool Force { get; init; }
 }

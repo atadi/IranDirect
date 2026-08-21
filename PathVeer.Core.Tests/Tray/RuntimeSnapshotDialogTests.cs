@@ -74,6 +74,7 @@ public sealed class RuntimeSnapshotDialogTests
             PathVeerCommand command,
             string? value = null,
             string? description = null,
+            bool force = false,
             CancellationToken cancellationToken = default)
         {
             Commands.Add(command);

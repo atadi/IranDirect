@@ -282,6 +282,7 @@ public sealed class SupportBundleTrayFlowTests
             PathVeerCommand command,
             string? value = null,
             string? description = null,
+            bool force = false,
             CancellationToken cancellationToken = default)
         {
             CallCount++;
@@ -311,6 +312,7 @@ public sealed class SupportBundleTrayFlowTests
             PathVeerCommand command,
             string? value = null,
             string? description = null,
+            bool force = false,
             CancellationToken cancellationToken = default)
         {
             throw _exception;

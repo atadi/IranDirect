@@ -8,6 +8,7 @@ using PathVeer.Core.Routing;
 using PathVeer.Core.Vpn;
 using PathVeer.Core.Observability;
 using PathVeer.Core.Prefixes;
+using PathVeer.Core.Cloud;
 
 namespace PathVeer.Core.Ipc;
 
@@ -59,6 +60,12 @@ public sealed record ServiceResponse
     public string? SupportBundlePath { get; init; }
 
     public long? SupportBundleBytesWritten { get; init; }
+
+    /// <summary>
+    /// Local PathVeer Cloud registration status, returned to the Tray/UI.
+    /// The credential is deliberately NOT included.
+    /// </summary>
+    public CloudRegistrationView? CloudRegistration { get; init; }
 
     /// <summary>
     /// When a country-set command also triggered a prefix refresh, reports

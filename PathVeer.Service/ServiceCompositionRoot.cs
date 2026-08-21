@@ -21,6 +21,7 @@ using PathVeer.Core.State;
 using PathVeer.Core.Support;
 using PathVeer.Core.SystemTools;
 using PathVeer.Core.Vpn;
+using PathVeer.Core.Cloud;
 using PathVeer.Service.Ipc;
 using PathVeer.Service.Operations;
 using Microsoft.Extensions.Configuration;
@@ -484,6 +485,51 @@ public static class ServiceCompositionRoot
                     serviceProvider.GetRequiredService<
                         SupportSnapshotExporter>()));
         services.AddSingleton<SupportBundleCommandHandler>();
+
+        // ---- PathVeer Cloud (device enrollment + heartbeat) ----
+        // All Cloud state is machine-scoped and owned by the Service.
+        // The Tray/UI only forwards operator input; the Service performs
+        // the authoritative network exchange, encrypts the credential
+        // (DPAPI, LocalMachine), and persists it. Cloud NEVER mutates
+        // routing or desired configuration.
+        CloudOptions cloudOptions = new();
+        configuration.GetSection("Cloud").Bind(cloudOptions);
+        services.AddSingleton(cloudOptions);
+
+        services.AddSingleton<ICloudSecretProtector, PathVeer.Service.Cloud.WindowsDpapiCloudSecretProtector>();
+        services.AddSingleton(serviceProvider =>
+            new CloudRegistrationStore(
+                Path.Combine(dataDirectory, "cloud-registration.json"),
+                serviceProvider.GetRequiredService<ICloudSecretProtector>()));
+
+        services.AddHttpClient("pathveer-cloud")
+            .ConfigurePrimaryHttpMessageHandler(() =>
+                new HttpClientHandler
+                {
+                    // Never follow redirects: the Bearer device credential
+                    // must not be forwarded to a redirected host.
+                    AllowAutoRedirect = false
+                });
+        services.AddSingleton(serviceProvider =>
+        {
+            CloudOptions opts = serviceProvider.GetRequiredService<CloudOptions>();
+            HttpClient httpClient =
+                serviceProvider.GetRequiredService<IHttpClientFactory>()
+                    .CreateClient("pathveer-cloud");
+            // When Cloud is not configured, point at an unreachable https
+            // placeholder. The client still enforces https at construction;
+            // the heartbeat worker idles when BaseUrl is empty, and enroll
+            // calls surface a clear connectivity error instead of silently
+            // using staging.
+            string baseUrl = string.IsNullOrWhiteSpace(opts.BaseUrl)
+                ? "https://cloud.pathveer.invalid"
+                : opts.BaseUrl;
+            return new PathVeerCloudClient(baseUrl, httpClient);
+        });
+        services.AddSingleton<CloudEnrollmentCoordinator>();
+        services.AddSingleton<CloudCommandHandler>();
+        services.AddHostedService<PathVeer.Service.Cloud.CloudHeartbeatService>();
+
         services.AddSingleton<NamedPipeCommandServer>();
         services.AddHostedService<PathVeerWorker>();
 

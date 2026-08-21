@@ -6,5 +6,6 @@ public interface ICustomRouteCommandSender
         PathVeerCommand command,
         string? value = null,
         string? description = null,
+        bool force = false,
         CancellationToken cancellationToken = default);
 }

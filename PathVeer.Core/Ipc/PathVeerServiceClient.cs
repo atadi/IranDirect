@@ -25,13 +25,15 @@ public sealed class PathVeerServiceClient :
         PathVeerCommand command,
         string? value = null,
         string? description = null,
+        bool force = false,
         CancellationToken cancellationToken = default)
     {
         ServiceRequest request = new()
         {
             Command = command,
             Value = value,
-            Description = description
+            Description = description,
+            Force = force
         };
 
         string requestJson =

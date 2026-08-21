@@ -49,6 +49,7 @@ public sealed class IranDirectServiceClientConsumerTests
             PathVeerCommand command,
             string? value = null,
             string? description = null,
+            bool force = false,
             CancellationToken cancellationToken = default)
         {
             await Task.CompletedTask;
