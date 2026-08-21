@@ -489,18 +489,28 @@ public static class ServiceCompositionRoot
         // ---- PathVeer Cloud (device enrollment + heartbeat) ----
         // All Cloud state is machine-scoped and owned by the Service.
         // The Tray/UI only forwards operator input; the Service performs
-        // the authoritative network exchange, encrypts the credential
-        // (DPAPI, LocalMachine), and persists it. Cloud NEVER mutates
-        // routing or desired configuration.
+        // the authoritative network exchange, protects the credential with
+        // user-scoped DPAPI (CurrentUser under LocalSystem) into an
+        // ACL-hardened dedicated directory, and persists it. Cloud NEVER
+        // mutates routing or desired configuration.
         CloudOptions cloudOptions = new();
         configuration.GetSection("Cloud").Bind(cloudOptions);
         services.AddSingleton(cloudOptions);
 
         services.AddSingleton<ICloudSecretProtector, PathVeer.Service.Cloud.WindowsDpapiCloudSecretProtector>();
         services.AddSingleton(serviceProvider =>
-            new CloudRegistrationStore(
-                Path.Combine(dataDirectory, "cloud-registration.json"),
-                serviceProvider.GetRequiredService<ICloudSecretProtector>()));
+        {
+            // Dedicated, ACL-hardened subdirectory for the Cloud credential so
+            // the secret never shares the permissive %ProgramData%\PathVeer ACL.
+            // The directory is hardened at startup (Program.cs) and every
+            // persisted file is hardened via the onFilePersisted hook below.
+            string cloudDirectory = Path.Combine(dataDirectory, "cloud");
+
+            return new CloudRegistrationStore(
+                Path.Combine(cloudDirectory, "cloud-registration.json"),
+                serviceProvider.GetRequiredService<ICloudSecretProtector>(),
+                onFilePersisted: PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
+        });
 
         services.AddHttpClient("pathveer-cloud")
             .ConfigurePrimaryHttpMessageHandler(() =>

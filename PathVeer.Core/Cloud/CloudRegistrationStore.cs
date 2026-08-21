@@ -20,8 +20,10 @@ public sealed class CloudRegistrationStore :
     public CloudRegistrationStore(
         string statePath,
         ICloudSecretProtector protector,
-        IFaultInjectionPolicy? faultPolicy = null)
-        : base(statePath, faultPolicy: faultPolicy)
+        IFaultInjectionPolicy? faultPolicy = null,
+        Action<string>? onFilePersisted = null)
+        : base(statePath, faultPolicy: faultPolicy,
+              onFilePersisted: onFilePersisted)
     {
         ArgumentNullException.ThrowIfNull(protector);
         _protector = protector;

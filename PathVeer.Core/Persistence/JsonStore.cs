@@ -12,6 +12,7 @@ public class JsonStore<T>
     private readonly string _path;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly IFaultInjectionPolicy _faultPolicy;
+    private readonly Action<string>? _onFilePersisted;
 
     // Serializes all file access for this store instance. The atomic
     // write (tmp + File.Move overwrite) cannot replace the live file
@@ -22,7 +23,8 @@ public class JsonStore<T>
     public JsonStore(
         string path,
         JsonSerializerOptions? jsonOptions = null,
-        IFaultInjectionPolicy? faultPolicy = null)
+        IFaultInjectionPolicy? faultPolicy = null,
+        Action<string>? onFilePersisted = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -34,6 +36,7 @@ public class JsonStore<T>
                 WriteIndented = true
             };
         _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
+        _onFilePersisted = onFilePersisted;
     }
 
     public virtual async Task<T> LoadAsync(
@@ -199,6 +202,11 @@ public class JsonStore<T>
 
         Directory.CreateDirectory(directory);
 
+        // Give the persistence hook a chance to harden the directory so the
+        // temporary (pre-move) file also inherits the restricted ACL, closing
+        // the brief tmp-file window (requirement F).
+        _onFilePersisted?.Invoke(directory);
+
         string temporaryPath =
             _path + ".tmp";
 
@@ -231,6 +239,12 @@ public class JsonStore<T>
                     temporaryPath,
                     _path,
                     overwrite: true);
+
+                // Best-effort post-persistence hook (e.g. Windows ACL hardening
+                // of the final file). Runs after the atomic move so the live
+                // file's security descriptor is enforced before any reader sees
+                // it as "enrolled".
+                _onFilePersisted?.Invoke(_path);
 
                 return;
             }
