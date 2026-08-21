@@ -73,9 +73,21 @@ public sealed class CloudRegistrationMigrator
         // survive, so this is best-effort hardening, not a state change.
         CloudStateSecurity.SecureLegacyFileIfPresent(_legacyPath);
 
-        // Already on the new model (or never enrolled) -> nothing to do.
-        if (File.Exists(_newPath) && await NewLocationIsEnrolledAsync(cancellationToken))
+        // Decide whether the current (new-location) state is authoritative.
+        // Authority is NOT given by attacker-controlled JSON flags
+        // (IsEnrolled / State / DeviceId / OrganizationId / mere presence of a
+        // blob). A non-revoked current registration is authoritative ONLY if
+        // the Service can actually decrypt and use its CurrentUser credential.
+        // Otherwise an attacker-planted "Connected" document must not suppress
+        // a recoverable legacy registration.
+        bool currentAuthoritative =
+            await NewLocationIsAuthoritativeAsync(cancellationToken);
+
+        if (currentAuthoritative)
         {
+            // Genuine, usable CurrentUser registration already present: safe
+            // to no-op. (A 'Revoked' current record is non-authoritative here,
+            // so it never suppresses a recoverable legacy below.)
             return false;
         }
 
@@ -181,20 +193,51 @@ public sealed class CloudRegistrationMigrator
         return true;
     }
 
-    private async Task<bool> NewLocationIsEnrolledAsync(
+    private async Task<bool> NewLocationIsAuthoritativeAsync(
         CancellationToken cancellationToken)
     {
+        string? json;
         try
         {
-            string json = await File.ReadAllTextAsync(
+            json = await File.ReadAllTextAsync(
                 _newPath, cancellationToken);
-            var record = JsonSerializer.Deserialize<CloudRegistrationRecord>(
+        }
+        catch (IOException)
+        {
+            // Unreadable (missing, locked) -> not authoritative.
+            return false;
+        }
+
+        CloudRegistrationRecord? record;
+        try
+        {
+            record = JsonSerializer.Deserialize<CloudRegistrationRecord>(
                 json, s_jsonOptions);
-            return record is { IsEnrolled: true };
         }
         catch (JsonException)
         {
+            // Malformed current file -> not authoritative; a recoverable
+            // legacy registration (if any) must not be suppressed by it.
             return false;
         }
+
+        if (record is null)
+        {
+            return false;
+        }
+
+        // Revoked current state is intentionally credential-less and therefore
+        // non-authoritative; it must NOT suppress a recoverable legacy.
+        if (record.CredentialRevoked)
+        {
+            return false;
+        }
+
+        // The single authoritative test: can the Service actually decrypt and
+        // use the stored CurrentUser credential? This reuses the exact same
+        // definition used by CloudRegistrationStore, so JSON flags alone never
+        // grant authority.
+        return CloudRegistrationStore.IsUsableRegistration(
+            record, _protector);
     }
 }

@@ -12,7 +12,7 @@ namespace PathVeer.Service.Tests.Cloud;
 public sealed class CloudStoreSecurityContractTests
 {
     [Fact]
-    public void JsonStore_InvokesDistinctDirectoryAndFileCallbacks()
+    public async Task JsonStore_InvokesDistinctDirectoryAndFileCallbacks()
     {
         // Proves the directory-prepared callback (before .tmp) and the
         // file-persisted callback (after atomic move) are distinct and
@@ -32,13 +32,13 @@ public sealed class CloudStoreSecurityContractTests
                 onDirectoryPrepared: dirCalls.Enqueue,
                 onFilePersisted: fileCalls.Enqueue);
 
-            store.SaveAsync(
+            await store.SaveAsync(
                 new CloudRegistrationRecord
                 {
                     State = CloudConnectionState.Connected,
                     DeviceId = "d",
                     OrganizationId = "o"
-                }).GetAwaiter().GetResult();
+                });
 
             // The directory callback must have fired with the directory, and
             // the file callback with the final path — not the .tmp path.

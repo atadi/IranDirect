@@ -300,6 +300,466 @@ public sealed class CloudRegistrationMigratorTests
         }
     }
 
+    // ===================================================================
+    // Attacker-controlled current-location state must NOT suppress a
+    // recoverable legacy registration (the migrator-trusts-IsEnrolled bug).
+    // ===================================================================
+
+    [Fact]
+    public async Task MigrateAsync_PlantedCurrentConnectedGarbageCred_MigratesLegacy()
+    {
+        // Attacker pre-creates cloud/cloud-registration.json as "Connected"
+        // with a non-decryptable credential blob. A valid legacy exists.
+        // The migrator must NOT short-circuit on IsEnrolled=true; it must
+        // migrate the legacy credential.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            await File.WriteAllTextAsync(
+                newPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "attacker",
+                        OrganizationId = "attacker-org",
+                        CredentialProtectedBase64 = "!!!not-a-real-blob!!!",
+                        CredentialRevoked = false
+                    },
+                    JsonOptions()));
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            bool migrated = await migrator.MigrateAsync();
+
+            Assert.True(migrated,
+                "attacker-planted current state must not suppress legacy migration");
+            // Legacy removed only after successful migration.
+            Assert.False(File.Exists(legacyPath));
+
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            Assert.Equal("legacy-cred", await store.GetCredentialAsync());
+            Assert.True(await store.CanUseStoredCredentialAsync());
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_PlantedCurrentIsEnrolledMissingCred_MigratesLegacy()
+    {
+        // Attacker claims IsEnrolled=true but provides NO credential blob.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            await File.WriteAllTextAsync(
+                newPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "x",
+                        OrganizationId = "y",
+                        CredentialProtectedBase64 = null,
+                        CredentialRevoked = false
+                    },
+                    JsonOptions()));
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            Assert.True(await migrator.MigrateAsync());
+            Assert.False(File.Exists(legacyPath));
+
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            Assert.Equal("legacy-cred", await store.GetCredentialAsync());
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_PlantedCurrentArbitraryIds_MigratesLegacy()
+    {
+        // Arbitrary DeviceId/OrganizationId in the attacker JSON must not make
+        // the current state authoritative.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            await File.WriteAllTextAsync(
+                newPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "ATTACKER-DEVICE",
+                        OrganizationId = "ATTACKER-ORG",
+                        CredentialProtectedBase64 = "garbage",
+                        CredentialRevoked = false
+                    },
+                    JsonOptions()));
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            Assert.True(await migrator.MigrateAsync());
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            Assert.Equal("legacy-cred", await store.GetCredentialAsync());
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_UsableCurrentWinsNoReMigration()
+    {
+        // A genuinely usable CurrentUser current registration already exists
+        // (plus a leftover legacy). Migration must safely no-op; the legacy is
+        // NOT re-protected or deleted. Cloud is usable from current state.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            // Legitimate legacy for context.
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            // Genuine, usable CurrentUser current registration.
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            await store.SaveEnrolledAsync(
+                "device-current", "org-current", "current-cred", null,
+                DateTimeOffset.UtcNow);
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            Assert.False(await migrator.MigrateAsync(),
+                "usable current registration must no-op migration");
+
+            // Legacy left untouched (no destructive re-migration).
+            Assert.True(File.Exists(legacyPath));
+            Assert.Equal("current-cred", await store.GetCredentialAsync());
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_InvalidCurrentValidLegacy_ReplacesCurrentSafely()
+    {
+        // Malformed current file + valid legacy => current is replaced only
+        // after a successful legacy migration; legacy kept until then.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            await File.WriteAllTextAsync(newPath, "{ not json at all");
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            Assert.True(await migrator.MigrateAsync());
+            Assert.False(File.Exists(legacyPath));
+
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            Assert.Equal("legacy-cred", await store.GetCredentialAsync());
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_UnusableCurrent_ReplaceFails_LegacyIntact()
+    {
+        // Unusable current + valid legacy, but the re-protection fails: legacy
+        // must remain intact (failure during current-state replacement must
+        // not destroy recoverable legacy).
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            await File.WriteAllTextAsync(
+                newPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "x",
+                        OrganizationId = "y",
+                        CredentialProtectedBase64 = "garbage",
+                        CredentialRevoked = false
+                    },
+                    JsonOptions()));
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new FailingProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            await Assert.ThrowsAsync<CryptographicException>(
+                () => migrator.MigrateAsync());
+
+            Assert.True(File.Exists(legacyPath),
+                "legacy must remain intact when replacement fails");
+            Assert.True(File.Exists(newPath),
+                "unusable attacker current file stays; no fabricated state");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_UnusableCurrentNoLegacy_CloudNotUsable()
+    {
+        // Usable-less current + no legacy => Cloud is not reported usable;
+        // nothing fabricated; routing continues (no exception).
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            await File.WriteAllTextAsync(
+                newPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "x",
+                        OrganizationId = "y",
+                        CredentialProtectedBase64 = "garbage",
+                        CredentialRevoked = false
+                    },
+                    JsonOptions()));
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            // No legacy present -> nothing to migrate.
+            Assert.False(await migrator.MigrateAsync());
+
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            Assert.False(await store.CanUseStoredCredentialAsync());
+            Assert.Null(await store.GetCredentialAsync());
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_RevokedCurrentPlusValidLegacy_MigratesLegacy()
+    {
+        // Conservative precedence: a 'Revoked' current document (attacker or
+        // stale) must NOT suppress a recoverable Connected legacy. Because a
+        // revoked current record is intentionally credential-less, it is
+        // non-authoritative, so the legacy Connected credential is migrated.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            await File.WriteAllTextAsync(
+                newPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Revoked,
+                        DeviceId = "whatever",
+                        OrganizationId = "whatever",
+                        CredentialProtectedBase64 = null,
+                        CredentialRevoked = true
+                    },
+                    JsonOptions()));
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            Assert.True(await migrator.MigrateAsync(),
+                "revoked current must not suppress recoverable legacy");
+            Assert.False(File.Exists(legacyPath));
+
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            Assert.Equal("legacy-cred", await store.GetCredentialAsync());
+            Assert.True(await store.CanUseStoredCredentialAsync());
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_LegitimateRevokedCurrentNoLegacy_StaysRevoked()
+    {
+        // A legitimate revoked current registration with no legacy remains
+        // revoked and does not fabricate a usable credential.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            var store = new CloudRegistrationStore(
+                newPath, new WindowsDpapiCloudSecretProtector());
+            await store.MarkRevokedAsync();
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            Assert.False(await migrator.MigrateAsync());
+            Assert.False(await store.CanUseStoredCredentialAsync());
+            Assert.Null(await store.GetCredentialAsync());
+            CloudRegistrationView view = await store.GetViewAsync();
+            Assert.Equal(CloudConnectionState.Revoked, view.State);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     private sealed class FailingProtector : ICloudSecretProtector
     {
         public string Protect(string secret) =>

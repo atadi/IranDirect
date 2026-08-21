@@ -121,7 +121,7 @@ public sealed class CloudStateSecurityTests
     }
 
     [Fact]
-    public void EnsureSecured_HardensFilesCreatedInside()
+    public async Task EnsureSecured_HardensFilesCreatedInside()
     {
         string dir = NewTempDir();
         try
@@ -139,13 +139,13 @@ public sealed class CloudStateSecurityTests
                     PathVeer.Service.Cloud.CloudStateSecurity.HardenDirectory,
                 onFilePersisted:
                     PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
-            store.SaveAsync(
+            await store.SaveAsync(
                 new PathVeer.Core.Cloud.CloudRegistrationRecord
                 {
                     State = PathVeer.Core.Cloud.CloudConnectionState.Connected,
                     DeviceId = "dev",
                     OrganizationId = "org"
-                }).GetAwaiter().GetResult();
+                });
 
             Assert.True(File.Exists(finalFile));
             Assert.True(IsFileCanonical(finalFile),

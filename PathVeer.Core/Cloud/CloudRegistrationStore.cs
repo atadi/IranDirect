@@ -115,14 +115,54 @@ public sealed class CloudRegistrationStore :
     }
 
     /// <summary>
+    /// Authoritative measure of whether a Cloud registration is usable by the
+    /// Service: for a non-revoked record the credential blob must actually be
+    /// decryptable by the supplied protector. This is the SINGLE definition
+    /// used by both the runtime store (via <see cref="CanUseStoredCredentialAsync"/>)
+    /// and the migrator, so attacker-controlled JSON flags
+    /// (IsEnrolled / State / DeviceId / OrganizationId / mere presence of a
+    /// blob) are never treated as enrollment. A revoked record is explicitly
+    /// non-usable (it intentionally carries no credential).
+    /// </summary>
+    public static bool IsUsableRegistration(
+        CloudRegistrationRecord record,
+        ICloudSecretProtector protector)
+    {
+        if (record is null
+            || record.CredentialRevoked
+            || string.IsNullOrEmpty(record.CredentialProtectedBase64))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = protector.Unprotect(record.CredentialProtectedBase64);
+            return true;
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return false;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// True when the Service can actually decrypt and use the stored
     /// credential. This — not the on-disk IsEnrolled/State flags — is the
     /// authoritative measure of whether a Cloud registration is usable, so an
     /// attacker-created "Connected" document is not trusted on its own.
     /// </summary>
     public async Task<bool> CanUseStoredCredentialAsync(
-        CancellationToken cancellationToken = default) =>
-        (await GetCredentialAsync(cancellationToken)) is not null;
+        CancellationToken cancellationToken = default)
+    {
+        CloudRegistrationRecord record =
+            await LoadAsync(cancellationToken);
+        return IsUsableRegistration(record, _protector);
+    }
 
     /// <summary>
     /// Marks the credential revoked locally: clears the protected blob so no
