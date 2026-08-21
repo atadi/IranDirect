@@ -8,8 +8,15 @@ using Xunit;
 namespace PathVeer.Service.Tests.Cloud;
 
 /// <summary>
-/// Tests for the corrected JsonStore security callback contract and for
+/// Contract tests for the JsonStore security-callback boundary and for
 /// treating an attacker-planted "Connected" registration as unusable.
+///
+/// The actual filesystem persistence of the canonical SYSTEM-owned descriptor
+/// is proven by the separate LocalSystem integration tool
+/// (tools/certification/Test-PathVeerCloudStateSecurity.ps1). These unit
+/// tests verify the CALLBACK CONTRACT (distinct directory/file callbacks at
+/// the correct lifecycle points) and the USABILITY SEMANTICS without
+/// requiring LocalSystem/SeTakeOwnershipPrivilege on the runner.
 /// </summary>
 public sealed class CloudStoreSecurityContractTests
 {
@@ -20,7 +27,8 @@ public sealed class CloudStoreSecurityContractTests
         // file-persisted callback (after atomic move) are distinct and
         // receive the correct paths. The Cloud store wires the directory
         // callback to canonical directory hardening and the file callback to
-        // canonical file hardening.
+        // canonical file hardening; here we use recording stubs so the test
+        // runs under any runner (no SYSTEM-owner persistence required).
         var dirCalls = new ConcurrentQueue<string>();
         var fileCalls = new ConcurrentQueue<string>();
 
@@ -124,150 +132,14 @@ public sealed class CloudStoreSecurityContractTests
         }
     }
 
-    [Fact]
-    public async Task SaveAsync_ProducesSystemOwnedCanonicalFile()
+    private static string NewTempDir()
     {
-        if (!CanSetOwner) { Skip(); }
-        string dir = NewTempDir();
-        try
-        {
-            string finalPath = Path.Combine(dir, "cloud-registration.json");
-            var store = new CloudRegistrationStore(
-                finalPath,
-                new InMemoryCloudSecretProtector(),
-                onDirectoryPrepared:
-                    PathVeer.Service.Cloud.CloudStateSecurity.HardenDirectory,
-                onFilePersisted:
-                    PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
-
-            await store.SaveAsync(
-                new CloudRegistrationRecord
-                {
-                    State = CloudConnectionState.Connected,
-                    DeviceId = "d",
-                    OrganizationId = "o"
-                });
-
-            Assert.True(File.Exists(finalPath));
-            Assert.Equal(
-                new SecurityIdentifier(
-                    WellKnownSidType.LocalSystemSid, null),
-                GetOwner(finalPath));
-            Assert.True(CloudStateSecurity.IsSecured(dir));
-        }
-        finally
-        {
-            TryDelete(dir);
-        }
-    }
-
-    [Fact]
-    public async Task SaveAsync_HostileOwnedPreCreatedFile_BecomesSystemOwned()
-    {
-        if (!CanSetOwner) { Skip(); }
-        string dir = NewTempDir();
-        try
-        {
-            string finalPath = Path.Combine(dir, "cloud-registration.json");
-            // Attacker pre-created the file and owns it.
-            Directory.CreateDirectory(dir);
-            File.WriteAllText(finalPath, "{\"State\":1}");
-            SetOwner(finalPath,
-                new SecurityIdentifier(
-                    WellKnownSidType.BuiltinGuestsSid, null));
-            Assert.NotEqual(
-                new SecurityIdentifier(
-                    WellKnownSidType.LocalSystemSid, null),
-                GetOwner(finalPath));
-
-            var store = new CloudRegistrationStore(
-                finalPath,
-                new InMemoryCloudSecretProtector(),
-                onDirectoryPrepared:
-                    PathVeer.Service.Cloud.CloudStateSecurity.HardenDirectory,
-                onFilePersisted:
-                    PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
-
-            await store.SaveAsync(
-                new CloudRegistrationRecord
-                {
-                    State = CloudConnectionState.Connected,
-                    DeviceId = "d",
-                    OrganizationId = "o"
-                });
-
-            // After atomic save, the final file is SYSTEM-owned and canonical;
-            // the hostile owner did not survive (no implicit WRITE_DAC).
-            Assert.Equal(
-                new SecurityIdentifier(
-                    WellKnownSidType.LocalSystemSid, null),
-                GetOwner(finalPath));
-            Assert.True(CloudStateSecurity.IsSecured(dir));
-        }
-        finally
-        {
-            TryDelete(dir);
-        }
-    }
-
-    private static SecurityIdentifier GetOwner(string path)
-    {
-        var security = new FileInfo(path).GetAccessControl();
-        return security.GetOwner(typeof(SecurityIdentifier))
-            as SecurityIdentifier;
-    }
-
-    private static void SetOwner(string path, SecurityIdentifier sid)
-    {
-        var info = new FileInfo(path);
-        var security = info.GetAccessControl();
-        security.SetOwner(sid);
-        info.SetAccessControl(security);
-    }
-
-    private static void Skip() =>
-        throw new System.InvalidOperationException(
-            "Owner-canonicalization ownership assertions require the test "
-            + "runner to hold SeTakeOwnershipPrivilege (set SYSTEM owner). "
-            + "This privileged runner can, so the branch below is active; "
-            + "if a non-privileged runner reaches here, owner "
-            + "canonicalization must be covered by the LocalSystem "
-            + "certification run instead of faking success.");
-
-    private static readonly bool CanSetOwner = ProbeCanSetOwner();
-
-    private static bool ProbeCanSetOwner()
-    {
-        try
-        {
-            string probe = Path.Combine(
-                Path.GetTempPath(),
-                "pvcloud-ctr-ownprobe-" + Guid.NewGuid().ToString("N"));
-            File.WriteAllText(probe, "{}");
-            try
-            {
-                SetOwner(probe,
-                    new SecurityIdentifier(
-                        WellKnownSidType.LocalSystemSid, null));
-                return GetOwner(probe) ==
-                    new SecurityIdentifier(
-                        WellKnownSidType.LocalSystemSid, null);
-            }
-            finally
-            {
-                try { File.Delete(probe); } catch { }
-            }
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-
-    private static string NewTempDir() =>
-        Path.Combine(
+        string dir = Path.Combine(
             Path.GetTempPath(),
             "pvcloud-ctr-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
 
     private static string TempFile() =>
         Path.Combine(

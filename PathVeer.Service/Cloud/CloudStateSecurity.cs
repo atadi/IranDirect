@@ -1,7 +1,14 @@
 using System.IO;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
+
+// The unit-test assembly inspects the pure descriptor logic
+// (IsCanonicalSecurityDescriptor) without persisting SYSTEM ownership onto
+// real filesystem objects. No production behavior is exposed solely for tests.
+[assembly: InternalsVisibleTo("PathVeer.Service.Tests")]
 
 namespace PathVeer.Service.Cloud;
 
@@ -182,7 +189,36 @@ public static class CloudStateSecurity
         var info = new DirectoryInfo(cloudDirectory);
         var security = info.GetAccessControl();
 
-        if (!security.AreAccessRulesProtected)
+        // Pure descriptor check: the single definition of "canonical" used by
+        // both validation (here) and hardening (ApplyCanonicalAcl). An ordinary
+        // unit test can exercise this logic against a DirectorySecurity object
+        // without ever persisting SYSTEM ownership onto a real object.
+        return IsCanonicalSecurityDescriptor(security);
+    }
+
+    /// <summary>
+    /// Pure validation of a CANONICAL Cloud security descriptor. True only when:
+    /// inheritance is disabled; the OWNER is SYSTEM; and every discretionary
+    /// allow ACE is exactly one of the approved identities (SYSTEM,
+    /// Administrators) with FullControl. Any other allow ACE (Everyone,
+    /// Authenticated Users, BUILTIN\Users, an arbitrary user/group SID, CREATOR
+    /// OWNER) OR a non-SYSTEM owner makes this FALSE — the owner implicitly
+    /// holds WRITE_DAC and could rewrite the DACL even when no ACE grants them
+    /// access. This is the SINGLE definition of canonical, shared by
+    /// <see cref="IsSecured"/> and <see cref="ApplyCanonicalAcl"/>.
+    /// </summary>
+    /// <remarks>
+    /// Internal (not public) so unit tests can verify descriptor logic without
+    /// requiring LocalSystem/SeTakeOwnershipPrivilege on the runner. It does not
+    /// touch the filesystem.
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    internal static bool IsCanonicalSecurityDescriptor(
+        ObjectSecurity security)
+    {
+        var fsSecurity = (FileSystemSecurity)security;
+
+        if (!fsSecurity.AreAccessRulesProtected)
         {
             // Inheritance still enabled -> inherits the parent Users-read ACL.
             return false;
@@ -192,7 +228,7 @@ public static class CloudStateSecurity
         // when no ACE grants them access. For this Service-owned secret store
         // the authoritative owner is SYSTEM; any other owner (an ordinary
         // user, Administrators, CREATOR OWNER, arbitrary SID) is not trusted.
-        var owner = security.GetOwner(typeof(SecurityIdentifier))
+        var owner = fsSecurity.GetOwner(typeof(SecurityIdentifier))
             as SecurityIdentifier;
         if (owner == null || owner != s_system)
         {
@@ -203,7 +239,7 @@ public static class CloudStateSecurity
         bool adminFull = false;
 
         foreach (FileSystemAccessRule rule in
-                 security.GetAccessRules(
+                 fsSecurity.GetAccessRules(
                      includeExplicit: true,
                      includeInherited: true,
                      typeof(SecurityIdentifier)))

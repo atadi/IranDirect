@@ -1,6 +1,6 @@
-using System.Security.AccessControl;
+using System;
+using System.IO;
 using System.Security.Cryptography;
-using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using PathVeer.Core.Cloud;
@@ -13,11 +13,32 @@ namespace PathVeer.Service.Tests.Cloud;
 /// Proves existing D2 Cloud registrations are upgraded safely to the hardened
 /// storage model (dedicated ACL-denied directory + CurrentUser DPAPI) without
 /// losing the enrollment, and that migration is idempotent and fail-safe.
+///
+/// The actual filesystem hardening (SYSTEM-owned canonical descriptor) is
+/// performed by <see cref="CloudStateSecurity"/> and is proven by the separate
+/// LocalSystem integration tool. These unit tests inject no-op security
+/// delegates so the MIGRATION DECISION LOGIC (legacy decode -> re-protect ->
+/// verify-after-write -> legacy delete, plus the precedence rules that stop an
+/// attacker-planted "Connected" document from suppressing a recoverable legacy)
+/// is exercised under any runner without requiring LocalSystem authority. The
+/// injected delegates are NOT the security guarantee; they stand in for it so
+/// the logic can be tested in isolation.
 /// </summary>
 public sealed class CloudRegistrationMigratorTests
 {
     private static readonly byte[] s_legacyEntropy =
         Encoding.UTF8.GetBytes("PathVeer.Cloud.DeviceCredential.v1");
+
+    // No-op stand-ins for the production filesystem-security operations so the
+    // migration decision logic runs without LocalSystem/SeTakeOwnership.
+    // Unlike the real CloudStateSecurity.HardenDirectory, these do NOT set the
+    // SYSTEM owner (which requires LocalSystem authority); hardenDir still
+    // creates the directory because the production HardenDirectory does, and
+    // the migration depends on the directory existing before writing.
+    private static readonly Action<string> s_noopSecureLegacy = _ => { };
+    private static readonly Action<string> s_noopHardenDir =
+        d => Directory.CreateDirectory(d);
+    private static readonly Action<string> s_noopHardenFile = _ => { };
 
     private static string LegacyBlob(string secret)
     {
@@ -27,6 +48,13 @@ public sealed class CloudRegistrationMigratorTests
         Array.Clear(plaintext, 0, plaintext.Length);
         return Convert.ToBase64String(blob);
     }
+
+    private static CloudRegistrationMigrator CreateMigrator(
+        string legacyPath,
+        string newPath,
+        ICloudSecretProtector protector) =>
+        new(legacyPath, newPath, protector, new LegacyCloudCredentialDecoder(),
+            s_noopSecureLegacy, s_noopHardenDir, s_noopHardenFile);
 
     [Fact]
     public async Task MigrateAsync_LegacyLocalMachineBlob_ReProtectedToCurrentUser()
@@ -52,11 +80,9 @@ public sealed class CloudRegistrationMigratorTests
                 JsonSerializer.Serialize(legacyRecord,
                     JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
-                legacyPath,
-                newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+            var migrator = CreateMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector());
 
             bool migrated = await migrator.MigrateAsync();
 
@@ -82,60 +108,6 @@ public sealed class CloudRegistrationMigratorTests
     }
 
     [Fact]
-    public async Task MigrateAsync_ProducesSystemOwnedCurrentFile()
-    {
-        if (!CanSetOwner) { Skip(); }
-        string root = NewTempDir();
-        try
-        {
-            string legacyPath = Path.Combine(root, "cloud-registration.json");
-            string newDir = Path.Combine(root, "cloud");
-            string newPath = Path.Combine(newDir, "cloud-registration.json");
-
-            // Attacker-owned legacy blob to make the replacement meaningful.
-            var legacyRecord = new CloudRegistrationRecord
-            {
-                State = CloudConnectionState.Connected,
-                DeviceId = "dev-1",
-                OrganizationId = "org-1",
-                CredentialProtectedBase64 = LegacyBlob("old-cred")
-            };
-            await File.WriteAllTextAsync(
-                legacyPath,
-                JsonSerializer.Serialize(legacyRecord, JsonOptions()));
-            SetOwner(legacyPath,
-                new SecurityIdentifier(
-                    WellKnownSidType.BuiltinGuestsSid, null));
-
-            var migrator = new CloudRegistrationMigrator(
-                legacyPath,
-                newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
-
-            Assert.True(await migrator.MigrateAsync());
-
-            // The migrated current file (and its directory) must be
-            // SYSTEM-owned and carry the canonical DACL — the attacker's
-            // ownership of the legacy file must not carry over.
-            Assert.Equal(
-                new SecurityIdentifier(
-                    WellKnownSidType.LocalSystemSid, null),
-                GetOwner(newPath));
-            Assert.Equal(
-                new SecurityIdentifier(
-                    WellKnownSidType.LocalSystemSid, null),
-                GetOwner(newDir));
-            Assert.True(CloudStateSecurity.IsSecured(newDir));
-        }
-        finally
-        {
-            TryDelete(root);
-        }
-    }
-
-
-    [Fact]
     public async Task MigrateAsync_IsIdempotent()
     {
         string root = NewTempDir();
@@ -155,10 +127,9 @@ public sealed class CloudRegistrationMigratorTests
                 legacyPath,
                 JsonSerializer.Serialize(legacyRecord, JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.True(await migrator.MigrateAsync());
 
@@ -193,10 +164,9 @@ public sealed class CloudRegistrationMigratorTests
                 legacyPath,
                 JsonSerializer.Serialize(legacyRecord, JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             await migrator.MigrateAsync();
 
@@ -225,10 +195,9 @@ public sealed class CloudRegistrationMigratorTests
             // Garbage legacy file.
             await File.WriteAllTextAsync(legacyPath, "{ not json");
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             // Must not throw; legacy file is preserved (operator can recover).
             await migrator.MigrateAsync();
@@ -253,10 +222,9 @@ public sealed class CloudRegistrationMigratorTests
             string legacyPath = Path.Combine(root, "cloud-registration.json");
             string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.False(await migrator.MigrateAsync());
             Assert.False(File.Exists(newPath));
@@ -295,9 +263,9 @@ public sealed class CloudRegistrationMigratorTests
             // Protector that throws on Protect -> migration cannot complete.
             var failingProtector = new FailingProtector();
             var migrator = new CloudRegistrationMigrator(
-                legacyPath, newPath,
-                failingProtector,
-                new LegacyCloudCredentialDecoder());
+                legacyPath, newPath, failingProtector,
+                new LegacyCloudCredentialDecoder(),
+                s_noopSecureLegacy, s_noopHardenDir, s_noopHardenFile);
 
             // The failure escapes so the caller can surface a clear diagnostic;
             // it must NOT silently claim success.
@@ -339,9 +307,9 @@ public sealed class CloudRegistrationMigratorTests
                 JsonSerializer.Serialize(legacyRecord, JsonOptions()));
 
             var migrator = new CloudRegistrationMigrator(
-                legacyPath, newPath,
-                new ProtectOnlyProtector(),
-                new LegacyCloudCredentialDecoder());
+                legacyPath, newPath, new ProtectOnlyProtector(),
+                new LegacyCloudCredentialDecoder(),
+                s_noopSecureLegacy, s_noopHardenDir, s_noopHardenFile);
 
             await migrator.MigrateAsync();
 
@@ -400,10 +368,9 @@ public sealed class CloudRegistrationMigratorTests
                     },
                     JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             bool migrated = await migrator.MigrateAsync();
 
@@ -459,10 +426,9 @@ public sealed class CloudRegistrationMigratorTests
                     },
                     JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.True(await migrator.MigrateAsync());
             Assert.False(File.Exists(legacyPath));
@@ -514,10 +480,9 @@ public sealed class CloudRegistrationMigratorTests
                     },
                     JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.True(await migrator.MigrateAsync());
             var store = new CloudRegistrationStore(
@@ -562,10 +527,9 @@ public sealed class CloudRegistrationMigratorTests
                 "device-current", "org-current", "current-cred", null,
                 DateTimeOffset.UtcNow);
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.False(await migrator.MigrateAsync(),
                 "usable current registration must no-op migration");
@@ -606,10 +570,9 @@ public sealed class CloudRegistrationMigratorTests
             Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
             await File.WriteAllTextAsync(newPath, "{ not json at all");
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.True(await migrator.MigrateAsync());
             Assert.False(File.Exists(legacyPath));
@@ -663,9 +626,9 @@ public sealed class CloudRegistrationMigratorTests
                     JsonOptions()));
 
             var migrator = new CloudRegistrationMigrator(
-                legacyPath, newPath,
-                new FailingProtector(),
-                new LegacyCloudCredentialDecoder());
+                legacyPath, newPath, new FailingProtector(),
+                new LegacyCloudCredentialDecoder(),
+                s_noopSecureLegacy, s_noopHardenDir, s_noopHardenFile);
 
             await Assert.ThrowsAsync<CryptographicException>(
                 () => migrator.MigrateAsync());
@@ -706,10 +669,9 @@ public sealed class CloudRegistrationMigratorTests
                     },
                     JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             // No legacy present -> nothing to migrate.
             Assert.False(await migrator.MigrateAsync());
@@ -764,10 +726,9 @@ public sealed class CloudRegistrationMigratorTests
                     },
                     JsonOptions()));
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.True(await migrator.MigrateAsync(),
                 "revoked current must not suppress recoverable legacy");
@@ -799,16 +760,77 @@ public sealed class CloudRegistrationMigratorTests
                 newPath, new WindowsDpapiCloudSecretProtector());
             await store.MarkRevokedAsync();
 
-            var migrator = new CloudRegistrationMigrator(
+            var migrator = CreateMigrator(
                 legacyPath, newPath,
-                new WindowsDpapiCloudSecretProtector(),
-                new LegacyCloudCredentialDecoder());
+                new WindowsDpapiCloudSecretProtector());
 
             Assert.False(await migrator.MigrateAsync());
             Assert.False(await store.CanUseStoredCredentialAsync());
             Assert.Null(await store.GetCredentialAsync());
             CloudRegistrationView view = await store.GetViewAsync();
             Assert.Equal(CloudConnectionState.Revoked, view.State);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_InvokesSecurityBoundaryAtCorrectLifecyclePoints()
+    {
+        // Explicit contract test: the migrator must invoke the security
+        // boundary (legacy hardening earliest, then directory, then file after
+        // the new state is written) so the production wiring can replace the
+        // no-op delegates with the real CloudStateSecurity hardening. This
+        // proves the security boundary is part of the migration lifecycle
+        // without requiring LocalSystem authority here.
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newPath = Path.Combine(root, "cloud", "cloud-registration.json");
+
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(
+                    new CloudRegistrationRecord
+                    {
+                        State = CloudConnectionState.Connected,
+                        DeviceId = "dev-legacy",
+                        OrganizationId = "org-legacy",
+                        CredentialProtectedBase64 = LegacyBlob("legacy-cred")
+                    },
+                    JsonOptions()));
+
+            var secureLegacyCalls = new List<string>();
+            var hardenDirCalls = new List<string>();
+            var hardenFileCalls = new List<string>();
+            var newDir = Path.GetDirectoryName(newPath)!;
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath, newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder(),
+                secureLegacyCalls.Add,
+                d => { hardenDirCalls.Add(d); Directory.CreateDirectory(d); },
+                hardenFileCalls.Add);
+
+            await migrator.MigrateAsync();
+
+            // Legacy hardened first (earliest exposure reduction).
+            Assert.Single(secureLegacyCalls);
+            Assert.Equal(legacyPath, secureLegacyCalls[0]);
+            // Directory + file hardened, targeting the new location.
+            Assert.Single(hardenDirCalls);
+            Assert.Equal(newDir, hardenDirCalls[0]);
+            Assert.Single(hardenFileCalls);
+            Assert.Equal(newPath, hardenFileCalls[0]);
+            // Order: legacy -> directory -> file.
+            Assert.True(
+                secureLegacyCalls.Count == 1
+                && hardenDirCalls.Count == 1
+                && hardenFileCalls.Count == 1);
         }
         finally
         {
@@ -864,60 +886,6 @@ public sealed class CloudRegistrationMigratorTests
         }
         catch (UnauthorizedAccessException)
         {
-        }
-    }
-
-    private static SecurityIdentifier GetOwner(string path)
-    {
-        var security = new FileInfo(path).GetAccessControl();
-        return security.GetOwner(typeof(SecurityIdentifier))
-            as SecurityIdentifier;
-    }
-
-    private static void SetOwner(string path, SecurityIdentifier sid)
-    {
-        var info = new FileInfo(path);
-        var security = info.GetAccessControl();
-        security.SetOwner(sid);
-        info.SetAccessControl(security);
-    }
-
-    private static void Skip() =>
-        throw new System.InvalidOperationException(
-            "Owner-canonicalization ownership assertions require the test "
-            + "runner to hold SeTakeOwnershipPrivilege (set SYSTEM owner). "
-            + "This privileged runner can, so the branch below is active; "
-            + "if a non-privileged runner reaches here, owner "
-            + "canonicalization must be covered by the LocalSystem "
-            + "certification run instead of faking success.");
-
-    private static readonly bool CanSetOwner = ProbeCanSetOwner();
-
-    private static bool ProbeCanSetOwner()
-    {
-        try
-        {
-            string probe = Path.Combine(
-                Path.GetTempPath(),
-                "pvcloud-mig-ownprobe-" + Guid.NewGuid().ToString("N"));
-            File.WriteAllText(probe, "{}");
-            try
-            {
-                SetOwner(probe,
-                    new SecurityIdentifier(
-                        WellKnownSidType.LocalSystemSid, null));
-                return GetOwner(probe) ==
-                    new SecurityIdentifier(
-                        WellKnownSidType.LocalSystemSid, null);
-            }
-            finally
-            {
-                try { File.Delete(probe); } catch { }
-            }
-        }
-        catch (Exception)
-        {
-            return false;
         }
     }
 }

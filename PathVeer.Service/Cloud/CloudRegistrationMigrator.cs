@@ -42,21 +42,52 @@ public sealed class CloudRegistrationMigrator
     private readonly ICloudSecretProtector _protector;
     private readonly LegacyCloudCredentialDecoder _legacyDecoder;
 
+    // Filesystem-security operations. Defaults to the real production
+    // canonicalization so the migrator's actual deployed behavior is unchanged.
+    // A caller (e.g. a unit test without SeTakeOwnershipPrivilege) may inject
+    // substitutes so migration DECISION logic is exercised without requiring
+    // LocalSystem authority to persist SYSTEM ownership. The injected delegates
+    // are NOT the security guarantee — they only stand in for it under test.
+    private readonly Action<string> _secureLegacy;
+    private readonly Action<string> _hardenDirectory;
+    private readonly Action<string> _hardenFile;
+
     public CloudRegistrationMigrator(
         string legacyPath,
         string newPath,
         ICloudSecretProtector protector,
         LegacyCloudCredentialDecoder legacyDecoder)
+        : this(legacyPath, newPath, protector, legacyDecoder,
+               CloudStateSecurity.SecureLegacyFileIfPresent,
+               CloudStateSecurity.HardenDirectory,
+               CloudStateSecurity.HardenFile)
+    {
+    }
+
+    public CloudRegistrationMigrator(
+        string legacyPath,
+        string newPath,
+        ICloudSecretProtector protector,
+        LegacyCloudCredentialDecoder legacyDecoder,
+        Action<string> secureLegacy,
+        Action<string> hardenDirectory,
+        Action<string> hardenFile)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(legacyPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(newPath);
         ArgumentNullException.ThrowIfNull(protector);
         ArgumentNullException.ThrowIfNull(legacyDecoder);
+        ArgumentNullException.ThrowIfNull(secureLegacy);
+        ArgumentNullException.ThrowIfNull(hardenDirectory);
+        ArgumentNullException.ThrowIfNull(hardenFile);
 
         _legacyPath = legacyPath;
         _newPath = newPath;
         _protector = protector;
         _legacyDecoder = legacyDecoder;
+        _secureLegacy = secureLegacy;
+        _hardenDirectory = hardenDirectory;
+        _hardenFile = hardenFile;
     }
 
     /// <summary>
@@ -71,7 +102,7 @@ public sealed class CloudRegistrationMigrator
         // possible, before any other work. The migration still must complete
         // (the blob remains decryptable by LocalSystem) for the credential to
         // survive, so this is best-effort hardening, not a state change.
-        CloudStateSecurity.SecureLegacyFileIfPresent(_legacyPath);
+        _secureLegacy(_legacyPath);
 
         // Decide whether the current (new-location) state is authoritative.
         // Authority is NOT given by attacker-controlled JSON flags
@@ -144,7 +175,7 @@ public sealed class CloudRegistrationMigrator
         string? newDir = Path.GetDirectoryName(_newPath);
         if (!string.IsNullOrEmpty(newDir))
         {
-            CloudStateSecurity.HardenDirectory(newDir);
+            _hardenDirectory(newDir);
         }
 
         await File.WriteAllTextAsync(
@@ -157,7 +188,7 @@ public sealed class CloudRegistrationMigrator
         // the ordinary-user read boundary intact post-migration.
         try
         {
-            CloudStateSecurity.HardenFile(_newPath);
+            _hardenFile(_newPath);
         }
         catch (UnauthorizedAccessException)
         {
