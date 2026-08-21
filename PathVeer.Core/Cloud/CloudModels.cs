@@ -106,4 +106,12 @@ public sealed record CloudRegistrationView
     public DateTimeOffset? EnrolledAtUtc { get; init; }
     public DateTimeOffset? LastHeartbeatUtc { get; init; }
     public bool HasCredential { get; init; }
+
+    /// <summary>
+    /// True only when the Service can actually decrypt and use the stored
+    /// credential. Derived from a real decryption attempt, not from the
+    /// on-disk State/IsEnrolled flags, so an attacker-created "Connected"
+    /// document is not reported as usable.
+    /// </summary>
+    public bool HasUsableCredential { get; init; }
 }

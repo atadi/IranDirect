@@ -66,6 +66,13 @@ public sealed class CloudRegistrationMigrator
     public async Task<bool> MigrateAsync(
         CancellationToken cancellationToken = default)
     {
+        // Reduce exposure of the original vulnerable LocalMachine blob: deny
+        // ordinary users read access to the legacy bytes as early as safely
+        // possible, before any other work. The migration still must complete
+        // (the blob remains decryptable by LocalSystem) for the credential to
+        // survive, so this is best-effort hardening, not a state change.
+        CloudStateSecurity.SecureLegacyFileIfPresent(_legacyPath);
+
         // Already on the new model (or never enrolled) -> nothing to do.
         if (File.Exists(_newPath) && await NewLocationIsEnrolledAsync(cancellationToken))
         {
@@ -119,12 +126,13 @@ public sealed class CloudRegistrationMigrator
         }
 
         // Persist into the new, hardened location. The directory ACL is applied
-        // separately by CloudStateSecurity.EnsureSecured before this runs, but
-        // create it defensively here in case migration runs before hardening.
+        // separately by CloudStateSecurity.HardenDirectory before this runs
+        // (onDirectoryPrepared callback), but create + harden it defensively
+        // here in case migration runs before that.
         string? newDir = Path.GetDirectoryName(_newPath);
         if (!string.IsNullOrEmpty(newDir))
         {
-            Directory.CreateDirectory(newDir);
+            CloudStateSecurity.HardenDirectory(newDir);
         }
 
         await File.WriteAllTextAsync(
@@ -133,8 +141,8 @@ public sealed class CloudRegistrationMigrator
             cancellationToken);
 
         // Harden the migrated file explicitly: it is written directly (not via
-        // the store's post-write hook), so apply the dedicated-directory ACL
-        // here to keep the ordinary-user read boundary intact post-migration.
+        // the store's post-write hook), so apply the canonical ACL here to keep
+        // the ordinary-user read boundary intact post-migration.
         try
         {
             CloudStateSecurity.HardenFile(_newPath);
@@ -143,6 +151,29 @@ public sealed class CloudRegistrationMigrator
         {
             // Hardening is defense-in-depth; the CurrentUser DPAPI scope remains
             // the primary boundary. Do not lose the enrollment over an ACL set.
+        }
+
+        // Verify the new state is actually usable (decryptable by the current
+        // protector) before declaring success. If it is not, remove the new
+        // file so we do NOT leave a fabricated/non-functional registration and
+        // do NOT delete the legacy file — next start retries safely.
+        if (!string.IsNullOrEmpty(legacy.CredentialProtectedBase64)
+            && !legacy.CredentialRevoked)
+        {
+            try
+            {
+                _ = _protector.Unprotect(legacy.CredentialProtectedBase64);
+            }
+            catch (CryptographicException)
+            {
+                File.Delete(_newPath);
+                return false;
+            }
+            catch (FormatException)
+            {
+                File.Delete(_newPath);
+                return false;
+            }
         }
 
         // Only now is it safe to remove the legacy file.

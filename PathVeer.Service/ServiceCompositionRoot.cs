@@ -509,7 +509,10 @@ public static class ServiceCompositionRoot
             return new CloudRegistrationStore(
                 Path.Combine(cloudDirectory, "cloud-registration.json"),
                 serviceProvider.GetRequiredService<ICloudSecretProtector>(),
-                onFilePersisted: PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
+                onDirectoryPrepared:
+                    PathVeer.Service.Cloud.CloudStateSecurity.HardenDirectory,
+                onFilePersisted:
+                    PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
         });
 
         services.AddHttpClient("pathveer-cloud")

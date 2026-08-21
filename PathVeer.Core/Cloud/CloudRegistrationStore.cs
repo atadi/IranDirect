@@ -21,8 +21,10 @@ public sealed class CloudRegistrationStore :
         string statePath,
         ICloudSecretProtector protector,
         IFaultInjectionPolicy? faultPolicy = null,
+        Action<string>? onDirectoryPrepared = null,
         Action<string>? onFilePersisted = null)
         : base(statePath, faultPolicy: faultPolicy,
+              onDirectoryPrepared: onDirectoryPrepared,
               onFilePersisted: onFilePersisted)
     {
         ArgumentNullException.ThrowIfNull(protector);
@@ -76,7 +78,11 @@ public sealed class CloudRegistrationStore :
 
     /// <summary>
     /// Recovers the raw credential for use by the heartbeat loop. Returns null
-    /// if no credential is held (not enrolled, revoked, or failed).
+    /// if no credential is held (not enrolled, revoked, failed, or the stored
+    /// blob is undecryptable). A blob the LocalSystem Service cannot actually
+    /// decrypt (corrupt, wrong DPAPI scope, or an attacker-planted document)
+    /// is treated as no credential — validity is tied to what the Service can
+    /// use, not to attacker-controlled JSON flags.
     /// </summary>
     public async Task<string?> GetCredentialAsync(
         CancellationToken cancellationToken = default)
@@ -91,9 +97,32 @@ public sealed class CloudRegistrationStore :
             return null;
         }
 
-        return _protector.Unprotect(
-            record.CredentialProtectedBase64);
+        try
+        {
+            return _protector.Unprotect(
+                record.CredentialProtectedBase64);
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            // Stored blob is unusable. Do not trust it; report no credential.
+            return null;
+        }
+        catch (FormatException)
+        {
+            // Malformed protected representation. Same handling.
+            return null;
+        }
     }
+
+    /// <summary>
+    /// True when the Service can actually decrypt and use the stored
+    /// credential. This — not the on-disk IsEnrolled/State flags — is the
+    /// authoritative measure of whether a Cloud registration is usable, so an
+    /// attacker-created "Connected" document is not trusted on its own.
+    /// </summary>
+    public async Task<bool> CanUseStoredCredentialAsync(
+        CancellationToken cancellationToken = default) =>
+        (await GetCredentialAsync(cancellationToken)) is not null;
 
     /// <summary>
     /// Marks the credential revoked locally: clears the protected blob so no
@@ -163,13 +192,20 @@ public sealed class CloudRegistrationStore :
     }
 
     /// <summary>
-    /// Returns a safe, credential-free view for the UI.
+    /// Returns a safe, credential-free view for the UI. Usability
+    /// (HasUsableCredential) is derived from whether the Service can actually
+    /// decrypt the stored blob — not from attacker-controlled JSON flags —
+    /// so a planted "Connected" document is reflected honestly.
     /// </summary>
     public async Task<CloudRegistrationView> GetViewAsync(
         CancellationToken cancellationToken = default)
     {
         CloudRegistrationRecord record =
             await LoadAsync(cancellationToken);
+
+        bool hasBlob = !string.IsNullOrEmpty(
+                record.CredentialProtectedBase64)
+            && !record.CredentialRevoked;
 
         return new CloudRegistrationView
         {
@@ -179,9 +215,9 @@ public sealed class CloudRegistrationStore :
             DeviceLabel = record.DeviceLabel,
             EnrolledAtUtc = record.EnrolledAtUtc,
             LastHeartbeatUtc = record.LastHeartbeatUtc,
-            HasCredential = !string.IsNullOrEmpty(
-                record.CredentialProtectedBase64)
-                && !record.CredentialRevoked
+            HasCredential = hasBlob,
+            HasUsableCredential = hasBlob
+                && await CanUseStoredCredentialAsync(cancellationToken)
         };
     }
 }

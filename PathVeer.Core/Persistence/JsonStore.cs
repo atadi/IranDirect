@@ -12,6 +12,7 @@ public class JsonStore<T>
     private readonly string _path;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly IFaultInjectionPolicy _faultPolicy;
+    private readonly Action<string>? _onDirectoryPrepared;
     private readonly Action<string>? _onFilePersisted;
 
     // Serializes all file access for this store instance. The atomic
@@ -24,6 +25,7 @@ public class JsonStore<T>
         string path,
         JsonSerializerOptions? jsonOptions = null,
         IFaultInjectionPolicy? faultPolicy = null,
+        Action<string>? onDirectoryPrepared = null,
         Action<string>? onFilePersisted = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -36,6 +38,7 @@ public class JsonStore<T>
                 WriteIndented = true
             };
         _faultPolicy = faultPolicy ?? FaultInjectionPolicy.Never;
+        _onDirectoryPrepared = onDirectoryPrepared;
         _onFilePersisted = onFilePersisted;
     }
 
@@ -202,10 +205,11 @@ public class JsonStore<T>
 
         Directory.CreateDirectory(directory);
 
-        // Give the persistence hook a chance to harden the directory so the
-        // temporary (pre-move) file also inherits the restricted ACL, closing
-        // the brief tmp-file window (requirement F).
-        _onFilePersisted?.Invoke(directory);
+        // Prepare/harden the directory BEFORE the temporary (pre-move) file is
+        // created, so the .tmp file inherits only the approved security
+        // boundary and there is no readable tmp-file window for an ordinary
+        // user (required by the Cloud credential storage contract).
+        _onDirectoryPrepared?.Invoke(directory);
 
         string temporaryPath =
             _path + ".tmp";

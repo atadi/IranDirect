@@ -6,66 +6,85 @@ using Xunit;
 namespace PathVeer.Service.Tests.Cloud;
 
 /// <summary>
-/// Exercises the on-disk security boundary for the Cloud credential:
-/// the dedicated directory must deny ordinary users read access, retain
-/// SYSTEM + Administrators, and harden files created inside it (including the
-/// atomic tmp file and any pre-placed permissive file).
+/// Exercises the CANONICAL on-disk security boundary for the Cloud credential.
+///
+/// The dedicated directory/file DACL must contain ONLY the approved
+/// identities (NT AUTHORITY\SYSTEM + BUILTIN\Administrators, FullControl) and
+/// NO other discretionary access ACEs. This is enforced by RESETTING the DACL
+/// to the allow-list, so any attacker-inserted ACE (Everyone, Authenticated
+/// Users, BUILTIN\Users, arbitrary user/group SID, CREATOR OWNER) is erased,
+/// and IsSecured() returns FALSE whenever any unauthorized ACE survives.
 /// </summary>
 public sealed class CloudStateSecurityTests
 {
     private static readonly SecurityIdentifier s_users =
         new(WellKnownSidType.BuiltinUsersSid, null);
+    private static readonly SecurityIdentifier s_everyone =
+        new(WellKnownSidType.WorldSid, null);
+    private static readonly SecurityIdentifier s_authenticatedUsers =
+        new(WellKnownSidType.AuthenticatedUserSid, null);
+    private static readonly SecurityIdentifier s_creatorOwner =
+        new(WellKnownSidType.CreatorOwnerSid, null);
+    private static readonly SecurityIdentifier s_system =
+        new(WellKnownSidType.LocalSystemSid, null);
+    private static readonly SecurityIdentifier s_administrators =
+        new(WellKnownSidType.BuiltinAdministratorsSid, null);
+
+    // An ordinary, non-privileged local account SID used to simulate an
+    // attacker-inserted explicit ACE.
+    private static readonly SecurityIdentifier s_arbitraryUser =
+        new(WellKnownSidType.BuiltinGuestsSid, null);
 
     [Fact]
-    public void EnsureSecured_RemovesUsersAndKeepsSystemAdmin()
+    public void EnsureSecured_RemovesEveryoneAuthenticatedUsersUsersArbitrarySids()
     {
+        // Simulate an attacker (or permissive default) who pre-created the
+        // directory with explicit ALLOW ACEs for several non-approved
+        // identities BEFORE the Service hardened it.
         string dir = NewTempDir();
         try
         {
+            var info = new DirectoryInfo(dir);
+            var security = info.GetAccessControl();
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_authenticatedUsers, FileSystemRights.Read,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_users, FileSystemRights.Read,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_arbitraryUser, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_creatorOwner, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            info.SetAccessControl(security);
+
             CloudStateSecurity.EnsureSecured(dir);
 
-            Assert.True(CloudStateSecurity.IsSecured(dir));
+            Assert.True(CloudStateSecurity.IsSecured(dir),
+                "after hardening, no unauthorized ACE may survive");
 
-            var security = new DirectoryInfo(dir).GetAccessControl();
-            Assert.True(security.AreAccessRulesProtected,
-                "inheritance must be disabled so parent Users-read ACL is not inherited");
-
-            bool usersRead = false;
-            bool systemFull = false;
-            bool adminFull = false;
-            foreach (FileSystemAccessRule rule in security.GetAccessRules(
-                         true, false, typeof(SecurityIdentifier)))
-            {
-                if (rule.AccessControlType != AccessControlType.Allow)
-                {
-                    continue;
-                }
-
-                var sid = (SecurityIdentifier)rule.IdentityReference;
-                if (sid == s_users
-                    && (rule.FileSystemRights & FileSystemRights.Read) != 0)
-                {
-                    usersRead = true;
-                }
-                else if (sid == new SecurityIdentifier(
-                             WellKnownSidType.LocalSystemSid, null)
-                         && rule.FileSystemRights.HasFlag(
-                             FileSystemRights.FullControl))
-                {
-                    systemFull = true;
-                }
-                else if (sid == new SecurityIdentifier(
-                             WellKnownSidType.BuiltinAdministratorsSid, null)
-                         && rule.FileSystemRights.HasFlag(
-                             FileSystemRights.FullControl))
-                {
-                    adminFull = true;
-                }
-            }
-
-            Assert.False(usersRead, "BUILTIN\\Users must not have read access");
-            Assert.True(systemFull, "SYSTEM must retain FullControl");
-            Assert.True(adminFull, "Administrators must retain FullControl");
+            Assert.False(HasAllow(dir, s_everyone));
+            Assert.False(HasAllow(dir, s_authenticatedUsers));
+            Assert.False(HasAllow(dir, s_users));
+            Assert.False(HasAllow(dir, s_arbitraryUser));
+            Assert.False(HasAllow(dir, s_creatorOwner));
+            Assert.True(HasAllowFull(dir, s_system));
+            Assert.True(HasAllowFull(dir, s_administrators));
         }
         finally
         {
@@ -80,10 +99,20 @@ public sealed class CloudStateSecurityTests
         try
         {
             CloudStateSecurity.EnsureSecured(dir);
-            // Second call must not throw and must keep the boundary intact.
+            // Inject an attacker ACE between calls, then re-harden.
+            var info = new DirectoryInfo(dir);
+            var security = info.GetAccessControl();
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.Read,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            info.SetAccessControl(security);
+
             CloudStateSecurity.EnsureSecured(dir);
 
             Assert.True(CloudStateSecurity.IsSecured(dir));
+            Assert.False(HasAllow(dir, s_everyone));
         }
         finally
         {
@@ -99,15 +128,17 @@ public sealed class CloudStateSecurityTests
         {
             CloudStateSecurity.EnsureSecured(dir);
 
-            // Simulate the atomic JSON store writing into the hardened dir:
-            // the persisted file (final, post-move) must NOT be readable by
-            // Users. We exercise the real store so the post-write hardening
-            // hook fires.
+            // Exercise the real store so the directory-prepared callback
+            // fires (canonical dir before tmp) and the post-move file callback
+            // fires (canonical final file).
             string finalFile = Path.Combine(dir, "cloud-registration.json");
             var store = new PathVeer.Core.Cloud.CloudRegistrationStore(
                 finalFile,
                 new PathVeer.Core.Cloud.InMemoryCloudSecretProtector(),
-                onFilePersisted: PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
+                onDirectoryPrepared:
+                    PathVeer.Service.Cloud.CloudStateSecurity.HardenDirectory,
+                onFilePersisted:
+                    PathVeer.Service.Cloud.CloudStateSecurity.HardenFile);
             store.SaveAsync(
                 new PathVeer.Core.Cloud.CloudRegistrationRecord
                 {
@@ -117,23 +148,9 @@ public sealed class CloudStateSecurityTests
                 }).GetAwaiter().GetResult();
 
             Assert.True(File.Exists(finalFile));
-
-            var security = new FileInfo(finalFile).GetAccessControl();
-            bool usersRead = false;
-            foreach (FileSystemAccessRule rule in security.GetAccessRules(
-                         true, false, typeof(SecurityIdentifier)))
-            {
-                if (rule.AccessControlType == AccessControlType.Allow
-                    && (SecurityIdentifier)rule.IdentityReference == s_users
-                    && (rule.FileSystemRights & FileSystemRights.Read) != 0)
-                {
-                    usersRead = true;
-                }
-            }
-
-            Assert.False(usersRead,
-                "a file written inside the hardened dir must not grant Users read");
-            Assert.True(security.AreAccessRulesProtected);
+            Assert.True(IsFileCanonical(finalFile),
+                "a file written inside the hardened dir must carry the " +
+                "canonical DACL (SYSTEM + Administrators only)");
         }
         finally
         {
@@ -147,30 +164,21 @@ public sealed class CloudStateSecurityTests
         string dir = NewTempDir();
         try
         {
-            // Create a file with default (inherited/permissive) ACL BEFORE
-            // hardening the directory, simulating a legacy state file that an
-            // ordinary user may have been able to read.
+            // Pre-place a file with a hostile explicit ACE before hardening.
             string file = Path.Combine(dir, "legacy.json");
             File.WriteAllText(file, "{}");
-            Assert.False(CloudStateSecurity.IsSecured(dir));
+            var info = new FileInfo(file);
+            var security = info.GetAccessControl();
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.FullControl,
+                AccessControlType.Allow));
+            info.SetAccessControl(security);
 
             CloudStateSecurity.EnsureSecured(dir);
 
-            var security = new FileInfo(file).GetAccessControl();
-            bool usersRead = false;
-            foreach (FileSystemAccessRule rule in security.GetAccessRules(
-                         true, false, typeof(SecurityIdentifier)))
-            {
-                if (rule.AccessControlType == AccessControlType.Allow
-                    && (SecurityIdentifier)rule.IdentityReference == s_users
-                    && (rule.FileSystemRights & FileSystemRights.Read) != 0)
-                {
-                    usersRead = true;
-                }
-            }
-
-            Assert.False(usersRead,
-                "pre-placed file must be re-hardened (TOCTOU / pre-created-file)");
+            Assert.True(IsFileCanonical(file),
+                "pre-placed file must be re-canonicalized (TOCTOU / " +
+                "pre-created-file)");
         }
         finally
         {
@@ -179,10 +187,44 @@ public sealed class CloudStateSecurityTests
     }
 
     [Fact]
+    public void TempFileInheritsCanonicalDirNotHostileParent()
+    {
+        // Hostile PARENT grants Everyone. The Cloud subdir is canonicalized
+        // (inheritance disabled), so a tmp file created inside it must NOT
+        // inherit the parent's Everyone ACE.
+        string parent = NewTempDir();
+        try
+        {
+            var pinfo = new DirectoryInfo(parent);
+            var psec = pinfo.GetAccessControl();
+            psec.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            pinfo.SetAccessControl(psec);
+
+            string cloud = Path.Combine(parent, "cloud");
+            CloudStateSecurity.EnsureSecured(cloud);
+
+            string tmp = Path.Combine(cloud, "cloud-registration.json.tmp");
+            File.WriteAllText(tmp, "{}");
+
+            Assert.False(HasAllow(tmp, s_everyone),
+                "tmp file must NOT inherit the hostile parent Everyone ACE");
+            Assert.True(IsFileCanonical(tmp)
+                || !HasAllow(tmp, s_everyone),
+                "tmp file must not grant Everyone access");
+        }
+        finally
+        {
+            TryDelete(parent);
+        }
+    }
+
+    [Fact]
     public void IsSecured_FalseForInheritingDirectory()
     {
-        // A plain temp directory inherits the parent ACL (Users read on
-        // ProgramData roots) and must NOT be reported as secured.
         string dir = NewTempDir();
         try
         {
@@ -192,6 +234,140 @@ public sealed class CloudStateSecurityTests
         {
             TryDelete(dir);
         }
+    }
+
+    [Fact]
+    public void IsSecured_FalseWhenUnauthorizedExplicitAceSurvives()
+    {
+        // Canonical but with an injected Everyone allow -> must be FALSE.
+        string dir = NewTempDir();
+        try
+        {
+            CloudStateSecurity.EnsureSecured(dir);
+            var info = new DirectoryInfo(dir);
+            var security = info.GetAccessControl();
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.Read,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            info.SetAccessControl(security);
+
+            Assert.False(CloudStateSecurity.IsSecured(dir),
+                "IsSecured must reject any unauthorized explicit ACE");
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public void SecureLegacyFileIfPresent_CanonicalizesExistingFile()
+    {
+        string dir = NewTempDir();
+        try
+        {
+            string legacy = Path.Combine(dir, "cloud-registration.json");
+            File.WriteAllText(legacy, "{}");
+            var info = new FileInfo(legacy);
+            var security = info.GetAccessControl();
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.FullControl,
+                AccessControlType.Allow));
+            info.SetAccessControl(security);
+
+            CloudStateSecurity.SecureLegacyFileIfPresent(legacy);
+
+            Assert.True(IsFileCanonical(legacy),
+                "legacy file must be canonicalized so ordinary users cannot " +
+                "read the vulnerable LocalMachine blob");
+
+            // No-op when absent.
+            CloudStateSecurity.SecureLegacyFileIfPresent(
+                Path.Combine(dir, "does-not-exist.json"));
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    // ---- helpers ----
+
+    private static bool HasAllow(string path, SecurityIdentifier sid)
+    {
+        var security = new FileInfo(path).GetAccessControl();
+        foreach (FileSystemAccessRule rule in
+                 security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType == AccessControlType.Allow
+                && (SecurityIdentifier)rule.IdentityReference == sid)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasAllowFull(string path, SecurityIdentifier sid)
+    {
+        var security = new DirectoryInfo(path).GetAccessControl();
+        foreach (FileSystemAccessRule rule in
+                 security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType == AccessControlType.Allow
+                && (SecurityIdentifier)rule.IdentityReference == sid
+                && rule.FileSystemRights.HasFlag(FileSystemRights.FullControl))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the file carries the canonical DACL: inheritance disabled and
+    /// every allow ACE is exactly SYSTEM or Administrators with FullControl.
+    /// </summary>
+    private static bool IsFileCanonical(string path)
+    {
+        var security = new FileInfo(path).GetAccessControl();
+        if (!security.AreAccessRulesProtected)
+        {
+            return false;
+        }
+
+        bool systemFull = false;
+        bool adminFull = false;
+        foreach (FileSystemAccessRule rule in
+                 security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType != AccessControlType.Allow)
+            {
+                continue;
+            }
+
+            var sid = (SecurityIdentifier)rule.IdentityReference;
+            if (sid == s_system && rule.FileSystemRights.HasFlag(
+                    FileSystemRights.FullControl))
+            {
+                systemFull = true;
+            }
+            else if (sid == s_administrators && rule.FileSystemRights.HasFlag(
+                         FileSystemRights.FullControl))
+            {
+                adminFull = true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return systemFull && adminFull;
     }
 
     private static string NewTempDir()

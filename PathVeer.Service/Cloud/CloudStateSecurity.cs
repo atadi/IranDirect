@@ -17,18 +17,23 @@ namespace PathVeer.Service.Cloud;
 ///      profile; ordinary local users therefore CANNOT decrypt the blob even
 ///      if they obtain its bytes.
 ///
-///   2. Filesystem ACL — this helper ensures the dedicated Cloud state
-///      directory (and everything created inside it by the atomic JSON store)
-///      is NOT readable by ordinary local users. Inheritance is disabled and
-///      BUILTIN\Users is removed; only SYSTEM and Administrators retain access.
+///   2. Filesystem ACL — this helper enforces a CANONICAL DACL on the
+///      dedicated Cloud state directory and its files. The canonical DACL
+///      contains exactly two allow ACEs — NT AUTHORITY\SYSTEM and
+///      BUILTIN\Administrators, both FullControl — and NO other discretionary
+///      access ACEs. Inheritance is disabled so the permissive
+///      %ProgramData%\PathVeer parent ACL (which grants BUILTIN\Users read)
+///      cannot leak in, and any attacker-inserted ACE (Everyone,
+///      Authenticated Users, BUILTIN\Users, an arbitrary user/group SID,
+///      CREATOR OWNER, etc.) is erased by resetting the DACL to the
+///      allow-list rather than by maintaining a deny-list.
 ///
 /// Defense in depth: even if one control is somehow bypassed, the other still
 /// prevents an ordinary user from obtaining/decrypting the credential merely
 /// by reading PathVeer state.
 ///
-/// The helper is idempotent and best-effort: it never throws for benign
-/// conditions (e.g. directory already correctly secured) and is a no-op on
-/// non-Windows platforms.
+/// The helper is idempotent and a no-op on non-Windows platforms. It never
+/// touches the SACL/auditing and never weakens ownership or SYSTEM access.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class CloudStateSecurity
@@ -37,13 +42,17 @@ public static class CloudStateSecurity
         new(WellKnownSidType.LocalSystemSid, null);
     private static readonly SecurityIdentifier s_administrators =
         new(WellKnownSidType.BuiltinAdministratorsSid, null);
-    private static readonly SecurityIdentifier s_users =
-        new(WellKnownSidType.BuiltinUsersSid, null);
+
+    // The only SIDs permitted any access in the canonical Cloud DACL.
+    private static readonly HashSet<SecurityIdentifier> s_approved =
+        new() { s_system, s_administrators };
 
     /// <summary>
-    /// Creates (if missing) and hardens the Cloud state directory so that only
-    /// SYSTEM and Administrators can read/write it. Ordinary users (including
-    /// BUILTIN\Users) are denied access. Safe to call repeatedly.
+    /// Ensures the Cloud state directory exists and carries the canonical
+    /// DACL. Any pre-existing (possibly attacker-controlled) explicit ACEs are
+    /// removed; only SYSTEM + Administrators FullControl survive. Existing
+    /// files inside the directory are also re-canonicalized. Safe to call
+    /// repeatedly.
     /// </summary>
     [SupportedOSPlatform("windows")]
     public static void EnsureSecured(string cloudDirectory)
@@ -51,38 +60,50 @@ public static class CloudStateSecurity
         ArgumentException.ThrowIfNullOrWhiteSpace(cloudDirectory);
 
         DirectoryInfo dir = Directory.CreateDirectory(cloudDirectory);
-        var info = new DirectoryInfo(dir.FullName);
-
-        var security = info.GetAccessControl();
-
-        // Do not inherit the parent (%ProgramData%\PathVeer) ACL, which grants
-        // BUILTIN\Users read access.
-        security.SetAccessRuleProtection(
-            isProtected: true,
-            preserveInheritance: false);
-
-        // Owner-level identities that must always retain full control.
-        AddFullControl(security, s_system);
-        AddFullControl(security, s_administrators);
-
-        // Explicitly strip any ordinary-user read access that might have
-        // leaked in from a prior (inherited) state.
-        RemoveSid(security, s_users);
-
-        info.SetAccessControl(security);
+        HardenDirectory(dir.FullName);
 
         // Re-apply to any files already present (e.g. a legacy blob being
-        // migrated) so a pre-existing file with a permissive ACE is tightened.
-        foreach (string file in Directory.EnumerateFiles(info.FullName))
+        // migrated, or a pre-placed file) so hostile explicit ACEs there are
+        // also erased.
+        foreach (string file in Directory.EnumerateFiles(dir.FullName))
         {
             HardenFile(file);
         }
     }
 
     /// <summary>
-    /// Hardens a single Cloud-state file: SYSTEM + Administrators full control,
-    /// BUILTIN\Users removed, inheritance disabled. Used for both freshly
-    /// written files and migrated legacy files.
+    /// Canonicalizes the Cloud state directory: resets the DACL to exactly
+    /// SYSTEM + Administrators FullControl (inheritance disabled). Used as the
+    /// JsonStore "directory prepared" callback so the atomic tmp file is
+    /// created inside an already-restricted directory. Idempotent.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    public static void HardenDirectory(string cloudDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cloudDirectory);
+
+        var info = new DirectoryInfo(cloudDirectory);
+        Directory.CreateDirectory(info.FullName);
+
+        var security = info.GetAccessControl();
+
+        // Disable inheritance (drop any inherited ACEs, including the parent
+        // %ProgramData%\PathVeer Users-read rule) so the boundary is fully
+        // self-contained.
+        security.SetAccessRuleProtection(
+            isProtected: true,
+            preserveInheritance: false);
+
+        ApplyCanonicalAcl(security);
+
+        info.SetAccessControl(security);
+    }
+
+    /// <summary>
+    /// Canonicalizes a single Cloud-state file: resets the DACL to exactly
+    /// SYSTEM + Administrators FullControl (inheritance disabled). Used both
+    /// for freshly written files (post atomic move) and for migrated or
+    /// pre-placed legacy files.
     /// </summary>
     [SupportedOSPlatform("windows")]
     public static void HardenFile(string filePath)
@@ -96,17 +117,46 @@ public static class CloudStateSecurity
             isProtected: true,
             preserveInheritance: false);
 
-        AddFullControl(security, s_system);
-        AddFullControl(security, s_administrators);
-        RemoveSid(security, s_users);
+        ApplyCanonicalAcl(security);
 
         info.SetAccessControl(security);
     }
 
     /// <summary>
-    /// True when the directory carries the hardened boundary (SYSTEM +
-    /// Administrators full control, no BUILTIN\Users access, inheritance
-    /// disabled). Used by tests and by startup self-checks.
+    /// Best-effort hardening of a pre-existing legacy credential file
+    /// (the original D2 layout under %ProgramData%\PathVeer). Reduces exposure
+    /// of the original LocalMachine DPAPI blob (which any local user could
+    /// decrypt) by denying ordinary users read access to the bytes while
+    /// migration is pending. No-op if the file does not exist.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    public static void SecureLegacyFileIfPresent(string legacyPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(legacyPath);
+
+        if (!File.Exists(legacyPath))
+        {
+            return;
+        }
+
+        try
+        {
+            HardenFile(legacyPath);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Hardening is defense-in-depth; the LocalSystem migration still
+            // runs. Do not throw over a secondary control.
+        }
+    }
+
+    /// <summary>
+    /// True only when the directory carries the CANONICAL hardened boundary:
+    /// inheritance disabled AND every discretionary allow ACE is exactly one
+    /// of the approved identities (SYSTEM, Administrators) with FullControl.
+    /// Returns FALSE if ANY unauthorized access ACE survives — including
+    /// Everyone, Authenticated Users, BUILTIN\Users, an arbitrary user/group
+    /// SID, or CREATOR OWNER.
     /// </summary>
     [SupportedOSPlatform("windows")]
     public static bool IsSecured(string cloudDirectory)
@@ -118,20 +168,20 @@ public static class CloudStateSecurity
 
         var info = new DirectoryInfo(cloudDirectory);
         var security = info.GetAccessControl();
+
         if (!security.AreAccessRulesProtected)
         {
-            // Inheritance still enabled -> inherits parent Users-read ACL.
+            // Inheritance still enabled -> inherits the parent Users-read ACL.
             return false;
         }
 
-        bool usersHasAccess = false;
         bool systemFull = false;
         bool adminFull = false;
 
         foreach (FileSystemAccessRule rule in
                  security.GetAccessRules(
                      includeExplicit: true,
-                     includeInherited: false,
+                     includeInherited: true,
                      typeof(SecurityIdentifier)))
         {
             if (rule.AccessControlType != AccessControlType.Allow)
@@ -140,14 +190,8 @@ public static class CloudStateSecurity
             }
 
             var sid = (SecurityIdentifier)rule.IdentityReference;
-            if (sid == s_users)
-            {
-                if ((rule.FileSystemRights & FileSystemRights.Read) != 0)
-                {
-                    usersHasAccess = true;
-                }
-            }
-            else if (sid == s_system)
+
+            if (sid == s_system)
             {
                 if (rule.FileSystemRights.HasFlag(
                         FileSystemRights.FullControl))
@@ -163,63 +207,69 @@ public static class CloudStateSecurity
                     adminFull = true;
                 }
             }
+            else
+            {
+                // Any other allow ACE (Everyone, Authenticated Users, Users,
+                // arbitrary user/group, CREATOR OWNER, etc.) is unauthorized.
+                return false;
+            }
         }
 
-        return systemFull && adminFull && !usersHasAccess;
+        return systemFull && adminFull;
     }
 
-    private static void AddFullControl(
-        ObjectSecurity security,
-        SecurityIdentifier sid)
+    /// <summary>
+    /// Resets the DACL to an EMPTY access list, then adds only the approved
+    /// identities with FullControl. Resetting (rather than removing a known
+    /// deny-list) guarantees no attacker-inserted ACE survives.
+    /// </summary>
+    private static void ApplyCanonicalAcl(ObjectSecurity security)
     {
+        // FileSystemSecurity exposes the public reset/remove API we need.
+        var fsSecurity = (FileSystemSecurity)security;
+
+        // Remove every existing access rule (explicit + inherited) so nothing
+        // unauthorized carries over.
+        var existing = new List<FileSystemAccessRule>();
+        foreach (FileSystemAccessRule rule in
+                 fsSecurity.GetAccessRules(
+                     includeExplicit: true,
+                     includeInherited: true,
+                     typeof(SecurityIdentifier)))
+        {
+            existing.Add(rule);
+        }
+
+        foreach (FileSystemAccessRule rule in existing)
+        {
+            fsSecurity.RemoveAccessRuleAll(rule);
+        }
+
         if (security is DirectorySecurity ds)
         {
             ds.AddAccessRule(new FileSystemAccessRule(
-                sid,
+                s_system,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            ds.AddAccessRule(new FileSystemAccessRule(
+                s_administrators,
                 FileSystemRights.FullControl,
                 InheritanceFlags.ContainerInherit
                 | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None,
                 AccessControlType.Allow));
         }
-        else if (security is FileSecurity fs)
+        else if (security is FileSecurity fsec)
         {
-            fs.AddAccessRule(new FileSystemAccessRule(
-                sid,
+            fsec.AddAccessRule(new FileSystemAccessRule(
+                s_system,
                 FileSystemRights.FullControl,
                 AccessControlType.Allow));
-        }
-    }
-
-    private static void RemoveSid(
-        ObjectSecurity security,
-        SecurityIdentifier sid)
-    {
-        if (security is DirectorySecurity ds)
-        {
-            ds.RemoveAccessRuleAll(new FileSystemAccessRule(
-                sid,
-                FileSystemRights.Read,
-                InheritanceFlags.ContainerInherit
-                | InheritanceFlags.ObjectInherit,
-                PropagationFlags.None,
-                AccessControlType.Allow));
-            ds.RemoveAccessRuleAll(new FileSystemAccessRule(
-                sid,
-                FileSystemRights.FullControl,
-                InheritanceFlags.ContainerInherit
-                | InheritanceFlags.ObjectInherit,
-                PropagationFlags.None,
-                AccessControlType.Allow));
-        }
-        else if (security is FileSecurity fs)
-        {
-            fs.RemoveAccessRuleAll(new FileSystemAccessRule(
-                sid,
-                FileSystemRights.Read,
-                AccessControlType.Allow));
-            fs.RemoveAccessRuleAll(new FileSystemAccessRule(
-                sid,
+            fsec.AddAccessRule(new FileSystemAccessRule(
+                s_administrators,
                 FileSystemRights.FullControl,
                 AccessControlType.Allow));
         }
