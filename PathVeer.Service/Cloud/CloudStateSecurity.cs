@@ -17,16 +17,27 @@ namespace PathVeer.Service.Cloud;
 ///      profile; ordinary local users therefore CANNOT decrypt the blob even
 ///      if they obtain its bytes.
 ///
-///   2. Filesystem ACL — this helper enforces a CANONICAL DACL on the
-///      dedicated Cloud state directory and its files. The canonical DACL
-///      contains exactly two allow ACEs — NT AUTHORITY\SYSTEM and
-///      BUILTIN\Administrators, both FullControl — and NO other discretionary
-///      access ACEs. Inheritance is disabled so the permissive
-///      %ProgramData%\PathVeer parent ACL (which grants BUILTIN\Users read)
-///      cannot leak in, and any attacker-inserted ACE (Everyone,
-///      Authenticated Users, BUILTIN\Users, an arbitrary user/group SID,
-///      CREATOR OWNER, etc.) is erased by resetting the DACL to the
-///      allow-list rather than by maintaining a deny-list.
+///   2. Filesystem ACL — this helper enforces a CANONICAL security descriptor
+///      on the dedicated Cloud state directory and its files. The canonical
+///      descriptor has exactly two properties:
+///
+///        (a) OWNER = NT AUTHORITY\SYSTEM. A non-SYSTEM owner (including an
+///            attacker who pre-created the object) implicitly holds
+///            WRITE_DAC and could rewrite the DACL to re-grant themselves
+///            access even after the ACE list below is reset, so ownership is
+///            part of the boundary.
+///
+///        (b) DACL = exactly two allow ACEs — NT AUTHORITY\SYSTEM and
+///            BUILTIN\Administrators, both FullControl — and NO other
+///            discretionary access ACEs. Inheritance is disabled so the
+///            permissive %ProgramData%\PathVeer parent ACL (which grants
+///            BUILTIN\Users read) cannot leak in, and any attacker-inserted
+///            ACE (Everyone, Authenticated Users, BUILTIN\Users, an arbitrary
+///            user/group SID, CREATOR OWNER, etc.) is erased by resetting the
+///            DACL to the allow-list rather than by maintaining a deny-list.
+///
+///      Both the owner and the DACL are reset on every invocation, so neither
+///      an attacker-controlled owner nor attacker-controlled ACEs can survive.
 ///
 /// Defense in depth: even if one control is somehow bypassed, the other still
 /// prevents an ordinary user from obtaining/decrypting the credential merely
@@ -152,11 +163,13 @@ public static class CloudStateSecurity
 
     /// <summary>
     /// True only when the directory carries the CANONICAL hardened boundary:
-    /// inheritance disabled AND every discretionary allow ACE is exactly one
-    /// of the approved identities (SYSTEM, Administrators) with FullControl.
-    /// Returns FALSE if ANY unauthorized access ACE survives — including
-    /// Everyone, Authenticated Users, BUILTIN\Users, an arbitrary user/group
-    /// SID, or CREATOR OWNER.
+    /// owner is SYSTEM, inheritance disabled, and every discretionary allow ACE
+    /// is exactly one of the approved identities (SYSTEM, Administrators) with
+    /// FullControl. Returns FALSE if ANY unauthorized access ACE survives —
+    /// including Everyone, Authenticated Users, BUILTIN\Users, an arbitrary
+    /// user/group SID, or CREATOR OWNER — AND FALSE if the owner is not SYSTEM
+    /// (a non-SYSTEM owner retains implicit WRITE_DAC and could rewrite the
+    /// DACL).
     /// </summary>
     [SupportedOSPlatform("windows")]
     public static bool IsSecured(string cloudDirectory)
@@ -172,6 +185,17 @@ public static class CloudStateSecurity
         if (!security.AreAccessRulesProtected)
         {
             // Inheritance still enabled -> inherits the parent Users-read ACL.
+            return false;
+        }
+
+        // The owner implicitly holds WRITE_DAC and can rewrite the DACL even
+        // when no ACE grants them access. For this Service-owned secret store
+        // the authoritative owner is SYSTEM; any other owner (an ordinary
+        // user, Administrators, CREATOR OWNER, arbitrary SID) is not trusted.
+        var owner = security.GetOwner(typeof(SecurityIdentifier))
+            as SecurityIdentifier;
+        if (owner == null || owner != s_system)
+        {
             return false;
         }
 
@@ -227,6 +251,12 @@ public static class CloudStateSecurity
     {
         // FileSystemSecurity exposes the public reset/remove API we need.
         var fsSecurity = (FileSystemSecurity)security;
+
+        // Canonicalize OWNER to SYSTEM. A non-SYSTEM owner (including an
+        // attacker who pre-created the object) retains implicit WRITE_DAC and
+        // could re-grant themselves access even after the DACL above is
+        // reset, so ownership is part of the canonical security descriptor.
+        security.SetOwner(s_system);
 
         // Remove every existing access rule (explicit + inherited) so nothing
         // unauthorized carries over.

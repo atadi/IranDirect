@@ -1,4 +1,6 @@
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using PathVeer.Core.Cloud;
@@ -78,6 +80,60 @@ public sealed class CloudRegistrationMigratorTests
             TryDelete(root);
         }
     }
+
+    [Fact]
+    public async Task MigrateAsync_ProducesSystemOwnedCurrentFile()
+    {
+        if (!CanSetOwner) { Skip(); }
+        string root = NewTempDir();
+        try
+        {
+            string legacyPath = Path.Combine(root, "cloud-registration.json");
+            string newDir = Path.Combine(root, "cloud");
+            string newPath = Path.Combine(newDir, "cloud-registration.json");
+
+            // Attacker-owned legacy blob to make the replacement meaningful.
+            var legacyRecord = new CloudRegistrationRecord
+            {
+                State = CloudConnectionState.Connected,
+                DeviceId = "dev-1",
+                OrganizationId = "org-1",
+                CredentialProtectedBase64 = LegacyBlob("old-cred")
+            };
+            await File.WriteAllTextAsync(
+                legacyPath,
+                JsonSerializer.Serialize(legacyRecord, JsonOptions()));
+            SetOwner(legacyPath,
+                new SecurityIdentifier(
+                    WellKnownSidType.BuiltinGuestsSid, null));
+
+            var migrator = new CloudRegistrationMigrator(
+                legacyPath,
+                newPath,
+                new WindowsDpapiCloudSecretProtector(),
+                new LegacyCloudCredentialDecoder());
+
+            Assert.True(await migrator.MigrateAsync());
+
+            // The migrated current file (and its directory) must be
+            // SYSTEM-owned and carry the canonical DACL — the attacker's
+            // ownership of the legacy file must not carry over.
+            Assert.Equal(
+                new SecurityIdentifier(
+                    WellKnownSidType.LocalSystemSid, null),
+                GetOwner(newPath));
+            Assert.Equal(
+                new SecurityIdentifier(
+                    WellKnownSidType.LocalSystemSid, null),
+                GetOwner(newDir));
+            Assert.True(CloudStateSecurity.IsSecured(newDir));
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
 
     [Fact]
     public async Task MigrateAsync_IsIdempotent()
@@ -808,6 +864,60 @@ public sealed class CloudRegistrationMigratorTests
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    private static SecurityIdentifier GetOwner(string path)
+    {
+        var security = new FileInfo(path).GetAccessControl();
+        return security.GetOwner(typeof(SecurityIdentifier))
+            as SecurityIdentifier;
+    }
+
+    private static void SetOwner(string path, SecurityIdentifier sid)
+    {
+        var info = new FileInfo(path);
+        var security = info.GetAccessControl();
+        security.SetOwner(sid);
+        info.SetAccessControl(security);
+    }
+
+    private static void Skip() =>
+        throw new System.InvalidOperationException(
+            "Owner-canonicalization ownership assertions require the test "
+            + "runner to hold SeTakeOwnershipPrivilege (set SYSTEM owner). "
+            + "This privileged runner can, so the branch below is active; "
+            + "if a non-privileged runner reaches here, owner "
+            + "canonicalization must be covered by the LocalSystem "
+            + "certification run instead of faking success.");
+
+    private static readonly bool CanSetOwner = ProbeCanSetOwner();
+
+    private static bool ProbeCanSetOwner()
+    {
+        try
+        {
+            string probe = Path.Combine(
+                Path.GetTempPath(),
+                "pvcloud-mig-ownprobe-" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(probe, "{}");
+            try
+            {
+                SetOwner(probe,
+                    new SecurityIdentifier(
+                        WellKnownSidType.LocalSystemSid, null));
+                return GetOwner(probe) ==
+                    new SecurityIdentifier(
+                        WellKnownSidType.LocalSystemSid, null);
+            }
+            finally
+            {
+                try { File.Delete(probe); } catch { }
+            }
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 }

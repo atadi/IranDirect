@@ -293,7 +293,255 @@ public sealed class CloudStateSecurityTests
         }
     }
 
+    [Fact]
+    public void HardenDirectory_CanonicalizesOwnerToSystem()
+    {
+        if (!CanSetOwner) { Skip(); return; }
+
+        // An ordinary user pre-created the Cloud directory and is its owner.
+        string dir = NewTempDir();
+        try
+        {
+            SetOwner(dir, s_arbitraryUser);
+            Assert.NotEqual(s_system, GetOwner(dir));
+
+            CloudStateSecurity.HardenDirectory(dir);
+
+            Assert.Equal(s_system, GetOwner(dir));
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public void HardenFile_CanonicalizesOwnerToSystem()
+    {
+        if (!CanSetOwner) { Skip(); return; }
+
+        string dir = NewTempDir();
+        try
+        {
+            string file = Path.Combine(dir, "cloud-registration.json");
+            File.WriteAllText(file, "{}");
+            SetOwner(file, s_arbitraryUser);
+            Assert.NotEqual(s_system, GetOwner(file));
+
+            CloudStateSecurity.HardenFile(file);
+
+            Assert.Equal(s_system, GetOwner(file));
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public void HardenDirectory_HostileOwnerAndAces_CanonicalAfter()
+    {
+        if (!CanSetOwner) { Skip(); return; }
+
+        string dir = NewTempDir();
+        try
+        {
+            var info = new DirectoryInfo(dir);
+            var security = info.GetAccessControl();
+            // Attacker-owned, with explicit Everyone + arbitrary-user ACEs.
+            security.SetOwner(s_arbitraryUser);
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_arbitraryUser, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            info.SetAccessControl(security);
+
+            CloudStateSecurity.HardenDirectory(dir);
+
+            // Owner reset to SYSTEM (no implicit WRITE_DAC for attacker).
+            Assert.Equal(s_system, GetOwner(dir));
+            // DACL canonical.
+            Assert.True(CloudStateSecurity.IsSecured(dir));
+            Assert.False(HasAllow(dir, s_everyone));
+            Assert.False(HasAllow(dir, s_arbitraryUser));
+            Assert.True(HasAllowFull(dir, s_system));
+            Assert.True(HasAllowFull(dir, s_administrators));
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public void IsSecured_FalseForCanonicalDaclWithNonSystemOwner()
+    {
+        if (!CanSetOwner) { Skip(); return; }
+
+        // Canonical DACL but an attacker-owned object must NOT be "secured":
+        // the owner implicitly holds WRITE_DAC and can rewrite the DACL.
+        string dir = NewTempDir();
+        try
+        {
+            CloudStateSecurity.HardenDirectory(dir);
+            Assert.True(CloudStateSecurity.IsSecured(dir));
+
+            // Re-assign ownership away from SYSTEM (attacker re-owns).
+            SetOwner(dir, s_arbitraryUser);
+
+            Assert.Equal(s_arbitraryUser, GetOwner(dir));
+            Assert.False(CloudStateSecurity.IsSecured(dir),
+                "IsSecured must reject a non-SYSTEM owner even when the " +
+                "DACL is otherwise canonical");
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public void IsSecured_TrueOnlyWithSystemOwnerCanonicalDaclProtected()
+    {
+        if (!CanSetOwner) { Skip(); return; }
+
+        string dir = NewTempDir();
+        try
+        {
+            CloudStateSecurity.HardenDirectory(dir);
+            Assert.True(CloudStateSecurity.IsSecured(dir),
+                "SYSTEM owner + canonical DACL + inheritance disabled => secured");
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public void HardenDirectory_OwnerNormalizationIsIdempotent()
+    {
+        if (!CanSetOwner) { Skip(); return; }
+
+        string dir = NewTempDir();
+        try
+        {
+            // Attacker-owned at the start.
+            SetOwner(dir, s_arbitraryUser);
+            CloudStateSecurity.HardenDirectory(dir);
+            Assert.Equal(s_system, GetOwner(dir));
+
+            // Re-inject an attacker ACE + re-own, then re-harden.
+            var info = new DirectoryInfo(dir);
+            var security = info.GetAccessControl();
+            security.SetOwner(s_arbitraryUser);
+            security.AddAccessRule(new FileSystemAccessRule(
+                s_everyone, FileSystemRights.Read,
+                InheritanceFlags.ContainerInherit
+                | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            info.SetAccessControl(security);
+
+            CloudStateSecurity.HardenDirectory(dir);
+
+            Assert.Equal(s_system, GetOwner(dir));
+            Assert.True(CloudStateSecurity.IsSecured(dir));
+            Assert.False(HasAllow(dir, s_everyone));
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public void SecureLegacyFileIfPresent_CanonicalizesOwnerToSystem()
+    {
+        if (!CanSetOwner) { Skip(); return; }
+
+        string dir = NewTempDir();
+        try
+        {
+            string legacy = Path.Combine(dir, "cloud-registration.json");
+            File.WriteAllText(legacy, "{}");
+            SetOwner(legacy, s_arbitraryUser);
+
+            CloudStateSecurity.SecureLegacyFileIfPresent(legacy);
+
+            Assert.Equal(s_system, GetOwner(legacy));
+            Assert.True(IsFileCanonical(legacy));
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
     // ---- helpers ----
+
+    // Probe whether this process can change an object's owner (e.g. to
+    // SYSTEM). The LocalSystem Service always can; an elevated admin test
+    // runner usually can. If it cannot, the ownership assertions below are
+    // skipped with a clear reason instead of faking success.
+    private static readonly bool CanSetOwner = ProbeCanSetOwner();
+
+    private static bool ProbeCanSetOwner()
+    {
+        try
+        {
+            string probe = Path.Combine(
+                Path.GetTempPath(),
+                "pvcloud-ownprobe-" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(probe, "{}");
+            try
+            {
+                SetOwner(probe, s_system);
+                return GetOwner(probe) == s_system;
+            }
+            finally
+            {
+                TryDelete(probe);
+            }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static SecurityIdentifier GetOwner(string path)
+    {
+        var security = new FileInfo(path).GetAccessControl();
+        return security.GetOwner(typeof(SecurityIdentifier))
+            as SecurityIdentifier ?? s_arbitraryUser;
+    }
+
+    private static void SetOwner(string path, SecurityIdentifier sid)
+    {
+        var info = new FileInfo(path);
+        var security = info.GetAccessControl();
+        security.SetOwner(sid);
+        info.SetAccessControl(security);
+    }
+
+    private static void Skip()
+    {
+        throw new System.InvalidOperationException(
+            "Owner-canonicalization ownership assertions require the test "
+            + "runner to hold SeTakeOwnershipPrivilege (set SYSTEM owner). "
+            + "This privileged runner can, so the branch below is active; "
+            + "if a non-privileged runner reaches here, owner "
+            + "canonicalization must be covered by the LocalSystem "
+            + "certification run instead of faking success.");
+    }
+
+
 
     private static bool HasAllow(string path, SecurityIdentifier sid)
     {
