@@ -9,12 +9,21 @@ namespace PathVeer.Core.Runtime.Execution;
 /// <summary>
 /// File-backed implementation of <see cref="IRouteMutationJournal"/>.
 ///
-/// Durability matches <see cref="JsonStore{T}"/> (tmp file + atomic
-/// <see cref="File.Move"/> overwrite, retry/backoff on transient IO), but load
-/// semantics differ deliberately: a present-but-unparseable journal or one with
-/// an unsupported schema version throws <see cref="RouteMutationJournalCorruptException"/>
-/// instead of silently resetting to empty. The journal must never be inferred as
-/// "no pending mutation" from corrupt bytes, because that would let recovery
+/// Crash-consistency contract for the route-mutation authority: a save writes
+/// to a "&lt;path&gt;.tmp" file and then atomically <see cref="File.Move"/>-
+/// overwrites the target, with bounded retry/backoff on transient IO. Writes and
+/// clears are serialized by a per-instance lock. This store deliberately does
+/// NOT use the generic JsonStore&lt;T&gt; BackupRollback / cross-instance
+/// path-lock machinery: the journal is its own write-ahead authority and its
+/// load semantics are strictly fail-closed (see below).
+///
+/// Load semantics differ deliberately from a normal document store: a
+/// present-but-unparseable journal, a present zero-length or whitespace-only or
+/// all-NUL file, or one with an unsupported schema version throws
+/// <see cref="RouteMutationJournalCorruptException"/> instead of silently
+/// resetting to empty. A MISSING journal file is the only case that legitimately
+/// means "no pending mutation". The journal must never be inferred as "no pending
+/// mutation" from corrupt bytes, because that would let recovery
 /// guess ownership from native route shape.
 ///
 /// All file access is serialized by an instance lock so the parallel prefix-add
@@ -164,24 +173,19 @@ public sealed class RouteMutationJournalStore : IRouteMutationJournal
         if (!File.Exists(_path))
             return new RouteMutationJournalFile();
 
-        string json;
+        // A PRESENT journal file that is zero-length, all-NUL, or
+        // whitespace-only is persisted corruption/truncation and MUST fail
+        // closed. It is NOT equivalent to a missing file, which legitimately
+        // means "no pending mutation".
+
+        byte[] rawBytes;
         try
         {
-            await using FileStream stream = new(
-                _path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete,
-                bufferSize: 4096,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-            using StreamReader reader = new(
-                stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-
-            json = await reader.ReadToEndAsync(cancellationToken);
+            rawBytes = await File.ReadAllBytesAsync(_path, cancellationToken);
         }
         catch (FileNotFoundException)
         {
+            // Disappeared between the existence check and the read.
             return new RouteMutationJournalFile();
         }
         catch (DirectoryNotFoundException)
@@ -189,8 +193,48 @@ public sealed class RouteMutationJournalStore : IRouteMutationJournal
             return new RouteMutationJournalFile();
         }
 
+        if (rawBytes.Length == 0)
+        {
+            throw new RouteMutationJournalCorruptException(
+                "The route mutation journal exists but is zero-length, " +
+                "indicating truncation. A present journal must not be " +
+                "treated as empty.");
+        }
+
+        if (rawBytes.AsSpan().IndexOfAnyExcept((byte)0) < 0)
+        {
+            throw new RouteMutationJournalCorruptException(
+                "The route mutation journal contains only NUL bytes, which is " +
+                "not valid journal content.");
+        }
+
+        // Decode UTF-8, tolerating (and skipping) a leading BOM so a
+        // legitimately-written journal (which never carries a BOM) parses
+        // identically to before.
+        int start = (rawBytes.Length >= 3 &&
+                    rawBytes[0] == 0xEF && rawBytes[1] == 0xBB &&
+                    rawBytes[2] == 0xBF)
+            ? 3
+            : 0;
+
+        string json;
+        try
+        {
+            json = Encoding.UTF8.GetString(
+                rawBytes, start, rawBytes.Length - start);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new RouteMutationJournalCorruptException(
+                "The route mutation journal is not valid UTF-8.", ex);
+        }
+
         if (string.IsNullOrWhiteSpace(json))
-            return new RouteMutationJournalFile();
+        {
+            throw new RouteMutationJournalCorruptException(
+                "The route mutation journal exists but contains only " +
+                "whitespace; a present journal must not be treated as empty.");
+        }
 
         RouteMutationJournalFile? parsed;
         try

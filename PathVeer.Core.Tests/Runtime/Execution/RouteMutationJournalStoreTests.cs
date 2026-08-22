@@ -56,6 +56,53 @@ public sealed class RouteMutationJournalStoreTests
         Assert.Empty(await store.LoadAllAsync());
     }
 
+    // Audit final closure: a PRESENT but zero-length journal is truncation and
+    // MUST fail closed, not be treated as an empty journal.
+    [Fact]
+    public async Task ZeroByteFile_ThrowsDoesNotResetToEmpty()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+        await File.WriteAllBytesAsync(path, []);
+
+        var store = new RouteMutationJournalStore(path);
+
+        RouteMutationJournalCorruptException ex =
+            await Assert.ThrowsAsync<RouteMutationJournalCorruptException>(
+                () => store.LoadAllAsync());
+        Assert.Contains("zero-length", ex.Message);
+    }
+
+    // A present whitespace-only journal is NOT a legitimate empty journal.
+    [Fact]
+    public async Task WhitespaceOnlyFile_ThrowsDoesNotResetToEmpty()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+        await File.WriteAllTextAsync(path, "   \t  \n  ");
+
+        var store = new RouteMutationJournalStore(path);
+
+        RouteMutationJournalCorruptException ex =
+            await Assert.ThrowsAsync<RouteMutationJournalCorruptException>(
+                () => store.LoadAllAsync());
+        Assert.Contains("whitespace", ex.Message);
+    }
+
+    // All-NUL bytes are not valid journal content.
+    [Fact]
+    public async Task AllNulFile_ThrowsDoesNotResetToEmpty()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+        await File.WriteAllBytesAsync(path, new byte[271]);
+
+        var store = new RouteMutationJournalStore(path);
+
+        await Assert.ThrowsAsync<RouteMutationJournalCorruptException>(
+            () => store.LoadAllAsync());
+    }
+
     [Fact]
     public async Task CorruptContent_ThrowsDoesNotResetToEmpty()
     {
@@ -84,6 +131,21 @@ public sealed class RouteMutationJournalStoreTests
             await Assert.ThrowsAsync<RouteMutationJournalCorruptException>(
                 () => store.LoadAllAsync());
         Assert.Contains("999", ex.Message);
+    }
+
+    // A valid serialized empty journal JSON remains a valid empty journal
+    // (not an error, not a reset).
+    [Fact]
+    public async Task ValidEmptyJournalJson_ReturnsEmpty()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+        var doc = new RouteMutationJournalFile();
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(doc));
+
+        var store = new RouteMutationJournalStore(path);
+
+        Assert.Empty(await store.LoadAllAsync());
     }
 
     [Fact]

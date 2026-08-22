@@ -326,6 +326,56 @@ public sealed class RouteMutationRecoveryTests
         Assert.False(File.Exists(path));
     }
 
+    // Audit final closure: a PRESENT zero-byte journal is truncation and must
+    // stop recovery exactly like malformed JSON — no routes mutated, file
+    // quarantined so operators can inspect the bytes.
+    [Fact]
+    public async Task ZeroByteJournal_StopsRecoveryWithoutMutation_Quarantines()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+        await File.WriteAllBytesAsync(path, []);
+
+        var store = new RouteMutationJournalStore(path);
+        var routes = new FakeRouteManager();
+        routes.AddToPresent(PrefixId);
+        var routeInv = new FakeRouteInventory();
+        var endpointInv = new FakeEndpointInventory();
+
+        await new RouteMutationRecovery(
+            routes, routeInv, endpointInv, store).RecoverAsync();
+
+        Assert.Empty((await routeInv.LoadAsync()).Routes);
+        Assert.Contains(PrefixId, routes.Present); // untouched
+        Assert.True(File.Exists(path + ".corrupt"));
+        Assert.False(File.Exists(path));
+    }
+
+    // A present whitespace-only journal is corruption, not "no pending
+    // mutation"; recovery must stop and quarantine rather than adopt/delete
+    // ownership from native route shape.
+    [Fact]
+    public async Task WhitespaceOnlyJournal_StopsRecoveryWithoutMutation_Quarantines()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+        await File.WriteAllTextAsync(path, "   \n\t  ");
+
+        var store = new RouteMutationJournalStore(path);
+        var routes = new FakeRouteManager();
+        routes.AddToPresent(PrefixId);
+        var routeInv = new FakeRouteInventory();
+        var endpointInv = new FakeEndpointInventory();
+
+        await new RouteMutationRecovery(
+            routes, routeInv, endpointInv, store).RecoverAsync();
+
+        Assert.Empty((await routeInv.LoadAsync()).Routes);
+        Assert.Contains(PrefixId, routes.Present);
+        Assert.True(File.Exists(path + ".corrupt"));
+        Assert.False(File.Exists(path));
+    }
+
     // ----- Shared in-memory fakes -----
 
     private sealed class FakeRouteMutationJournal : IRouteMutationJournal

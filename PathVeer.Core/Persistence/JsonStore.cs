@@ -641,9 +641,10 @@ public class JsonStore<T>
     // IOException / UnauthorizedAccessException is reported as TransientIoFailure
     // and must NOT be treated as corruption.
     private async Task<(DocumentReadResult result, T? value)> ReadDocumentAsync(
-        string path)
+        string path,
+        FaultInjectionPoint faultPoint = FaultInjectionPoint.FileRead)
     {
-        if (ShouldFailAt(FaultInjectionPoint.FileRead))
+        if (ShouldFailAt(faultPoint))
         {
             // Disk/access read failure: genuine I/O, NOT corruption.
             return (DocumentReadResult.TransientIoFailure, null);
@@ -951,7 +952,11 @@ public class JsonStore<T>
         DocumentReadResult result = DocumentReadResult.TransientIoFailure;
         for (int attempt = 0; attempt < MaxFileAccessAttempts; attempt++)
         {
-            result = (await ReadDocumentAsync(_path)).result;
+            // The primary-classification read uses a dedicated fault point so a
+            // regression test can deterministically target THIS boundary (the
+            // temp is already written and validated before we get here).
+            result = (await ReadDocumentAsync(
+                _path, FaultInjectionPoint.PrimaryValidation)).result;
             if (result != DocumentReadResult.TransientIoFailure)
             {
                 break;

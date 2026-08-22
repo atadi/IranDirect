@@ -17,5 +17,6 @@ public enum FaultInjectionPoint
     DiagnosticsRun,
     CloudHttp,
     RecoveryTempWrite,
-    RecoveryPromotion
+    RecoveryPromotion,
+    PrimaryValidation
 }

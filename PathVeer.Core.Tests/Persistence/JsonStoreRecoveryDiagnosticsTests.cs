@@ -415,7 +415,14 @@ public sealed class JsonStoreRecoveryDiagnosticsTests
     // Audit finding 2, regression: a transient primary read during Save must
     // NOT promote the temp without preserving the prior generation. With the
     // path-lock serializing, inject FileRead on the primary-validation step so
-    // the save fails and the existing valid primary + backup survive.
+    // Audit finding 2 (corrected regression): a transient primary-validation
+    // read during Save must NOT promote the temp without preserving the prior
+    // generation. The regression targets the REAL boundary deterministically:
+    // the temp is written AND read-back-validated FIRST (via the FileRead seam),
+    // then the primary-classification read (a distinct PrimaryValidation seam)
+    // fails persistently. Because the temp validation uses a different fault
+    // point, this proves execution reached primary classification rather than
+    // merely failing at an earlier FileRead.
     [Fact]
     public async Task Save_TransientPrimaryValidation_DoesNotPromoteWithoutBackup()
     {
@@ -426,11 +433,38 @@ public sealed class JsonStoreRecoveryDiagnosticsTests
         byte[] primaryBefore = await File.ReadAllBytesAsync(path);
         byte[] backupBefore = await File.ReadAllBytesAsync(path + ".bak");
 
-        // Persistent (always) FileRead fault: the primary-validation read
-        // during promotion keeps failing across retries, so the save must abort
-        // and must NOT overwrite the primary without preserving the prior
-        // generation. (The temp write-back read also fails transiently, which
-        // is the same "transient I/O aborts the save" invariant.)
+        // Only the PRIMARY-CLASSIFICATION read is faulted (persistent). The
+        // temp write-back read uses the separate FileRead seam and therefore
+        // SUCCEEDS, proving the temp was validated before the injected
+        // primary failure. The save must then abort and must NOT overwrite the
+        // primary without preserving the prior generation.
+        JsonStore<Doc> faulted = Create(
+            path,
+            JsonStoreRecoveryMode.BackupRollback,
+            faultPolicy: FaultInjectionPolicy.For(
+                [FaultInjectionPoint.PrimaryValidation]));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => faulted.SaveAsync(new Doc { Name = "v3", Count = 3 }));
+
+        // Primary and backup are byte-preserved; v3 was NOT promoted.
+        Assert.Equal(primaryBefore, await File.ReadAllBytesAsync(path));
+        Assert.Equal(backupBefore, await File.ReadAllBytesAsync(path + ".bak"));
+    }
+
+    // Complementary control: faulting ONLY the temp write-back read (FileRead)
+    // must abort the save BEFORE primary classification (temp never promoted),
+    // proving the two seams are independent and the primary path is not reached.
+    [Fact]
+    public async Task Save_TempValidationFailure_AbortsBeforePrimaryClassification()
+    {
+        string path = CreateTemporaryPath();
+        JsonStore<Doc> store = Create(path, JsonStoreRecoveryMode.BackupRollback);
+        await store.SaveAsync(new Doc { Name = "v1", Count = 1 });
+        await store.SaveAsync(new Doc { Name = "v2", Count = 2 });
+        byte[] primaryBefore = await File.ReadAllBytesAsync(path);
+        byte[] backupBefore = await File.ReadAllBytesAsync(path + ".bak");
+
         JsonStore<Doc> faulted = Create(
             path,
             JsonStoreRecoveryMode.BackupRollback,
@@ -440,7 +474,6 @@ public sealed class JsonStoreRecoveryDiagnosticsTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => faulted.SaveAsync(new Doc { Name = "v3", Count = 3 }));
 
-        // Primary and backup are byte-preserved; v3 was NOT promoted.
         Assert.Equal(primaryBefore, await File.ReadAllBytesAsync(path));
         Assert.Equal(backupBefore, await File.ReadAllBytesAsync(path + ".bak"));
     }
