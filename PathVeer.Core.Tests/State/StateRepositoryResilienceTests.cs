@@ -39,7 +39,13 @@ public sealed class StateRepositoryResilienceTests
         Assert.True(loaded.Enabled);
         Assert.Equal("10.0.0.1", loaded.Gateway);
         Assert.Equal(3, loaded.PrefixCount);
-        Assert.True(File.Exists(path + ".corrupt"));
+        Assert.True(
+            File.Exists(path + ".corrupt")
+            || Directory.EnumerateFiles(
+                Path.GetDirectoryName(path)!,
+                Path.GetFileName(path + ".corrupt") + ".*").Any());
+        // The validated .bak must survive the recovery (it is never consumed).
+        Assert.True(File.Exists(path + ".bak"));
     }
 
     [Fact]
@@ -128,4 +134,83 @@ public sealed class StateRepositoryResilienceTests
             "IranDirect.Tests",
             Guid.NewGuid().ToString("N"),
             "state.json");
+
+    // Required regression (audit finding 3): a stale backup from a previous
+    // generation — whose primary vanished — must NOT become eligible for
+    // automatic recovery once a new generation is established while no prior
+    // primary exists. Recovery must never resurrect pre-missing-primary state.
+    [Fact]
+    public async Task MissingPrimaryThenNewGeneration_DoesNotRecoverStaleBackup()
+    {
+        string path = CreateTemporaryPath();
+        StateRepository repository = new(path);
+
+        await repository.SaveAsync(
+            new PathVeerState { Enabled = true, Gateway = "10.0.0.1", PrefixCount = 1 });
+        await repository.SaveAsync(
+            new PathVeerState { Enabled = true, Gateway = "10.0.0.2", PrefixCount = 2 });
+        // primary = .2/2, .bak = .1/1.
+
+        // Primary disappears (without restoring from .bak).
+        File.Delete(path);
+
+        // Truly missing primary: not automatically restored from .bak.
+        PathVeerState missing = await repository.LoadAsync();
+        Assert.False(missing.Enabled);
+        Assert.Equal(0, missing.PrefixCount);
+
+        // New generation established while no prior primary exists.
+        await repository.SaveAsync(
+            new PathVeerState { Enabled = false, Gateway = "10.0.0.9", PrefixCount = 5 });
+
+        // Now corrupt the new primary. Recovery must NOT resurrect v1 (.1/1).
+        await File.WriteAllBytesAsync(path, new byte[HistoricalNulSize]);
+
+        PersistenceCorruptException ex =
+            await Assert.ThrowsAsync<PersistenceCorruptException>(
+                () => repository.LoadAsync());
+        Assert.Equal(path, ex.StorePath);
+        Assert.False(File.Exists(path + ".bak"));
+    }
+
+    // Required regression (audit finding 6): a 0-byte / whitespace-only primary
+    // that EXISTS is corruption for BackupRollback stores and must enter the
+    // recovery policy, not silently become defaults. A truly missing file
+    // remains distinguishable.
+    [Fact]
+    public async Task ZeroBytePrimaryWithValidBackup_RecoversDoNotDefault()
+    {
+        string path = CreateTemporaryPath();
+        StateRepository repository = new(path);
+
+        await repository.SaveAsync(
+            new PathVeerState { Enabled = true, Gateway = "10.0.0.1", PrefixCount = 1 });
+        await repository.SaveAsync(
+            new PathVeerState { Enabled = true, Gateway = "10.0.0.2", PrefixCount = 2 });
+
+        // 0-byte existing primary + valid backup -> recovers, not defaults.
+        File.WriteAllBytes(path, Array.Empty<byte>());
+
+        PathVeerState loaded = await repository.LoadAsync();
+        Assert.Equal("10.0.0.1", loaded.Gateway);
+        Assert.True(File.Exists(path + ".bak"));
+    }
+
+    [Fact]
+    public async Task WhitespacePrimaryWithValidBackup_RecoversDoNotDefault()
+    {
+        string path = CreateTemporaryPath();
+        StateRepository repository = new(path);
+
+        await repository.SaveAsync(
+            new PathVeerState { Enabled = true, Gateway = "10.0.0.1", PrefixCount = 1 });
+        await repository.SaveAsync(
+            new PathVeerState { Enabled = true, Gateway = "10.0.0.2", PrefixCount = 2 });
+
+        await File.WriteAllTextAsync(path, "   \t  ");
+
+        PathVeerState loaded = await repository.LoadAsync();
+        Assert.Equal("10.0.0.1", loaded.Gateway);
+        Assert.True(File.Exists(path + ".bak"));
+    }
 }

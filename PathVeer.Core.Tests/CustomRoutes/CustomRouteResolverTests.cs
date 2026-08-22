@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using PathVeer.Core.CustomRoutes;
 
@@ -902,15 +903,17 @@ public sealed class CustomRouteResolverTests
 
         Assert.Equal(["1.2.3.4/32"], result.Prefixes);
 
+        // A corrupt cache with NO valid backup now fails clearly (it does not
+        // silently return stale/empty). The resolver surfaces that as a read
+        // failure diagnostic and continues, refreshing the cache.
         Assert.Contains(
             result.Diagnostics,
             d => d.Status == CustomRouteResolutionStatus.Failure
                 && (d.Reason ?? "").Contains("DNS cache read failed"));
 
-        Assert.Contains(
-            result.Diagnostics,
-            d => d.Status == CustomRouteResolutionStatus.Failure
-                && (d.Reason ?? "").Contains("DNS cache update failed"));
+        // The corrupt primary was quarantined to a collision-safe evidence
+        // file for diagnosis rather than silently overwritten.
+        Assert.True(ExistsWithPrefix(path + ".corrupt"));
     }
 
     [Fact]
@@ -1083,5 +1086,16 @@ public sealed class CustomRouteResolverTests
         public override DateTimeOffset GetUtcNow() => _now;
 
         public void Advance(TimeSpan delta) => _now += delta;
+    }
+
+    // Collision-safe evidence files use "<base>.<timestamp>.<id>"; this helper
+    // asserts that at least one such file exists for the given base prefix.
+    private static bool ExistsWithPrefix(string basePath)
+    {
+        string? dir = Path.GetDirectoryName(basePath);
+        string fileName = Path.GetFileName(basePath);
+        return dir is not null
+            && Directory.Exists(dir)
+            && Directory.EnumerateFiles(dir, fileName + ".*").Any();
     }
 }

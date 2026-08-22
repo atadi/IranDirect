@@ -399,15 +399,18 @@ public sealed class CustomRouteServiceTests
         Assert.Empty(await fixture.Service.GetAllAsync());
     }
 
+    // Finding 6: an EXISTING zero-length file is corruption, not a missing
+    // file. A fail-closed store surfaces it as JsonException.
     [Fact]
-    public async Task EmptyFile_ReturnsEmptyCollection()
+    public async Task EmptyFile_ThrowsCorruption()
     {
         ServiceFixture fixture = CreateFixture();
         Directory.CreateDirectory(
             Path.GetDirectoryName(fixture.Path)!);
         await File.WriteAllTextAsync(fixture.Path, "");
 
-        Assert.Empty(await fixture.Service.GetAllAsync());
+        await Assert.ThrowsAsync<JsonException>(
+            () => fixture.Service.GetAllAsync());
     }
 
     [Fact]

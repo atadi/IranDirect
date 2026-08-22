@@ -185,18 +185,18 @@ public sealed class PrefixSourceUpdateHistoryRepositoryTests
             () => repository.LoadAsync());
     }
 
+    // Finding 6: an EXISTING zero-length file is corruption, not a missing
+    // file. A fail-closed store surfaces it as JsonException.
     [Fact]
-    public async Task LoadAsync_EmptyFile_ReturnsDefault()
+    public async Task LoadAsync_EmptyFile_ThrowsCorruption()
     {
         (PrefixSourceUpdateHistoryRepository repository, string path) =
             CreateRepository();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, "");
 
-        PrefixSourceUpdateHistoryDocument document =
-            await repository.LoadAsync();
-
-        Assert.Empty(document.Entries);
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+            () => repository.LoadAsync());
     }
 
     [Fact]

@@ -128,7 +128,7 @@ public sealed class PersistenceRecoveryContractTests
         JsonStore<PersistenceEnduranceDocument> store = new(path);
 
         await File.WriteAllTextAsync(
-            path + ".tmp",
+            path + ".tmp-orphan",
             "stale partial garbage that is not json");
 
         await store.SaveAsync(PersistenceEnduranceFixtures.Document(9));

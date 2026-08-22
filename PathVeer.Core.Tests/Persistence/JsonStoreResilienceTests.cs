@@ -131,8 +131,9 @@ public sealed class JsonStoreResilienceTests
 
         Assert.Equal("v1", loaded.Name);
         Assert.Equal(10, loaded.Count);
-        Assert.True(File.Exists(path + ".corrupt"));
+        Assert.True(File.Exists(path + ".corrupt") || ExistsWithPrefix(path + ".corrupt"));
         Assert.False(File.Exists(path + ".tmp"));
+        Assert.True(File.Exists(path + ".bak"));
     }
 
     [Fact]
@@ -173,6 +174,7 @@ public sealed class JsonStoreResilienceTests
 
         Assert.Equal("v1", loaded.Name);
         Assert.Equal(12, loaded.Count);
+        Assert.True(File.Exists(path + ".bak"));
     }
 
     [Fact]
@@ -270,7 +272,7 @@ public sealed class JsonStoreResilienceTests
     }
 
     [Fact]
-    public async Task BackupRollback_FailedPromotion_KeepsPriorPrimaryAndBackup()
+    public async Task BackupRollback_PrePromotionFault_KeepsPriorPrimaryAndBackup()
     {
         string path = CreateTemporaryPath();
         JsonStore<SampleDoc> store =
@@ -292,6 +294,44 @@ public sealed class JsonStoreResilienceTests
 
         Assert.Equal(primaryBefore, await File.ReadAllTextAsync(path));
         Assert.Equal(backupBefore, await File.ReadAllTextAsync(path + ".bak"));
+    }
+
+    // PROVES the actual replacement failure (not merely a pre-promotion fault):
+    // a file-operations implementation that throws inside Replace leaves both
+    // the prior primary and the .bak intact, and no recovery temp is left in
+    // the active slot.
+    [Fact]
+    public async Task BackupRollback_ActualReplaceFailure_KeepsPriorPrimaryAndBackup()
+    {
+        string path = CreateTemporaryPath();
+        JsonStore<SampleDoc> store =
+            Create(path, JsonStoreRecoveryMode.BackupRollback);
+        await store.SaveAsync(new SampleDoc { Name = "v1", Count = 1 });
+        await store.SaveAsync(new SampleDoc { Name = "v2", Count = 2 });
+        string primaryBefore = await File.ReadAllTextAsync(path);
+        string backupBefore = await File.ReadAllTextAsync(path + ".bak");
+
+        IJsonStoreFileOperations failingOps = new FailingReplaceOps();
+        JsonStore<SampleDoc> faulted = new(
+            path,
+            JsonStoreRecoveryMode.BackupRollback,
+            fileOperations: failingOps);
+
+        await Assert.ThrowsAsync<IOException>(
+            () => faulted.SaveAsync(
+                new SampleDoc { Name = "v3", Count = 3 }));
+
+        Assert.Equal(primaryBefore, await File.ReadAllTextAsync(path));
+        Assert.Equal(backupBefore, await File.ReadAllTextAsync(path + ".bak"));
+    }
+
+    private sealed class FailingReplaceOps : IJsonStoreFileOperations
+    {
+        public void Replace(string source, string destination, string? backup) =>
+            throw new IOException("injected replace failure");
+
+        public void Move(string source, string destination) =>
+            throw new IOException("injected move failure");
     }
 
     // ---- Phase 5.11 : repeated valid saves keep correct backup sequencing ----
@@ -411,8 +451,8 @@ public sealed class JsonStoreResilienceTests
         IFaultInjectionPolicy? faultPolicy = null) =>
         new(
             path,
-            faultPolicy: faultPolicy,
-            recoveryMode: mode);
+            mode,
+            faultPolicy: faultPolicy);
 
     private static string CreateTemporaryPath()
     {
@@ -423,6 +463,20 @@ public sealed class JsonStoreResilienceTests
             "document.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         return path;
+    }
+
+    // Collision-safe evidence files use "<base>.<timestamp>.<id>"; this helper
+    // asserts that at least one such file exists for the given base prefix.
+    private static bool ExistsWithPrefix(string basePath)
+    {
+        string? dir = Path.GetDirectoryName(basePath);
+        string fileName = Path.GetFileName(basePath);
+        if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
+        {
+            return false;
+        }
+
+        return Directory.EnumerateFiles(dir, fileName + ".*").Any();
     }
 
     public sealed record SampleDoc

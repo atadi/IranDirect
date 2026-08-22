@@ -37,8 +37,11 @@ public sealed class JsonStoreTests
         Assert.False(File.Exists(path + ".tmp"));
     }
 
+    // Finding 6: an EXISTING zero-length file is corruption, NOT a missing
+    // file. A fail-closed store must surface it as a JsonException rather than
+    // silently returning a default object.
     [Fact]
-    public async Task LoadAsync_WhenFileIsEmpty_ReturnsDefault()
+    public async Task LoadAsync_WhenFileIsEmpty_ThrowsCorruption()
     {
         string path = CreateTemporaryPath();
         Directory.CreateDirectory(
@@ -47,10 +50,8 @@ public sealed class JsonStoreTests
 
         JsonStore<TestDocument> store = new(path);
 
-        TestDocument document = await store.LoadAsync();
-
-        Assert.Equal("", document.Name);
-        Assert.Equal(0, document.Count);
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+            () => store.LoadAsync());
     }
 
     [Fact]

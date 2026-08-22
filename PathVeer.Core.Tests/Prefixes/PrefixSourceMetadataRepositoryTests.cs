@@ -75,18 +75,18 @@ public sealed class PrefixSourceMetadataRepositoryTests
             () => repository.LoadAsync());
     }
 
+    // Finding 6: an EXISTING zero-length file is corruption, not a missing
+    // file. A fail-closed store surfaces it as JsonException.
     [Fact]
-    public async Task LoadAsync_EmptyFile_ReturnsDefault()
+    public async Task LoadAsync_EmptyFile_ThrowsCorruption()
     {
         (PrefixSourceMetadataRepository repository, string path) =
             CreateRepository();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, "");
 
-        PrefixSourceMetadataDocument document =
-            await repository.LoadAsync();
-
-        Assert.Null(document.Current);
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+            () => repository.LoadAsync());
     }
 
     [Fact]

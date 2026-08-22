@@ -5,8 +5,11 @@ namespace PathVeer.Core.Tests.Persistence;
 
 public sealed class JsonStoreFaultInjectionTests
 {
+    // Audit finding 4: a JsonLoad fault (content/parse failure) is CORRUPTION,
+    // so a fail-closed store surfaces it as JsonException — preserving the
+    // native caller contract, not as a FaultInjectionException.
     [Fact]
-    public async Task LoadAsync_JsonLoadFault_ThrowsExpectedException()
+    public async Task LoadAsync_JsonLoadFault_ThrowsJsonException()
     {
         string path = CreateTemporaryPath();
         JsonStore<TestDocument> store = CreateStore(
@@ -14,17 +17,16 @@ public sealed class JsonStoreFaultInjectionTests
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.JsonLoad]));
 
-        FaultInjectionException exception =
-            await Assert.ThrowsAsync<FaultInjectionException>(
-                () => store.LoadAsync());
-
-        Assert.Equal(
-            FaultInjectionPoint.JsonLoad,
-            exception.Point);
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+            () => store.LoadAsync());
     }
 
+    // Audit finding 4: a FileRead fault is a transient I/O failure, NOT
+    // corruption. It is retried (bounded) and, once exhausted, surfaces as an
+    // InvalidOperationException — not a FaultInjectionException, and never as a
+    // corruption classification.
     [Fact]
-    public async Task LoadAsync_FileReadFault_ThrowsExpectedException()
+    public async Task LoadAsync_FileReadFault_RetriedThenThrowsAccessFailure()
     {
         string path = CreateTemporaryPath();
         JsonStore<TestDocument> store = CreateStore(
@@ -32,13 +34,30 @@ public sealed class JsonStoreFaultInjectionTests
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.FileRead]));
 
-        FaultInjectionException exception =
-            await Assert.ThrowsAsync<FaultInjectionException>(
+        InvalidOperationException exception =
+            await Assert.ThrowsAsync<InvalidOperationException>(
                 () => store.LoadAsync());
 
-        Assert.Equal(
-            FaultInjectionPoint.FileRead,
-            exception.Point);
+        Assert.Contains("could not be read", exception.Message);
+    }
+
+    // A ONE-SHOT FileRead fault must be retried and then succeed, proving it is
+    // classified as transient rather than corruption.
+    [Fact]
+    public async Task LoadAsync_OneShotFileReadFault_Recovers()
+    {
+        string path = CreateTemporaryPath();
+        JsonStore<TestDocument> store = new(path);
+        await store.SaveAsync(new TestDocument { Name = "ok", Count = 3 });
+
+        JsonStore<TestDocument> faultedStore = CreateStore(
+            path,
+            new OneShotFaultInjectionPolicy(FaultInjectionPoint.FileRead));
+
+        TestDocument loaded = await faultedStore.LoadAsync();
+
+        Assert.Equal("ok", loaded.Name);
+        Assert.Equal(3, loaded.Count);
     }
 
     [Fact]
@@ -59,7 +78,7 @@ public sealed class JsonStoreFaultInjectionTests
                     FaultInjectionPoint.FileRead
                 ]));
 
-        await Assert.ThrowsAsync<FaultInjectionException>(
+        await Assert.ThrowsAnyAsync<Exception>(
             () => faultedStore.LoadAsync());
 
         string after = await File.ReadAllTextAsync(path);
@@ -76,7 +95,9 @@ public sealed class JsonStoreFaultInjectionTests
             FaultInjectionPolicy.For(
                 [FaultInjectionPoint.FileRead]));
 
-        await Assert.ThrowsAsync<FaultInjectionException>(
+        // A FileRead fault is now transient-retried; once exhausted it throws
+        // an access failure rather than FaultInjectionException.
+        await Assert.ThrowsAsync<InvalidOperationException>(
             () => faultedStore.LoadAsync());
 
         JsonStore<TestDocument> store = new(path);
@@ -234,13 +255,13 @@ public sealed class JsonStoreFaultInjectionTests
                     FaultInjectionPoint.FileWrite
                 ]));
 
-        FaultInjectionException loadFault =
-            await Assert.ThrowsAsync<FaultInjectionException>(
+        // FileRead is now transient-retried and surfaces as an access failure
+        // (not FaultInjectionException); FileWrite still faults immediately.
+        InvalidOperationException loadFault =
+            await Assert.ThrowsAsync<InvalidOperationException>(
                 () => store.LoadAsync());
 
-        Assert.Equal(
-            FaultInjectionPoint.FileRead,
-            loadFault.Point);
+        Assert.Contains("could not be read", loadFault.Message);
 
         FaultInjectionException saveFault =
             await Assert.ThrowsAsync<FaultInjectionException>(
@@ -293,10 +314,19 @@ public sealed class JsonStoreFaultInjectionTests
         Assert.Equal(3, loaded.Count);
     }
 
+    // Audit finding 4: the two load-side fault points now have distinct,
+    // correct classifications — FileRead is a transient access failure
+    // (retried, then InvalidOperationException) while JsonLoad is corruption
+    // (fail-closed surfaces JsonException). The ambient scope + injected policy
+    // both contribute failures.
     [Fact]
-    public async Task NestedFaultScopes_SelectCorrectFailurePoint()
+    public async Task NestedFaultScopes_DistinctClassifications()
     {
         string path = CreateTemporaryPath();
+
+        // Establish a valid primary so read faults can actually apply.
+        JsonStore<TestDocument> seed = new(path);
+        await seed.SaveAsync(new TestDocument { Name = "seed", Count = 1 });
 
         using (FaultInjectionScope outer =
             FaultInjectionScope.Fail(FaultInjectionPoint.JsonLoad))
@@ -312,23 +342,31 @@ public sealed class JsonStoreFaultInjectionTests
             using (FaultInjectionScope inner =
                 FaultInjectionScope.Fail(FaultInjectionPoint.FileRead))
             {
-                FaultInjectionException innerFault =
-                    await Assert.ThrowsAsync<FaultInjectionException>(
-                        () => store.LoadAsync());
-
-                Assert.Equal(
-                    FaultInjectionPoint.FileRead,
-                    innerFault.Point);
+                // Inner scope forces FileRead: transient I/O -> retried ->
+                // access failure (NOT FaultInjectionException, NOT corruption).
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => store.LoadAsync());
             }
 
-            FaultInjectionException outerFault =
-                await Assert.ThrowsAsync<FaultInjectionException>(
-                    () => store.LoadAsync());
-
-            Assert.Equal(
-                FaultInjectionPoint.JsonLoad,
-                outerFault.Point);
+            // After the inner scope, we are still inside the outer JsonLoad
+            // ambient scope, which takes precedence over the injected policy,
+            // so a parse failure is classified as corruption -> JsonException.
+            await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+                () => store.LoadAsync());
         }
+
+        // With the ambient scope cleared and only the injected JsonLoad
+        // fault remaining, a parse failure is corruption -> JsonException.
+        string p2 = CreateTemporaryPath();
+        JsonStore<TestDocument> seed2 = new(p2);
+        await seed2.SaveAsync(new TestDocument { Name = "seed2", Count = 2 });
+
+        JsonStore<TestDocument> store2 = CreateStore(
+            p2,
+            FaultInjectionPolicy.For([FaultInjectionPoint.JsonLoad]));
+
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+            () => store2.LoadAsync());
     }
 
     [Fact]

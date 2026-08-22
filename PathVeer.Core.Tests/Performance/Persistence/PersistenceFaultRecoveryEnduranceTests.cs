@@ -38,12 +38,29 @@ public sealed class PersistenceFaultRecoveryEnduranceTests
                 path,
                 faultPolicy: FaultInjectionPolicy.For([point]));
 
-            FaultInjectionException fault =
-                await Assert.ThrowsAsync<FaultInjectionException>(
+            // Audit finding 4: FileRead is a TRANSIENT I/O failure (retried,
+            // then InvalidOperationException); JsonLoad is CORRUPTION
+            // (fail-closed surfaces JsonException). The write-side points still
+            // fault immediately as FaultInjectionException.
+            if (point is FaultInjectionPoint.FileRead)
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(
                     () => FaultAsync(faulted, point));
+            }
+            else if (point is FaultInjectionPoint.JsonLoad)
+            {
+                await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+                    () => FaultAsync(faulted, point));
+            }
+            else
+            {
+                FaultInjectionException fault =
+                    await Assert.ThrowsAsync<FaultInjectionException>(
+                        () => FaultAsync(faulted, point));
 
-            Assert.Equal(point, fault.Point);
-            Assert.False(File.Exists(path + ".tmp"));
+                Assert.Equal(point, fault.Point);
+                Assert.False(File.Exists(path + ".tmp"));
+            }
 
             if (point is FaultInjectionPoint.FileWrite
                 or FaultInjectionPoint.FileMove)
@@ -98,8 +115,24 @@ public sealed class PersistenceFaultRecoveryEnduranceTests
 
             await healthy.SaveAsync(healthyDocument);
 
-            await Assert.ThrowsAsync<FaultInjectionException>(
-                () => FaultAsync(faulted, point));
+            // Audit finding 4: read-side points now have corrected
+            // classifications (FileRead -> InvalidOperationException,
+            // JsonLoad -> JsonException); write-side -> FaultInjectionException.
+            if (point is FaultInjectionPoint.FileRead)
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => FaultAsync(faulted, point));
+            }
+            else if (point is FaultInjectionPoint.JsonLoad)
+            {
+                await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+                    () => FaultAsync(faulted, point));
+            }
+            else
+            {
+                await Assert.ThrowsAsync<FaultInjectionException>(
+                    () => FaultAsync(faulted, point));
+            }
 
             PersistenceEnduranceDocument loaded =
                 await healthy.LoadAsync();

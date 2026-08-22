@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using PathVeer.Core.CustomRoutes;
 using PathVeer.Core.Persistence;
@@ -88,10 +89,12 @@ public sealed class CustomRouteDnsCacheRepositoryTests
             await repository.GetAllAsync();
 
         // Recovered from the last known-good backup (example.com), not the
-        // corrupt primary.
+        // corrupt primary. The corrupt primary is quarantined to a
+        // collision-safe evidence file.
         CustomRouteDnsCacheEntry recovered = Assert.Single(entries);
         Assert.Equal("example.com", recovered.Domain);
-        Assert.True(File.Exists(path + ".corrupt"));
+        Assert.True(
+            ExistsWithPrefix(path + ".corrupt"));
     }
 
     [Fact]
@@ -638,6 +641,17 @@ public sealed class CustomRouteDnsCacheRepositoryTests
             "IranDirect.Tests",
             Guid.NewGuid().ToString("N"),
             "custom-route-dns-cache.json");
+    }
+
+    // Collision-safe evidence files use "<base>.<timestamp>.<id>"; this helper
+    // asserts that at least one such file exists for the given base prefix.
+    private static bool ExistsWithPrefix(string basePath)
+    {
+        string? dir = Path.GetDirectoryName(basePath);
+        string fileName = Path.GetFileName(basePath);
+        return dir is not null
+            && Directory.Exists(dir)
+            && Directory.EnumerateFiles(dir, fileName + ".*").Any();
     }
 
     private static CustomRouteDnsCacheStore CreateStore() =>
