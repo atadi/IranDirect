@@ -1,5 +1,6 @@
 using System.Text.Json;
 using PathVeer.Core.CustomRoutes;
+using PathVeer.Core.Persistence;
 
 namespace PathVeer.Core.Tests.CustomRoutes;
 
@@ -23,7 +24,7 @@ public sealed class CustomRouteDnsCacheRepositoryTests
     }
 
     [Fact]
-    public async Task GetAllAsync_WhenFileIsCorrupt_ThrowsJsonException()
+    public async Task GetAllAsync_WhenFileIsCorruptAndNoBackup_FailsClearly()
     {
         string path = CreatePath();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -34,8 +35,63 @@ public sealed class CustomRouteDnsCacheRepositoryTests
                 new CustomRouteDnsCacheStore(path),
                 new FakeTimeProvider(Start));
 
-        await Assert.ThrowsAsync<JsonException>(
+        // Derived cache now uses backup rollback: with no valid backup, a
+        // corrupt primary fails clearly instead of silently returning empty.
+        await Assert.ThrowsAsync<PersistenceCorruptException>(
             () => repository.GetAllAsync());
+    }
+
+    [Fact]
+    public async Task GetAllAsync_WhenFileIsCorruptButBackupValid_Recovers()
+    {
+        string path = CreatePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        CustomRouteDnsCacheStore seed = new(path);
+        await seed.SaveAsync(
+            new CustomRouteDnsCacheCollection
+            {
+                Entries =
+                [
+                    new CustomRouteDnsCacheEntry
+                    {
+                        CustomRouteEntryId = Guid.NewGuid(),
+                        Domain = "example.com",
+                        IPv4Addresses = ["8.8.8.8"],
+                        LastAttemptedAt = Start
+                    }
+                ]
+            });
+        await seed.SaveAsync(
+            new CustomRouteDnsCacheCollection
+            {
+                Entries =
+                [
+                    new CustomRouteDnsCacheEntry
+                    {
+                        CustomRouteEntryId = Guid.NewGuid(),
+                        Domain = "good.example",
+                        IPv4Addresses = ["1.1.1.1"],
+                        LastAttemptedAt = Start
+                    }
+                ]
+            });
+        // primary = good.example, .bak = example.com.
+
+        // Corrupt the primary (all NUL) to mimic the historical incident.
+        await File.WriteAllBytesAsync(path, new byte[44]);
+
+        CustomRouteDnsCacheRepository repository =
+            new(new CustomRouteDnsCacheStore(path), new FakeTimeProvider(Start));
+
+        IReadOnlyList<CustomRouteDnsCacheEntry> entries =
+            await repository.GetAllAsync();
+
+        // Recovered from the last known-good backup (example.com), not the
+        // corrupt primary.
+        CustomRouteDnsCacheEntry recovered = Assert.Single(entries);
+        Assert.Equal("example.com", recovered.Domain);
+        Assert.True(File.Exists(path + ".corrupt"));
     }
 
     [Fact]

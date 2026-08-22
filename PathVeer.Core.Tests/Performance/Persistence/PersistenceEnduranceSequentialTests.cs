@@ -43,8 +43,11 @@ public sealed class PersistenceEnduranceSequentialTests
         await PersistenceEnduranceRunner.RunDesiredConfigAsync(
             workspace.CreatePath("desired-config.json"), cycles);
 
+        // state.json (BackupRollback) and dns-cache.json (BackupRollback)
+        // each retain a ".bak" of the prior known-good document, so the count
+        // is 7 primaries + 2 backups.
         FileSystemSnapshot snapshot = workspace.Snapshot();
-        Assert.Equal(7, snapshot.FileCount);
+        Assert.Equal(9, snapshot.FileCount);
         PersistenceEnduranceVerifier.VerifyNoOrphanTempFiles(snapshot);
 
         foreach (FileSystemSnapshot.SnapshotEntry entry in snapshot.Entries)

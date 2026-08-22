@@ -233,8 +233,10 @@ public sealed class PersistenceEnduranceConcurrencyTests
             PersistenceEnduranceFixtures.CustomRoutes(Seed, cycles).Entries,
             customLoaded.Entries);
 
+        // routes.json, state.json, custom-routes.json primaries + the
+        // state.json ".bak" retained by BackupRollback = 4.
         FileSystemSnapshot snapshot = workspace.Snapshot();
-        Assert.Equal(3, snapshot.FileCount);
+        Assert.Equal(4, snapshot.FileCount);
         PersistenceEnduranceVerifier.VerifyNoOrphanTempFiles(snapshot);
 
         foreach (FileSystemSnapshot.SnapshotEntry entry in snapshot.Entries)

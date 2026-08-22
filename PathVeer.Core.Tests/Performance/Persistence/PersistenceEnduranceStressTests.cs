@@ -135,10 +135,11 @@ public sealed class PersistenceEnduranceStressTests
         await PersistenceEnduranceRunner.RunPerfReportsAsync(
             perfDirectory, cyclesPerStore);
 
+        // The two stores classified for backup rollback (state.json and
+        // dns-cache.json) retain a ".bak" of the prior known-good document, so
+        // the on-disk file count is the 9 primaries + 2 backups.
         FileSystemSnapshot snapshot = workspace.Snapshot();
-        Assert.Equal(
-            9 + cyclesPerStore,
-            snapshot.FileCount);
+        Assert.Equal(9 + cyclesPerStore + 2, snapshot.FileCount);
         PersistenceEnduranceVerifier.VerifyNoOrphanTempFiles(snapshot);
 
         foreach (FileSystemSnapshot.SnapshotEntry entry in snapshot.Entries)
