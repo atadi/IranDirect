@@ -31,13 +31,24 @@ public sealed class StateRepository :
     /// Internal testing hook: lets a test wire recovery diagnostics without
     /// changing the public contract.
     /// </summary>
-    internal StateRepository(
-        string statePath,
-        JsonStoreRecoveryOptions options)
+    // Public for Service composition (a different assembly) to wire recovery
+    // diagnostics. The recovery mode is still fixed internally to BackupRollback
+    // with the supplied diagnostics options, so the public API cannot opt into
+    // an arbitrary mode.
+    public StateRepository(
+        string path,
+        JsonStoreRecoveryOptions? recoveryOptions = null)
         : base(
-            statePath,
+            path,
             JsonStoreRecoveryMode.BackupRollback,
-            options)
+            recoveryOptions: recoveryOptions)
+    {
+    }
+
+    internal StateRepository(
+        string path,
+        JsonStoreRecoveryMode recoveryMode)
+        : base(path, recoveryMode)
     {
     }
 }

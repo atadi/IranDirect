@@ -15,5 +15,7 @@ public enum FaultInjectionPoint
     RouteDelete,
     SnapshotCapture,
     DiagnosticsRun,
-    CloudHttp
+    CloudHttp,
+    RecoveryTempWrite,
+    RecoveryPromotion
 }

@@ -302,4 +302,146 @@ public sealed class JsonStoreRecoveryDiagnosticsTests
         Assert.Equal(primaryBefore, await File.ReadAllTextAsync(path));
         Assert.Equal(backupBefore, await File.ReadAllTextAsync(path + ".bak"));
     }
+
+    // Audit finding 1, regression A/B: a corrupt primary with no valid backup
+    // fails to load, and a SECOND load still fails (never silently defaults to
+    // new T()). The corrupt primary is preserved in place between loads.
+    [Fact]
+    public async Task CorruptPrimary_NoBackup_FirstAndSecondLoadBothFail()
+    {
+        string path = CreateTemporaryPath();
+        // Seed a valid primary, then corrupt it and remove any backup.
+        JsonStore<Doc> store = Create(path, JsonStoreRecoveryMode.BackupRollback);
+        await store.SaveAsync(new Doc { Name = "v1", Count = 1 });
+        await File.WriteAllBytesAsync(path, new byte[271]); // all-NUL => corrupt
+        if (File.Exists(path + ".bak"))
+        {
+            File.Delete(path + ".bak");
+        }
+
+        JsonStore<Doc> reader = Create(path, JsonStoreRecoveryMode.BackupRollback);
+        await Assert.ThrowsAsync<PersistenceCorruptException>(
+            () => reader.LoadAsync());
+
+        // Crucially the corrupt primary is STILL present (not renamed away).
+        Assert.True(File.Exists(path));
+        byte[] bytes = await File.ReadAllBytesAsync(path);
+        Assert.True(bytes.AsSpan().IndexOfAnyExcept((byte)0) < 0,
+            "corrupt primary must remain in place");
+
+        // Second load must STILL fail the same way, never default.
+        await Assert.ThrowsAsync<PersistenceCorruptException>(
+            () => reader.LoadAsync());
+    }
+
+    // Audit finding 1, regression C: corrupt primary + valid backup + injected
+    // recovery temp write failure => backup preserved, primary remains
+    // corruption-visible, subsequent load does not default.
+    [Fact]
+    public async Task CorruptPrimary_ValidBackup_RecoveryTempWriteFails_NoDefault()
+    {
+        string path = CreateTemporaryPath();
+        JsonStore<Doc> store = Create(path, JsonStoreRecoveryMode.BackupRollback);
+        await store.SaveAsync(new Doc { Name = "v1", Count = 1 });
+        await store.SaveAsync(new Doc { Name = "v2", Count = 2 });
+
+        byte[] bakBytes = await File.ReadAllBytesAsync(path + ".bak");
+        await File.WriteAllBytesAsync(path, new byte[271]); // corrupt primary
+
+        JsonStore<Doc> faulted = Create(
+            path,
+            JsonStoreRecoveryMode.BackupRollback,
+            faultPolicy: FaultInjectionPolicy.For(
+                [FaultInjectionPoint.RecoveryTempWrite]));
+
+        await Assert.ThrowsAsync<FaultInjectionException>(
+            () => faulted.LoadAsync());
+
+        // Backup preserved and untouched.
+        Assert.True(File.Exists(path + ".bak"));
+        Assert.Equal(bakBytes, await File.ReadAllBytesAsync(path + ".bak"));
+
+        // Primary remains corrupt (not turned into Missing).
+        Assert.True(File.Exists(path));
+        byte[] primaryNow = await File.ReadAllBytesAsync(path);
+        Assert.True(primaryNow.AsSpan().IndexOfAnyExcept((byte)0) < 0);
+
+        // A subsequent load (without the fault) recovers from the valid backup
+        // (it does NOT silently default to a new T()). The corrupt primary is
+        // still present but recovery correctly falls back to the good .bak.
+        Doc recovered = await Create(
+            path, JsonStoreRecoveryMode.BackupRollback).LoadAsync();
+        Assert.Equal("v1", recovered.Name);
+    }
+
+    // Audit finding 1, regression D: corrupt primary + valid backup + injected
+    // actual recovery promotion (replace) failure => backup preserved, primary
+    // remains corrupt, subsequent load retries recovery (not a default).
+    [Fact]
+    public async Task CorruptPrimary_ValidBackup_RecoveryPromotionFails_NoDefault()
+    {
+        string path = CreateTemporaryPath();
+        JsonStore<Doc> store = Create(path, JsonStoreRecoveryMode.BackupRollback);
+        await store.SaveAsync(new Doc { Name = "v1", Count = 1 });
+        await store.SaveAsync(new Doc { Name = "v2", Count = 2 });
+
+        byte[] bakBytes = await File.ReadAllBytesAsync(path + ".bak");
+        await File.WriteAllBytesAsync(path, new byte[271]); // corrupt primary
+
+        JsonStore<Doc> faulted = Create(
+            path,
+            JsonStoreRecoveryMode.BackupRollback,
+            faultPolicy: FaultInjectionPolicy.For(
+                [FaultInjectionPoint.RecoveryPromotion]));
+
+        await Assert.ThrowsAsync<FaultInjectionException>(
+            () => faulted.LoadAsync());
+
+        // Backup preserved and untouched.
+        Assert.True(File.Exists(path + ".bak"));
+        Assert.Equal(bakBytes, await File.ReadAllBytesAsync(path + ".bak"));
+
+        // Primary remains corrupt (never absented).
+        Assert.True(File.Exists(path));
+        byte[] primaryNow = await File.ReadAllBytesAsync(path);
+        Assert.True(primaryNow.AsSpan().IndexOfAnyExcept((byte)0) < 0);
+
+        // Subsequent load (no fault) recovers from the backup, NOT defaults.
+        Doc recovered = await Create(
+            path, JsonStoreRecoveryMode.BackupRollback).LoadAsync();
+        Assert.Equal("v1", recovered.Name);
+    }
+
+    // Audit finding 2, regression: a transient primary read during Save must
+    // NOT promote the temp without preserving the prior generation. With the
+    // path-lock serializing, inject FileRead on the primary-validation step so
+    // the save fails and the existing valid primary + backup survive.
+    [Fact]
+    public async Task Save_TransientPrimaryValidation_DoesNotPromoteWithoutBackup()
+    {
+        string path = CreateTemporaryPath();
+        JsonStore<Doc> store = Create(path, JsonStoreRecoveryMode.BackupRollback);
+        await store.SaveAsync(new Doc { Name = "v1", Count = 1 });
+        await store.SaveAsync(new Doc { Name = "v2", Count = 2 });
+        byte[] primaryBefore = await File.ReadAllBytesAsync(path);
+        byte[] backupBefore = await File.ReadAllBytesAsync(path + ".bak");
+
+        // Persistent (always) FileRead fault: the primary-validation read
+        // during promotion keeps failing across retries, so the save must abort
+        // and must NOT overwrite the primary without preserving the prior
+        // generation. (The temp write-back read also fails transiently, which
+        // is the same "transient I/O aborts the save" invariant.)
+        JsonStore<Doc> faulted = Create(
+            path,
+            JsonStoreRecoveryMode.BackupRollback,
+            faultPolicy: FaultInjectionPolicy.For(
+                [FaultInjectionPoint.FileRead]));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => faulted.SaveAsync(new Doc { Name = "v3", Count = 3 }));
+
+        // Primary and backup are byte-preserved; v3 was NOT promoted.
+        Assert.Equal(primaryBefore, await File.ReadAllBytesAsync(path));
+        Assert.Equal(backupBefore, await File.ReadAllBytesAsync(path + ".bak"));
+    }
 }

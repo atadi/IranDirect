@@ -15,14 +15,13 @@ namespace PathVeer.Core.Persistence;
 /// and security/credential state must stay fail-closed: a stale copy of those
 /// files could cause network mutation or violate revocation/authority.
 ///
-/// The enum is public (vs. the policy constructor, which is internal) so the
-/// two opt-in repository types AND the in-assembly persistence test suite can
-/// name the policy. The PUBLIC JsonStore constructor does NOT accept it — a
-/// caller can only reach BackupRollback through the internal constructor, so
-/// the public API contract is unchanged and misuse from outside this assembly
-/// is not possible.
+/// The enum is intentionally internal: the only two stores that use it are
+/// in-assembly (StateRepository, CustomRouteDnsCacheStore) and the test suite
+/// reaches it through InternalsVisibleTo. The PUBLIC JsonStore constructor does
+/// NOT accept it, so a caller outside this assembly cannot opt into backup
+/// rollback and the public API contract is unchanged.
 /// </summary>
-public enum JsonStoreRecoveryMode
+internal enum JsonStoreRecoveryMode
 {
     /// <summary>
     /// Default. A malformed/corrupt primary throws (preserving any existing
@@ -156,8 +155,12 @@ public sealed class JsonStoreRecoveryOptions
 /// primary/backup" invariant can be proven deterministically (the prior
 /// FaultInjectionPoint.FileMove only fired *before* the replace, which is a
 /// different boundary).
+///
+/// This seam is internal: only Core internals and the persistence test suite
+/// (via InternalsVisibleTo) construct it. It is NOT part of the public
+/// persistence API.
 /// </summary>
-public interface IJsonStoreFileOperations
+internal interface IJsonStoreFileOperations
 {
     // Used when the destination/current document already exists: atomic
     // replace, optionally preserving the replaced document as a backup.
@@ -240,14 +243,12 @@ internal static class JsonStoreLockRegistry
 
     private static string Canonicalize(string path)
     {
-        // OrdinalIgnoreCase on the dictionary handles casing; normalize
-        // directory separators so '/' and '\' collapse to the same key. We do
-        // not resolve symlinks (out of scope for the single-authority model),
-        // but we do use the absolute form so relative variants coincide.
-        string full = Path.IsPathRooted(path)
-            ? Path.GetFullPath(path)
-            : path;
-
+        // Always resolve to the fully-qualified absolute form so both rooted
+        // and relative inputs (and '.' / '..' segments, and '/' vs '\'
+        // separators) collapse to the same canonical key. The dictionary's
+        // OrdinalIgnoreCase comparer handles Windows casing. We do NOT resolve
+        // symlinks (out of scope for the single-authority model).
+        string full = Path.GetFullPath(path);
         return full.Replace('/', '\\');
     }
 }
@@ -479,19 +480,33 @@ public class JsonStore<T>
     // consumed/destroyed. We build a SEPARATE recovery temp from the backup,
     // validate it, then atomically promote it to primary via File.Replace.
     // The original .bak stays on disk and remains valid for the next incident.
-    // If any stage fails we do not destroy the .bak and we do not manufacture a
-    // default; at least one validated known-good copy (the .bak) survives.
+    // Recovery transaction order (audit finding 1):
+    //   1. validate the .bak FIRST, without touching the corrupt primary
+    //   2. if backup is missing/invalid/unreadable: leave the corrupt primary
+    //      IN PLACE, emit a failure diagnostic, throw. The next load is STILL a
+    //      corrupt primary -> consistent corruption/recovery path, NEVER Missing.
+    //   3. if backup is valid: build a unique recovery temp, re-validate it,
+    //      preserve the corrupt primary as COPY evidence (never move it away),
+    //      then atomically Replace the corrupt primary with the validated temp.
+    //      The .bak is never consumed and remains valid.
+    //
+    // Invariant after ANY stage failure:
+    //   - the .bak is valid and untouched
+    //   - the primary is either the original corrupt primary or a valid
+    //     recovered primary (it is never absent/renamed such that the next
+    //     LoadAsync returns new T())
+    //   - a failed recovery fails clearly, not silently.
     private async Task<T> RecoverFromBackupOrThrow(
         JsonStoreCorruptionException corruption,
         CancellationToken cancellationToken = default)
     {
         string backupPath = _path + ".bak";
-        string evidencePath = QuarantineCorruptPrimary();
 
-        // Validate the backup WITHOUT consuming it. A transient read/access
+        // 1. Validate the backup WITHOUT consuming it. A transient read/access
         // failure on the backup must NOT be reported as a corrupt backup
         // (finding 4): retry with backoff before concluding.
-        (DocumentReadResult bakResult, T? backupValue) = (DocumentReadResult.TransientIoFailure, (T?)null);
+        (DocumentReadResult bakResult, T? backupValue) =
+            (DocumentReadResult.TransientIoFailure, (T?)null);
         for (int attempt = 0; attempt < MaxFileAccessAttempts; attempt++)
         {
             (bakResult, backupValue) = await ReadDocumentAsync(backupPath);
@@ -503,85 +518,122 @@ public class JsonStore<T>
             await BackoffAsync(attempt, cancellationToken);
         }
 
-        if (bakResult == DocumentReadResult.Valid && backupValue is not null)
+        if (bakResult != DocumentReadResult.Valid || backupValue is null)
         {
-            string recoveryTemp = _path + ".recovery.tmp";
+            // 2. No usable backup. Leave the corrupt primary exactly where it
+            // is so the next load re-enters the corruption/recovery path
+            // (never Missing/default). Emit a failure diagnostic and fail.
+            _onRecovery?.Invoke(new JsonStoreRecoveryEventArgs(
+                _path,
+                succeeded: false,
+                failureReason: "No valid backup available for recovery.",
+                evidencePath: null,
+                backupPreserved: File.Exists(backupPath)));
 
-            try
+            throw new PersistenceCorruptException(
+                _path,
+                $"Primary document at '{_path}' is corrupt and no valid " +
+                $"backup ('.bak') is available for recovery.",
+                corruption);
+        }
+
+        // 3. Backup is valid. Build a unique recovery temp, re-validate it, then
+        // atomically replace the corrupt primary with it.
+        string recoveryTemp = _path + ".recovery.tmp-" + Guid.NewGuid().ToString("N");
+
+        try
+        {
+            await WriteDocumentAsync(
+                recoveryTemp, backupValue, cancellationToken: default);
+
+            if (ShouldFailAt(FaultInjectionPoint.RecoveryTempWrite))
             {
-                // Write a recovery temp from the validated backup content, then
-                // validate that temp before promoting it.
-                await WriteDocumentAsync(recoveryTemp, backupValue, cancellationToken: default);
+                throw new FaultInjectionException(
+                    FaultInjectionPoint.RecoveryTempWrite);
+            }
 
-                (DocumentReadResult tempResult, _) =
-                    await ReadDocumentAsync(recoveryTemp);
+            (DocumentReadResult tempResult, _) =
+                await ReadDocumentAsync(recoveryTemp);
 
-                if (tempResult != DocumentReadResult.Valid)
-                {
-                    // The recovery temp could not be validated (should not
-                    // happen since the source was valid, but be defensive).
-                    // Do NOT touch the .bak; report and fail clearly.
-                    _onRecovery?.Invoke(new JsonStoreRecoveryEventArgs(
-                        _path,
-                        succeeded: false,
-                        failureReason:
-                            "Recovered backup could not be re-validated " +
-                            "into a temp document.",
-                        evidencePath: evidencePath,
-                        backupPreserved: true));
-
-                    throw new PersistenceCorruptException(
-                        _path,
-                        "Primary is corrupt and the recovered backup could " +
-                        "not be re-validated.",
-                        corruption);
-                }
-
-                // Promote the recovery temp to primary. The valid .bak is left
-                // in place untouched (backup is null here on purpose). The
-                // corrupt primary was already quarantined away, so the
-                // destination does not exist -> use Move.
-                _fileOps.Move(recoveryTemp, _path);
-
-                // A leftover ordinary .tmp from an interrupted save is never
-                // authoritative; now that primary is established it is safe
-                // to drop.
-                TryDeleteStaleTemp();
-
+            if (tempResult != DocumentReadResult.Valid)
+            {
+                // The recovery temp could not be re-validated (should not
+                // happen since the source was valid, but be defensive). The
+                // corrupt primary and the .bak are both left intact.
                 _onRecovery?.Invoke(new JsonStoreRecoveryEventArgs(
                     _path,
-                    succeeded: true,
-                    failureReason: null,
+                    succeeded: false,
+                    failureReason:
+                        "Recovered backup could not be re-validated " +
+                        "into a temp document.",
+                    evidencePath: null,
+                    backupPreserved: true));
+
+                throw new PersistenceCorruptException(
+                    _path,
+                    "Primary is corrupt and the recovered backup could " +
+                    "not be re-validated.",
+                    corruption);
+            }
+
+            // Copy the corrupt primary to collision-safe evidence BEFORE
+            // replacing it, so a failed promotion still leaves the original
+            // corrupt primary on disk (it is never moved away first, so the
+            // next load cannot observe a Missing file).
+            string? evidencePath = CopyCorruptPrimaryEvidence();
+
+            // Inject a promotion failure BEFORE the atomic replace so the test
+            // can verify the corrupt primary stays put (never turned Missing).
+            if (ShouldFailAt(FaultInjectionPoint.RecoveryPromotion))
+            {
+                throw new FaultInjectionException(
+                    FaultInjectionPoint.RecoveryPromotion);
+            }
+
+            // Atomically replace the corrupt primary with the validated
+            // recovery temp. backup is null on purpose: the valid .bak stays
+            // in place. On failure, the corrupt primary is unchanged.
+            try
+            {
+                _fileOps.Replace(recoveryTemp, _path, backup: null);
+            }
+            catch (Exception)
+            {
+                // Promotion failed: the corrupt primary is still present and
+                // the .bak is untouched. Leave evidence (if any) for diagnosis
+                // and throw so the next load retries/recovers rather than
+                // defaulting.
+                _onRecovery?.Invoke(new JsonStoreRecoveryEventArgs(
+                    _path,
+                    succeeded: false,
+                    failureReason: "Recovery promotion (replace) failed.",
                     evidencePath: evidencePath,
                     backupPreserved: true));
 
-                return backupValue;
+                throw;
             }
-            finally
+
+            // A leftover ordinary .tmp from an interrupted save is never
+            // authoritative; now that primary is established it is safe to drop.
+            TryDeleteStaleTemp();
+
+            _onRecovery?.Invoke(new JsonStoreRecoveryEventArgs(
+                _path,
+                succeeded: true,
+                failureReason: null,
+                evidencePath: evidencePath,
+                backupPreserved: true));
+
+            return backupValue;
+        }
+        finally
+        {
+            // Always clean up the recovery temp, never the .bak.
+            if (File.Exists(recoveryTemp))
             {
-                // Always clean up the recovery temp, never the .bak.
-                if (File.Exists(recoveryTemp))
-                {
-                    File.Delete(recoveryTemp);
-                }
+                File.Delete(recoveryTemp);
             }
         }
-
-        // Primary corrupt AND backup missing/corrupt: fail clearly. Never
-        // silently substitute a default object. The .bak (if present) is left
-        // untouched for diagnosis.
-        _onRecovery?.Invoke(new JsonStoreRecoveryEventArgs(
-            _path,
-            succeeded: false,
-            failureReason: "No valid backup available for recovery.",
-            evidencePath: evidencePath,
-            backupPreserved: File.Exists(backupPath)));
-
-        throw new PersistenceCorruptException(
-            _path,
-            $"Primary document at '{_path}' is corrupt and no valid backup " +
-            $"('.bak') is available for recovery.",
-            corruption);
     }
 
     // Reads + classifies a candidate document. A returned Corrupt result means
@@ -774,7 +826,7 @@ public class JsonStore<T>
                         FaultInjectionPoint.FileMove);
                 }
 
-                await PromoteTempToPrimary(temporaryPath);
+                await PromoteTempToPrimary(temporaryPath, cancellationToken);
 
                 // Best-effort post-persistence hook (e.g. Windows ACL hardening
                 // of the final file). Runs after the atomic move so the live
@@ -869,45 +921,16 @@ public class JsonStore<T>
         await writeStream.FlushAsync(cancellationToken);
     }
 
-    private async Task PromoteTempToPrimary(string temporaryPath)
+    private async Task PromoteTempToPrimary(
+        string temporaryPath,
+        CancellationToken cancellationToken)
     {
-        if (File.Exists(_path))
-        {
-            // Preserve the previous known-good primary as the ".bak" DURING
-            // replacement (File.Replace moves the old primary to the backup
-            // path atomically) — but only when the current primary is itself
-            // valid. If the current primary is already corrupt we must NOT
-            // overwrite a good .bak with bad bytes; in that case replace
-            // without a backup.
-            //
-            // Missing-primary generation reset: if the primary was ABSENT when
-            // this save runs, there is no current generation to preserve, so we
-            // do NOT create a .bak (a backup of nothing). This also means a
-            // previously remaining stale .bak from a PRIOR generation (whose
-            // primary vanished) must not remain eligible for automatic recovery.
-            // We remove that stale .bak only after the new primary is safely
-            // committed (see below), never before.
-            bool primaryValid = (await ReadDocumentAsync(_path)).result
-                == DocumentReadResult.Valid;
-
-            string? backupPath =
-                (_recoveryMode == JsonStoreRecoveryMode.BackupRollback
-                 && primaryValid)
-                    ? _path + ".bak"
-                    : null;
-
-            // File.Replace is atomic on NTFS: it replaces _path with the temp
-            // document and (when backupPath is set) moves the prior _path to
-            // backupPath in a single operation. If it fails, both the temp and
-            // the old primary remain, so at least one trustworthy copy exists.
-            _fileOps.Replace(temporaryPath, _path, backupPath);
-        }
-        else
+        if (!File.Exists(_path))
         {
             // No existing primary: nothing to back up. Promote the temp
             // document (the destination does not exist, so Move not Replace).
             // This establishes a NEW generation.
-            _fileOps.Move(temporaryPath, _path);
+            MoveFileWithRetry(temporaryPath, _path);
 
             // New-generation establishment completed successfully. A ".bak"
             // from a PREVIOUS generation (whose primary vanished) must not stay
@@ -917,6 +940,110 @@ public class JsonStore<T>
             // NOTE: this runs only here, on the no-prior-primary branch — a
             // normal save-with-existing-primary keeps its fresh ".bak" intact.
             QuarantineStaleBackupIfPresent();
+            return;
+        }
+
+        // Existing primary: classify it explicitly (audit finding 2). We must
+        // NOT collapse TransientIoFailure into "not valid" and therefore skip
+        // the .bak, because that would let us overwrite a known-good primary
+        // without preserving the prior generation merely because a transient
+        // read flaked.
+        DocumentReadResult result = DocumentReadResult.TransientIoFailure;
+        for (int attempt = 0; attempt < MaxFileAccessAttempts; attempt++)
+        {
+            result = (await ReadDocumentAsync(_path)).result;
+            if (result != DocumentReadResult.TransientIoFailure)
+            {
+                break;
+            }
+
+            await BackoffAsync(attempt, cancellationToken);
+        }
+
+        if (result == DocumentReadResult.TransientIoFailure)
+        {
+            // Even after bounded retries the primary could not be read. We MUST
+            // NOT promote the temp and we MUST NOT touch the .bak. Fail the
+            // save loudly and leave both the primary and the .bak intact.
+            throw new InvalidOperationException(
+                "Primary could not be read for backup classification after " +
+                "retries; the save was aborted to avoid an unbacked " +
+                "overwrite of the existing primary.");
+        }
+
+        if (result == DocumentReadResult.Corrupt)
+        {
+            // The current primary is itself corrupt. Do NOT overwrite a good
+            // .bak with bad bytes; promote without a backup so the valid .bak
+            // (from a prior good generation) is preserved.
+            ReplaceFileWithRetry(temporaryPath, _path, backupPath: null);
+            return;
+        }
+
+        // result == Valid: preserve the current known-good primary as the
+        // ".bak" DURING replacement (File.Replace moves the old primary to the
+        // backup path atomically, never consuming it).
+        string? backupPath = _recoveryMode == JsonStoreRecoveryMode.BackupRollback
+            ? _path + ".bak"
+            : null;
+
+        ReplaceFileWithRetry(temporaryPath, _path, backupPath);
+    }
+
+    // File.Move can transiently fail under load for the same reasons as
+    // Replace. The temp is preserved on a failed Move, so retrying is safe.
+    private void MoveFileWithRetry(string temporaryPath, string destinationPath)
+    {
+        for (int attempt = 0; attempt < MaxFileAccessAttempts; attempt++)
+        {
+            try
+            {
+                _fileOps.Move(temporaryPath, destinationPath);
+                return;
+            }
+            catch (Exception ex) when (IsRetryableAccess(ex))
+            {
+                if (attempt == MaxFileAccessAttempts - 1)
+                {
+                    throw;
+                }
+
+                Task.Delay(
+                    TimeSpan.FromMilliseconds(25 * (attempt + 1)))
+                    .GetAwaiter().GetResult();
+            }
+        }
+    }
+
+    // File.Replace can transiently fail under load (e.g. "Unable to remove the
+    // file to be replaced" when the destination is briefly locked by an
+    // external reader / AV). The temp file is preserved across a failed
+    // Replace, so retrying is safe and is the correct handling for transient
+    // I/O — it must NOT collapse into a corrupt/abort classification.
+    private void ReplaceFileWithRetry(
+        string temporaryPath,
+        string destinationPath,
+        string? backupPath)
+    {
+        for (int attempt = 0; attempt < MaxFileAccessAttempts; attempt++)
+        {
+            try
+            {
+                _fileOps.Replace(temporaryPath, destinationPath, backupPath);
+                return;
+            }
+            catch (Exception ex) when (IsRetryableAccess(ex))
+            {
+                if (attempt == MaxFileAccessAttempts - 1)
+                {
+                    throw;
+                }
+
+                // The temp remains valid; await a short backoff and retry.
+                Task.Delay(
+                    TimeSpan.FromMilliseconds(25 * (attempt + 1)))
+                    .GetAwaiter().GetResult();
+            }
         }
     }
 
@@ -948,28 +1075,26 @@ public class JsonStore<T>
         }
     }
 
-    // Quarantines a corrupt primary so it is preserved for diagnosis rather
-    // than silently overwritten. Uses collision-safe evidence naming so a
-    // second incident does not destroy the first incident's artifact.
-    private string? QuarantineCorruptPrimary()
+    // Copies (NOT moves) the corrupt primary to a collision-safe evidence file
+    // so the original corrupt primary remains in place for the next load to
+    // keep failing consistently (audit finding 1). Returns the evidence path,
+    // or null if the primary is already gone or the copy fails.
+    private string? CopyCorruptPrimaryEvidence()
     {
         try
         {
             if (File.Exists(_path))
             {
-                string corruptPath = MakeEvidencePath(_path + ".corrupt");
-                if (File.Exists(corruptPath))
-                {
-                    File.Delete(corruptPath);
-                }
-
-                File.Move(_path, corruptPath, overwrite: false);
-                return corruptPath;
+                string evidencePath = MakeEvidencePath(_path + ".corrupt");
+                // Copy, never Move: the corrupt primary must stay where it is so
+                // a subsequent LoadAsync does not silently see "Missing".
+                File.Copy(_path, evidencePath, overwrite: false);
+                return evidencePath;
             }
         }
         catch
         {
-            // Best-effort; do not let quarantine failure mask the real error.
+            // Best-effort; do not let evidence capture mask the real error.
         }
 
         return null;

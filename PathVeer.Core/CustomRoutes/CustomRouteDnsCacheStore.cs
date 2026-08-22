@@ -26,13 +26,17 @@ public sealed class CustomRouteDnsCacheStore :
     /// Internal testing hook: lets a test wire recovery diagnostics without
     /// changing the public contract.
     /// </summary>
-    internal CustomRouteDnsCacheStore(
+    // Public for Service composition (a different assembly) to wire recovery
+    // diagnostics. The recovery mode is still fixed internally to BackupRollback
+    // with the supplied diagnostics options, so the public API cannot opt into
+    // an arbitrary mode.
+    public CustomRouteDnsCacheStore(
         string path,
-        JsonStoreRecoveryOptions options)
+        JsonStoreRecoveryOptions? recoveryOptions = null)
         : base(
             path,
             JsonStoreRecoveryMode.BackupRollback,
-            options,
+            recoveryOptions,
             jsonOptions: CreateJsonOptions())
     {
     }

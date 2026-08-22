@@ -17,6 +17,7 @@ using PathVeer.Core.Runtime;
 using PathVeer.Core.Runtime.Execution;
 using PathVeer.Core.Runtime.Profiling;
 using PathVeer.Core.Runtime.Reconciliation;
+using PathVeer.Core.Persistence;
 using PathVeer.Core.State;
 using PathVeer.Core.Support;
 using PathVeer.Core.SystemTools;
@@ -24,6 +25,7 @@ using PathVeer.Core.Vpn;
 using PathVeer.Core.Cloud;
 using PathVeer.Service.Ipc;
 using PathVeer.Service.Operations;
+using PathVeer.Service.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -185,10 +187,19 @@ public static class ServiceCompositionRoot
                         TimeProvider>()));
 
         services.AddSingleton(
-            new StateRepository(
-                Path.Combine(
-                    dataDirectory,
-                    "state.json")));
+            serviceProvider =>
+            {
+                JsonStoreRecoveryDiagnostics recoveryDiagnostics =
+                    new(serviceProvider.GetRequiredService<
+                        ILogger<StateRepository>>());
+
+                return new StateRepository(
+                    Path.Combine(dataDirectory, "state.json"),
+                    new JsonStoreRecoveryOptions
+                    {
+                        OnRecovery = recoveryDiagnostics.OnRecovery
+                    });
+            });
 
         RouteInventoryStore routeInventoryStore = new(
             Path.Combine(dataDirectory, "route-inventory.json"));
@@ -244,15 +255,27 @@ public static class ServiceCompositionRoot
         services.AddSingleton<CustomRouteEntryValidator>();
         services.AddSingleton<CustomRouteService>();
 
-        CustomRouteDnsCacheStore customRouteDnsCacheStore = new(
-            Path.Combine(
-                dataDirectory,
-                "custom-route-dns-cache.json"));
-        services.AddSingleton(customRouteDnsCacheStore);
+        services.AddSingleton(
+            serviceProvider =>
+            {
+                JsonStoreRecoveryDiagnostics recoveryDiagnostics =
+                    new(serviceProvider.GetRequiredService<
+                        ILogger<CustomRouteDnsCacheStore>>());
+
+                return new CustomRouteDnsCacheStore(
+                    Path.Combine(
+                        dataDirectory,
+                        "custom-route-dns-cache.json"),
+                    new JsonStoreRecoveryOptions
+                    {
+                        OnRecovery = recoveryDiagnostics.OnRecovery
+                    });
+            });
         services.AddSingleton<ICustomRouteDnsCacheRepository>(
             serviceProvider =>
                 new CustomRouteDnsCacheRepository(
-                    customRouteDnsCacheStore,
+                    serviceProvider.GetRequiredService<
+                        CustomRouteDnsCacheStore>(),
                     serviceProvider.GetRequiredService<TimeProvider>()));
 
         CustomRouteDnsCacheOptions dnsCacheOptions = new();

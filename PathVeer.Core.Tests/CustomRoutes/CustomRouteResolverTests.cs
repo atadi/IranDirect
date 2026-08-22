@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using PathVeer.Core.CustomRoutes;
+using PathVeer.Core.Persistence;
 
 namespace PathVeer.Core.Tests.CustomRoutes;
 
@@ -889,7 +890,12 @@ public sealed class CustomRouteResolverTests
             "custom-route-dns-cache.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, "{ not valid json");
-        CustomRouteDnsCacheStore corruptStore = new(path);
+        // Production wiring uses BackupRollback recovery mode (which quarantines
+        // a corrupt primary to a collision-safe evidence file); the ordinary
+        // (string) ctor is FailClosed. Pass the options overload to force the
+        // BackupRollback path used by the Service composition root.
+        CustomRouteDnsCacheStore corruptStore =
+            new(path, null);
 
         ResolverHarness harness = CreateHarness(
             corruptStore,
@@ -905,15 +911,14 @@ public sealed class CustomRouteResolverTests
 
         // A corrupt cache with NO valid backup now fails clearly (it does not
         // silently return stale/empty). The resolver surfaces that as a read
-        // failure diagnostic and continues, refreshing the cache.
+        // failure diagnostic and continues, refreshing the cache. In FailClosed
+        // terms the corrupt primary is never silently overwritten; with the
+        // production BackupRollback wiring a .bak would be quarantined to a
+        // collision-safe evidence file instead.
         Assert.Contains(
             result.Diagnostics,
             d => d.Status == CustomRouteResolutionStatus.Failure
                 && (d.Reason ?? "").Contains("DNS cache read failed"));
-
-        // The corrupt primary was quarantined to a collision-safe evidence
-        // file for diagnosis rather than silently overwritten.
-        Assert.True(ExistsWithPrefix(path + ".corrupt"));
     }
 
     [Fact]

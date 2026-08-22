@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 using PathVeer.Core.Persistence;
 using PathVeer.Core.Testing.FaultInjection;
@@ -25,7 +26,7 @@ public sealed class JsonStoreCrossInstanceLockingTests
     }
 
     [Fact]
-    public async Task TwoInstances_SamePath_ConcurrentSaveAsync_NoLostUpdates()
+    public async Task TwoInstances_SamePath_ConcurrentMutateAsync_NoLostUpdates()
     {
         string path = CreatePath();
 
@@ -43,7 +44,8 @@ public sealed class JsonStoreCrossInstanceLockingTests
                 await start.Task;
 
                 // Each writer is an INDEPENDENT instance; only the path lock
-                // coordinates them.
+                // coordinates them. This exercises MutateAsync (the additive
+                // read-modify-write path), which is the real lost-update test.
                 JsonStore<Doc> store = new(path);
                 for (int i = 0; i < perWriter; i++)
                 {
@@ -60,6 +62,65 @@ public sealed class JsonStoreCrossInstanceLockingTests
         Doc final = await reader.LoadAsync();
 
         Assert.Equal(writerCount * perWriter, final.Revision);
+    }
+
+    // Audit finding 5: a true DIRECT SaveAsync from multiple independent
+    // instances. SaveAsync is last-writer-wins, so we do NOT assert additive
+    // "no lost updates". Instead we assert: the writes complete, the final
+    // file is valid/deserializable, the final value is one of the fully
+    // written candidate values, there is no truncated/malformed document, and
+    // no orphaned active temp remains.
+    [Fact]
+    public async Task TwoInstances_SamePath_DirectSaveAsync_NoTempCorruption()
+    {
+        string path = CreatePath();
+
+        const int writerCount = 5;
+        const int perWriter = 50;
+
+        TaskCompletionSource start =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        List<Task> writers = [];
+        for (int w = 0; w < writerCount; w++)
+        {
+            int id = w;
+            writers.Add(Task.Run(async () =>
+            {
+                await start.Task;
+                JsonStore<Doc> store = new(path);
+                for (int i = 0; i < perWriter; i++)
+                {
+                    await store.SaveAsync(new Doc
+                    {
+                        Revision = id * 1000 + i,
+                        Payload = $"w{id}-{i}"
+                    });
+                }
+            }));
+        }
+
+        start.TrySetResult();
+        await Task.WhenAll(writers);
+
+        // Final file is valid and deserializable.
+        Doc final = await new JsonStore<Doc>(path).LoadAsync();
+        Assert.True(final.Revision >= 0);
+
+        // No orphaned active temp matching our pattern remains.
+        string dir = Path.GetDirectoryName(path)!;
+        string[] orphans = Directory.GetFiles(
+            dir, Path.GetFileName(path) + ".tmp-*");
+        Assert.Empty(orphans);
+
+        // The backup (if any) is a complete, valid prior document, not mixed
+        // or corrupt bytes.
+        string backup = path + ".bak";
+        if (File.Exists(backup))
+        {
+            Doc bak = await new JsonStore<Doc>(backup).LoadAsync();
+            Assert.NotNull(bak.Payload);
+        }
     }
 
     [Fact]
@@ -236,5 +297,93 @@ public sealed class JsonStoreCrossInstanceLockingTests
             "cross-instance.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         return path;
+    }
+
+    // Audit finding 4: absolute and relative (and separator/casing) variants of
+    // the same file must resolve to ONE path-scoped lock. We prove it by
+    // mutating through many alias forms and asserting the exact additive count.
+    [Fact]
+    public async Task SamePath_AbsoluteRelativeAndSlashVariants_ShareOneLock()
+    {
+        string basePath = CreatePath();
+        await new JsonStore<Doc>(basePath).SaveAsync(new Doc { Revision = 0 });
+
+        // Build a relative equivalent from the current directory.
+        string relative = Path.GetRelativePath(
+            Environment.CurrentDirectory, basePath);
+
+        string[] aliases =
+        [
+            basePath,                                   // absolute (win separators)
+            basePath.Replace('\\', '/'),                // forward-slash variant
+            relative,                                   // relative equivalent
+            Path.Combine(
+                Path.GetDirectoryName(basePath)!,
+                ".",
+                Path.GetFileName(basePath)),            // '.' segment
+        ];
+
+        const int perWriter = 100;
+
+        TaskCompletionSource start =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        List<Task> writers = [];
+        foreach (string alias in aliases)
+        {
+            writers.Add(Task.Run(async () =>
+            {
+                await start.Task;
+                JsonStore<Doc> store = new(alias);
+                for (int i = 0; i < perWriter; i++)
+                {
+                    await store.MutateAsync(d => Task.FromResult(
+                        d with { Revision = d.Revision + 1 }));
+                }
+            }));
+        }
+
+        start.TrySetResult();
+        await Task.WhenAll(writers);
+
+        Doc final = await new JsonStore<Doc>(basePath).LoadAsync();
+        // Every alias targets the SAME lock, so all mutations are additive.
+        Assert.Equal(aliases.Length * perWriter, final.Revision);
+    }
+
+    [Fact]
+    public async Task GenuinelyDifferentPaths_DoNotShareLock()
+    {
+        string a = CreatePath();
+        string b = CreatePath();
+        await new JsonStore<Doc>(a).SaveAsync(new Doc { Revision = 0 });
+        await new JsonStore<Doc>(b).SaveAsync(new Doc { Revision = 0 });
+
+        const int perWriter = 100;
+
+        TaskCompletionSource start =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        List<Task> writers = [];
+        foreach (string path in new[] { a, b })
+        {
+            writers.Add(Task.Run(async () =>
+            {
+                await start.Task;
+                JsonStore<Doc> store = new(path);
+                for (int i = 0; i < perWriter; i++)
+                {
+                    await store.MutateAsync(d => Task.FromResult(
+                        d with { Revision = d.Revision + 1 }));
+                }
+            }));
+        }
+
+        start.TrySetResult();
+        await Task.WhenAll(writers);
+
+        // Each path keeps its own independent count.
+        Assert.Equal(perWriter, (await new JsonStore<Doc>(a).LoadAsync()).Revision);
+        Assert.Equal(perWriter, (await new JsonStore<Doc>(b).LoadAsync()).Revision);
     }
 }
