@@ -1,6 +1,7 @@
 namespace PathVeer.Core.Tests.Runtime.Execution;
 
 using System.Net;
+using System.Text;
 using PathVeer.Core.Routing;
 using PathVeer.Core.Vpn;
 using PathVeer.Core.Runtime.Execution;
@@ -372,6 +373,57 @@ public sealed class RouteMutationRecoveryTests
 
         Assert.Empty((await routeInv.LoadAsync()).Routes);
         Assert.Contains(PrefixId, routes.Present);
+        Assert.True(File.Exists(path + ".corrupt"));
+        Assert.False(File.Exists(path));
+    }
+
+    // Audit final UTF-8 closure at the recovery boundary: a journal whose raw
+    // bytes contain invalid UTF-8 INSIDE a JSON string must surface
+    // RouteMutationJournalCorruptException from the store, be caught by recovery,
+    // stop all route/inventory mutation, and be quarantined (not normalized away).
+    [Fact]
+    public async Task InvalidUtf8Journal_StopsRecoveryWithoutMutation_Quarantines()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+
+        string json =
+            "{\n" +
+            "  \"SchemaVersion\": 1,\n" +
+            "  \"Entries\": {\n" +
+            "    \"pfx\": {\n" +
+            "      \"Kind\": 0,\n" +
+            "      \"InventoryKind\": 0,\n" +
+            "      \"RouteIdentity\": \"pfx\",\n" +
+            "      \"DestinationPrefix\": \"10.0.0.0/8\",\n" +
+            "      \"Gateway\": \"192.168.1.1\",\n" +
+            "      \"InterfaceIndex\": 12,\n" +
+            "      \"Metric\": 100,\n" +
+            "      \"Description\": \"MARKER\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+
+        byte[] validBytes = Encoding.UTF8.GetBytes(json);
+        byte[] marker = Encoding.UTF8.GetBytes("MARKER");
+        int idx = validBytes.AsSpan().IndexOf(marker);
+        byte[] corruptBytes = validBytes.ToArray();
+        corruptBytes[idx] = 0xC3;      // invalid: expects a continuation byte
+        corruptBytes[idx + 1] = 0x28;  // 0x28 is not a continuation byte
+        await File.WriteAllBytesAsync(path, corruptBytes);
+
+        var store = new RouteMutationJournalStore(path);
+        var routes = new FakeRouteManager();
+        routes.AddToPresent(PrefixId);
+        var routeInv = new FakeRouteInventory();
+        var endpointInv = new FakeEndpointInventory();
+
+        await new RouteMutationRecovery(
+            routes, routeInv, endpointInv, store).RecoverAsync();
+
+        // No ownership claimed; corrupt file quarantined to .corrupt.
+        Assert.Empty((await routeInv.LoadAsync()).Routes);
+        Assert.Contains(PrefixId, routes.Present); // untouched native route
         Assert.True(File.Exists(path + ".corrupt"));
         Assert.False(File.Exists(path));
     }

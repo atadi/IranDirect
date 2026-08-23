@@ -148,6 +148,58 @@ public sealed class RouteMutationJournalStoreTests
         Assert.Empty(await store.LoadAllAsync());
     }
 
+    // Audit final UTF-8 closure: malformed UTF-8 INSIDE a JSON string value must
+    // fail closed. A lenient decoder would turn 0xC3 0x28 into U+FFFD '(' and
+    // still produce syntactically valid JSON (so it would be ACCEPTED). The
+    // strict decoder must reject the raw bytes instead.
+    [Fact]
+    public async Task InvalidUtf8InsideJsonString_FailsClosed_NotNormalized()
+    {
+        using TempDir dir = new();
+        string path = dir.File("j.json");
+
+        // Otherwise-valid journal JSON with a sentinel inside a string value.
+        string json =
+            "{\n" +
+            "  \"SchemaVersion\": 1,\n" +
+            "  \"Entries\": {\n" +
+            "    \"pfx\": {\n" +
+            "      \"Kind\": 0,\n" +
+            "      \"InventoryKind\": 0,\n" +
+            "      \"RouteIdentity\": \"pfx\",\n" +
+            "      \"DestinationPrefix\": \"10.0.0.0/8\",\n" +
+            "      \"Gateway\": \"192.168.1.1\",\n" +
+            "      \"InterfaceIndex\": 12,\n" +
+            "      \"Metric\": 100,\n" +
+            "      \"Description\": \"MARKER\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+
+        byte[] validBytes = System.Text.Encoding.UTF8.GetBytes(json);
+        // Replace the sentinel with an invalid UTF-8 sequence: 0xC3 expects a
+        // continuation byte (0x80-0xBF) but 0x28 follows.
+        byte[] marker = System.Text.Encoding.UTF8.GetBytes("MARKER");
+        int idx = validBytes.AsSpan().IndexOf(marker);
+        Assert.True(idx >= 0);
+        byte[] corruptBytes = validBytes.ToArray();
+        corruptBytes[idx] = 0xC3;
+        corruptBytes[idx + 1] = 0x28;
+
+        await File.WriteAllBytesAsync(path, corruptBytes);
+        byte[] before = await File.ReadAllBytesAsync(path);
+
+        var store = new RouteMutationJournalStore(path);
+
+        // Not normalized to U+FFFD and accepted; not silently reset to empty.
+        await Assert.ThrowsAsync<RouteMutationJournalCorruptException>(
+            () => store.LoadAllAsync());
+
+        // LoadAllAsync is read-only: it must not rewrite/normalize the file.
+        Assert.Equal(corruptBytes, await File.ReadAllBytesAsync(path));
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+    }
+
     [Fact]
     public async Task WriteIntent_ReplacesExistingForSameIdentity()
     {

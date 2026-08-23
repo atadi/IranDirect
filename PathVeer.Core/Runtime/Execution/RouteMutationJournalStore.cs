@@ -33,6 +33,13 @@ public sealed class RouteMutationJournalStore : IRouteMutationJournal
 {
     private const int MaxFileAccessAttempts = 5;
 
+    // Strict UTF-8 decoder: does NOT substitute U+FFFD for invalid byte
+    // sequences. A malformed byte inside a JSON string must fail closed, not be
+    // silently normalized into otherwise-valid JSON (which the default
+    // Encoding.UTF8.GetString would do).
+    private static readonly UTF8Encoding StrictUtf8 =
+        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     private readonly string _path;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly IFaultInjectionPolicy _faultPolicy;
@@ -208,9 +215,9 @@ public sealed class RouteMutationJournalStore : IRouteMutationJournal
                 "not valid journal content.");
         }
 
-        // Decode UTF-8, tolerating (and skipping) a leading BOM so a
-        // legitimately-written journal (which never carries a BOM) parses
-        // identically to before.
+        // Decode UTF-8 STRICTLY. A leading BOM (if present) is skipped so a
+        // legitimately-written journal parses identically, but any malformed
+        // byte AFTER the BOM still throws rather than being normalized to U+FFFD.
         int start = (rawBytes.Length >= 3 &&
                     rawBytes[0] == 0xEF && rawBytes[1] == 0xBB &&
                     rawBytes[2] == 0xBF)
@@ -220,13 +227,16 @@ public sealed class RouteMutationJournalStore : IRouteMutationJournal
         string json;
         try
         {
-            json = Encoding.UTF8.GetString(
+            json = StrictUtf8.GetString(
                 rawBytes, start, rawBytes.Length - start);
         }
         catch (DecoderFallbackException ex)
         {
+            // Malformed raw UTF-8 is corruption of an authority file; fail
+            // closed. Never substitute replacement characters.
             throw new RouteMutationJournalCorruptException(
-                "The route mutation journal is not valid UTF-8.", ex);
+                "The route mutation journal is not valid UTF-8 and cannot be " +
+                "safely decoded.", ex);
         }
 
         if (string.IsNullOrWhiteSpace(json))
